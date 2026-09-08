@@ -1,18 +1,45 @@
 # -*- coding: utf-8 -*-
 """nearest_match.py — 规则 3.4：最近邻空间欧氏距离匹配
 
-职责：
-    针对反映射后连续坐标与离散取值错位、或需要将连续解就近归位
-    到离散候选点的情况，采用"最近邻 + 欧氏距离"策略在连续空间中
-    找到距离最近的合法离散取值点完成匹配，将基因还原为合法取值。
+对应论文：
+    规则 3.4：对差分后临时代价值集合中的每个合理值，在航程代价矩阵中
+    找到与其距离最近的值 C(i,j)，将其对应的序列关系对 (U,T,C(i,j))
+    作为该位置上的新个体基因。
 
-具体承担职责（对应规则 3.4）：
-    1. 遍历连续个体中每个待归位的维度/分量。
-    2. 在候选离散取值集合中，按欧氏距离最近原则匹配唯一取值。
-    3. 返回替换后的离散基因片段，供 inverse_mapper 组装。
-
-对外接口约定（占位，待实现）：
-    - nearest_match(...): 对给定连续坐标执行最近邻离散匹配。
-
-注：本文件暂不包含具体实现，仅声明模块职责与边界。
+    公式 (3-8): C'(i,j) = C(i,j) | min{|x'(i)(t) - C(i,j)|}
 """
+
+from __future__ import annotations
+
+import numpy as np
+
+
+def nearest_match(
+    target_value: float,
+    cost_matrix: np.ndarray,
+    mask: np.ndarray,
+) -> tuple[int, int, float] | None:
+    """在代价矩阵中找最近邻匹配。
+
+    对应规则 3.4 和公式 (3-8)。
+
+    Args:
+        target_value: 差分后的临时代价值。
+        cost_matrix:  代价矩阵（会被修改，用 Inf 标记已匹配位置）。
+        mask:         布尔掩码，True 表示该位置已不可用。
+
+    Returns:
+        (row, col, cost) 三元组，无可用匹配时返回 None。
+    """
+    # 计算差分值与矩阵中每个可用位置的距离
+    diff = np.abs(cost_matrix - target_value)
+    diff[mask] = np.inf  # 排除已匹配位置
+
+    # 找最近邻
+    min_idx = np.unravel_index(np.argmin(diff), diff.shape)
+    if diff[min_idx] == np.inf:
+        return None
+
+    row, col = min_idx
+    cost = cost_matrix[row, col]
+    return (row, col, cost)

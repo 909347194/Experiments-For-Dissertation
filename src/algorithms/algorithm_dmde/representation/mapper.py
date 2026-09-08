@@ -1,28 +1,49 @@
 # -*- coding: utf-8 -*-
-"""mapper.py — 离散到连续的正向空间映射 phi（公式 3-5）
+"""mapper.py — 离散到连续的正向空间映射 φ（公式 3-5）
 
 职责：
-    本模块实现编码层与连续差分进化搜索层之间的"正向映射通道"，
-    将 encoder 输出的离散三元组基因映射到连续实值空间，使
-    DE/DMDE 算子（变异、交叉）能够在连续坐标系下正常运作。
+    将离散个体的基因代价值提取为连续实值向量，使 DE 算子
+    （变异、交叉）能在连续空间中正常运作。
 
-具体承担职责（对应公式 3-5）：
-    1. 离散 → 连续映射 phi：
-       为每个三元组基因建立连续编码规则（如归一化坐标 / 松弛变量 /
-       位置编码），把离散取值铺展为连续区间内的实值向量，完成
-       S_d -> S_c 的空间转换。
+对应论文：
+    公式 (3-5): φ: {(U_i, T_j) ∈ Z^d} --C_cost--> R^c
+    映射方法：直接提取基因中存储的航程代价值，组成连续向量。
+    这是 DMDE 的核心创新——用航程代价作为离散→连续的映射媒介，
+    使差分操作具有物理意义（定义 3.1 代价距离）。
 
-    2. 映射可逆性保障：
-       保证正向映射结果携带足够的结构信息，使 inverse_mapper 能够
-       依据公式 3-7 将连续个体还原为合法离散个体，避免信息丢失。
-
-    3. 边界与标定：
-       统一约定连续空间的取值范围、映射基准与精度，维持种群内
-       各维度量纲一致。
-
-对外接口约定（占位，待实现）：
-    - phi(discrete_gene) -> continuous_vector: 正向映射主入口。
-    - 可能提供批量映射与逆变换参数的缓存/标定辅助函数。
-
-注：本文件暂不包含具体实现，仅声明模块职责与边界。
+数据流：
+    Individual (离散三元组) → mapper.phi() → cost_vector (连续实值)
+    cost_vector → DE 算子 → new_cost_vector → inverse_mapper → Individual
 """
+
+from __future__ import annotations
+
+import numpy as np
+
+from .encoder import Individual
+
+
+def phi(individual: Individual) -> np.ndarray:
+    """正向映射：提取个体的代价值向量。
+
+    对应公式 (3-5)：将离散的 (U_i, T_j) 对映射为连续的代价值空间。
+
+    Args:
+        individual: 进化个体。
+
+    Returns:
+        代价值向量，shape = (len(genes),)。
+    """
+    return individual.cost_vector
+
+
+def phi_batch(population: list[Individual]) -> np.ndarray:
+    """批量正向映射。
+
+    Args:
+        population: 种群个体列表。
+
+    Returns:
+        代价值矩阵，shape = (pop_size, gene_length)。
+    """
+    return np.array([phi(ind) for ind in population])

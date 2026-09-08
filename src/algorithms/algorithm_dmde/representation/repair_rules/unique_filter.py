@@ -1,19 +1,55 @@
 # -*- coding: utf-8 -*-
 """unique_filter.py — 规则 3.5：独占分配与掩码(Inf)行/列剔除
 
-职责：
-    处理"多基因争抢同一独占资源/工件"的分配冲突：对同一独占对象
-    仅保留一个分配，其余竞争基因通过掩码(Inf)剔除所在行/列，
-    保证分配结果满足互斥性约束。
+对应论文：
+    规则 3.5a (N=M): 匹配后删除该基因所在行列（用 Inf 掩码）。
+    规则 3.5b (N>M): 匹配后删除该基因对应行（UAV 不重复）。
+    规则 3.5c (N<M): 匹配后删除目标列，用目标行替换 UAV 行。
 
-具体承担职责（对应规则 3.5）：
-    1. 独占分配筛选：识别同一行(或列)内的重复竞争，保留最优点。
-    2. 掩码剔除：将未被选中候选对应行/列标记为 +Inf（不可再选），
-       阻止其在后续分配与评估中再次被占用。
-    3. 更新可行候选矩阵，输出满足一对一/独占约束的离散分配。
-
-对外接口约定（占位，待实现）：
-    - unique_filter(...): 对候选代价/距离矩阵执行独占分配 + Inf 掩码剔除。
-
-注：本文件暂不包含具体实现，仅声明模块职责与边界。
+    实际计算中用 Inf 重置行列，避免删除操作降低效率。
 """
+
+from __future__ import annotations
+
+import numpy as np
+
+INF = 1e12
+
+
+def mask_balanced(mask: np.ndarray, row: int, col: int) -> None:
+    """规则 3.5a: N=M 时，行和列均置 Inf。
+
+    保证 UAV 与目标点一一对应不重复。
+    """
+    mask[row, :] = True
+    mask[:, col] = True
+
+
+def mask_overloaded(mask: np.ndarray, row: int, col: int) -> None:
+    """规则 3.5b: N>M 时，仅 UAV 所在行置 Inf。
+
+    保证 UAV 不重复，但同一目标可被多个 UAV 执行。
+    """
+    mask[row, :] = True
+
+
+def mask_srp_upper(
+    cost_matrix: np.ndarray,
+    mask: np.ndarray,
+    row: int,
+    col: int,
+    n_uavs: int,
+) -> None:
+    """规则 3.5c: N<M 时，目标列置 Inf，UAV 行更新为巡游代价。
+
+    匹配 UAV -> Target 后：
+    1. 目标列置 Inf（该目标已被分配）。
+    2. UAV 行替换为该目标到其他目标的巡游代价（下半部分矩阵）。
+    """
+    # 目标列置 Inf
+    mask[:, col] = True
+
+    # 用目标的巡游代价行替换 UAV 行
+    target_row = n_uavs + col  # 下半部分矩阵中该目标的行
+    cost_matrix[row, :] = cost_matrix[target_row, :]
+    mask[row, :] = mask[target_row, :]
