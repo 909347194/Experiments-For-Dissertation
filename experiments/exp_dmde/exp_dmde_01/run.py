@@ -16,12 +16,10 @@
 
 from __future__ import annotations
 
-import json
+import os
 import sys
 import time
 from pathlib import Path
-
-import numpy as np
 
 # ── 路径设置 ──────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[3]  # Experiments-For-Dissertation
@@ -50,6 +48,9 @@ from utils.utils_dmde.metrics import compute_metrics, format_metrics
 # 可视化模块（实验本地）
 sys.path.insert(0, str(Path(__file__).parent))
 from visualization.visualizer import ExperimentVisualizer
+
+# 全量实验数据持久化（供 plot_from_saved.py 离线绘图）
+from data_store import DEFAULT_DATA_FILE, save_experiment
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -81,7 +82,8 @@ SOLVER_PARAMS = dict(
 )
 
 # 多次运行次数
-N_RUNS = 5
+# 可用环境变量 EXP_N_RUNS 覆盖（例如 EXP_N_RUNS=1 快速验证数据保存/绘图链路）
+N_RUNS = int(os.environ.get("EXP_N_RUNS", "5"))
 
 # 可视化配置
 VISUALIZE = True  # 是否生成可视化图表
@@ -293,34 +295,19 @@ def run_scenario(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 结果保存
+# 实验元信息（写入全量数据文件）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def save_results(scenarios: list[dict], output_dir: Path) -> None:
-    """保存实验结果到 JSON 文件。"""
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    summary = []
-    for sc in scenarios:
-        m = sc["metrics"]
-        summary.append({
-            "name": sc["name"],
-            "model_type": sc["model_type"],
-            "n_uavs": sc["n_uavs"],
-            "n_targets": sc["n_targets"],
-            "best_fitness": round(m.best_fitness, 2),
-            "mean_fitness": round(m.mean_fitness, 2),
-            "std_fitness": round(m.std_fitness, 2),
-            "feasible_rate": round(m.feasible_rate, 2),
-            "mean_time_s": round(m.mean_time, 2),
-            "n_runs": m.n_runs,
-            "best_assignment": sc["results"][m.best_run_idx].best_assignment,
-        })
-
-    output_file = output_dir / "exp_dmde_01_results.json"
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
-    print(f"\n结果已保存: {output_file}")
+def _build_meta() -> dict:
+    """构建写入数据文件的实验元信息。"""
+    return {
+        "experiment": "exp_dmde_01",
+        "description": "DMDE 算法验证实验（拉萨地区真实 DEM 地形）",
+        "solver_params": SOLVER_PARAMS,
+        "estimator_params": ESTIMATOR_PARAMS,
+        "n_runs": N_RUNS,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -386,8 +373,13 @@ def main():
               f"{m.feasible_rate:>7.0%} "
               f"{m.mean_time:>7.2f}s")
 
-    # 4. 保存结果
-    save_results(scenarios, RESULTS_DIR)
+    # 4. 保存全量实验数据（供 plot_from_saved.py 离线绘图，无需重跑实验）
+    data_file = save_experiment(
+        scenarios, uavs_dict, targets_dict,
+        meta=_build_meta(),
+        path=RESULTS_DIR / DEFAULT_DATA_FILE,
+    )
+    print(f"\n全量实验数据已保存: {data_file}")
 
     # 5. 生成可视化图表
     if VISUALIZE:
