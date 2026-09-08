@@ -393,7 +393,7 @@ def main():
     if VISUALIZE:
         print(f"\n[5] 生成可视化图表...")
         viz = ExperimentVisualizer(output_dir=FIGURES_DIR)
-        saved_files = viz.plot_all(scenarios, uavs_dict, targets_dict)
+        saved_files = viz.plot_all(scenarios, uavs_dict, targets_dict, dem_terrain=dem)
         print(f"  共生成 {len(saved_files)} 张图表")
         print(f"  图表保存位置: {FIGURES_DIR}")
 
