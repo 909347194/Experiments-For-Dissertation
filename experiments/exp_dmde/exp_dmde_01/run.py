@@ -101,16 +101,16 @@ def make_scenario_balanced():
     - sequence_group: 2 对目标有时序关系
     """
     uavs = [
-        UAV(id=0,  start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=28000),
-        UAV(id=1,  start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=26000),
-        UAV(id=2,  start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=24000),
-        UAV(id=3,  start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=22000),
-        UAV(id=4,  start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=20000),
-        UAV(id=5,  start_pos=(91.25, 29.48, 3610), speed_range=(0.30, 0.60), max_range=27000),
-        UAV(id=6,  start_pos=(91.08, 29.52, 3590), speed_range=(0.20, 0.50), max_range=25000),
-        UAV(id=7,  start_pos=(91.18, 29.42, 3630), speed_range=(0.25, 0.55), max_range=23000),
-        UAV(id=8,  start_pos=(91.03, 29.58, 3600), speed_range=(0.30, 0.60), max_range=21000),
-        UAV(id=9,  start_pos=(91.12, 29.47, 3640), speed_range=(0.20, 0.50), max_range=26000),
+        UAV(id=0,  start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=42000),
+        UAV(id=1,  start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=40000),
+        UAV(id=2,  start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=38000),
+        UAV(id=3,  start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=36000),
+        UAV(id=4,  start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=34000),
+        UAV(id=5,  start_pos=(91.25, 29.48, 3610), speed_range=(0.30, 0.60), max_range=41000),
+        UAV(id=6,  start_pos=(91.08, 29.52, 3590), speed_range=(0.20, 0.50), max_range=39000),
+        UAV(id=7,  start_pos=(91.18, 29.42, 3630), speed_range=(0.25, 0.55), max_range=37000),
+        UAV(id=8,  start_pos=(91.03, 29.58, 3600), speed_range=(0.30, 0.60), max_range=35000),
+        UAV(id=9,  start_pos=(91.12, 29.47, 3640), speed_range=(0.20, 0.50), max_range=40000),
     ]
     targets = [
         Target(id=0, position=(91.30, 29.70, 3700), weight=1.0,
@@ -146,18 +146,18 @@ def make_scenario_overloaded():
     - sync: 多 UAV 同时到达同一目标时需协同
     """
     uavs = [
-        UAV(id=0,  start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=28000),
-        UAV(id=1,  start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=26000),
-        UAV(id=2,  start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=30000),
-        UAV(id=3,  start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=24000),
-        UAV(id=4,  start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=22000),
-        UAV(id=5,  start_pos=(91.25, 29.48, 3610), speed_range=(0.30, 0.60), max_range=27000),
-        UAV(id=6,  start_pos=(91.08, 29.52, 3590), speed_range=(0.20, 0.50), max_range=25000),
-        UAV(id=7,  start_pos=(91.18, 29.42, 3630), speed_range=(0.25, 0.55), max_range=23000),
-        UAV(id=8,  start_pos=(91.03, 29.58, 3600), speed_range=(0.30, 0.60), max_range=29000),
-        UAV(id=9,  start_pos=(91.12, 29.47, 3640), speed_range=(0.20, 0.50), max_range=21000),
-        UAV(id=10, start_pos=(91.22, 29.50, 3610), speed_range=(0.25, 0.55), max_range=26000),
-        UAV(id=11, start_pos=(91.07, 29.55, 3595), speed_range=(0.30, 0.60), max_range=28000),
+        UAV(id=0,  start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=45000),
+        UAV(id=1,  start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=42000),
+        UAV(id=2,  start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=48000),
+        UAV(id=3,  start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=38000),
+        UAV(id=4,  start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=36000),
+        UAV(id=5,  start_pos=(91.25, 29.48, 3610), speed_range=(0.30, 0.60), max_range=44000),
+        UAV(id=6,  start_pos=(91.08, 29.52, 3590), speed_range=(0.20, 0.50), max_range=40000),
+        UAV(id=7,  start_pos=(91.18, 29.42, 3630), speed_range=(0.25, 0.55), max_range=37000),
+        UAV(id=8,  start_pos=(91.03, 29.58, 3600), speed_range=(0.30, 0.60), max_range=46000),
+        UAV(id=9,  start_pos=(91.12, 29.47, 3640), speed_range=(0.20, 0.50), max_range=35000),
+        UAV(id=10, start_pos=(91.22, 29.50, 3610), speed_range=(0.25, 0.55), max_range=42000),
+        UAV(id=11, start_pos=(91.07, 29.55, 3595), speed_range=(0.30, 0.60), max_range=44000),
     ]
     targets = [
         Target(id=0, position=(91.30, 29.70, 3700), weight=1.0,
@@ -182,10 +182,10 @@ def make_scenario_srp():
     - time_window: 部分目标有时间窗
     """
     uavs = [
-        UAV(id=0, start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=60000),
-        UAV(id=1, start_pos=(91.15, 29.45, 3650), speed_range=(0.25, 0.55), max_range=65000),
-        UAV(id=2, start_pos=(91.10, 29.55, 3600), speed_range=(0.30, 0.60), max_range=70000),
-        UAV(id=3, start_pos=(91.05, 29.48, 3620), speed_range=(0.20, 0.50), max_range=55000),
+        UAV(id=0, start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=100000),
+        UAV(id=1, start_pos=(91.15, 29.45, 3650), speed_range=(0.25, 0.55), max_range=110000),
+        UAV(id=2, start_pos=(91.10, 29.55, 3600), speed_range=(0.30, 0.60), max_range=120000),
+        UAV(id=3, start_pos=(91.05, 29.48, 3620), speed_range=(0.20, 0.50), max_range=90000),
     ]
     targets = [
         Target(id=0, position=(91.30, 29.70, 3700), weight=1.0,

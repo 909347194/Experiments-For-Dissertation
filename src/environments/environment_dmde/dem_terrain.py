@@ -34,6 +34,11 @@ except ImportError:
     rasterio = None  # type: ignore[assignment]
     rowcol = None  # type: ignore[assignment]
 
+try:
+    from utils.utils_dmde.coord_transform import degree_to_meters_at_lat
+except ImportError:
+    degree_to_meters_at_lat = None  # type: ignore[assignment]
+
 
 # ---------------------------------------------------------------------------
 # 数据结构
@@ -340,13 +345,24 @@ class DEMTerrain:
 
         elevations = self.query_elevations_batch(xs, ys)
 
-        # 计算累计距离（考虑高程的三维距离）
-        dx = np.diff(xs)
-        dy = np.diff(ys)
-        dz = np.diff(elevations)
-        # 对 NaN 的 dz 段置零以避免传播
+        # 计算累计距离（三维距离，经纬度转米）
+        dx_deg = np.diff(xs)   # 经度差 (度)
+        dy_deg = np.diff(ys)   # 纬度差 (度)
+        dz = np.diff(elevations)  # 高程差 (米)
         dz = np.where(np.isnan(dz), 0.0, dz)
-        seg_lengths = np.sqrt(dx**2 + dy**2 + dz**2)
+
+        # 经纬度差 → 米（用剖面平均纬度处的换算系数）
+        if degree_to_meters_at_lat is not None:
+            mean_lat = float(np.nanmean(ys))
+            m_per_deg_lon, m_per_deg_lat = degree_to_meters_at_lat(mean_lat)
+        else:
+            # 降级：近似 1° ≈ 111km
+            m_per_deg_lon = 111320.0
+            m_per_deg_lat = 110540.0
+
+        dx_m = dx_deg * m_per_deg_lon
+        dy_m = dy_deg * m_per_deg_lat
+        seg_lengths = np.sqrt(dx_m**2 + dy_m**2 + dz**2)
         distances = np.concatenate([[0.0], np.cumsum(seg_lengths)])
 
         coords_xy = np.column_stack([xs, ys])
