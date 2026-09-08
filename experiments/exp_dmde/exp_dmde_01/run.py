@@ -46,7 +46,10 @@ from models.model_dmde import (
 )
 from algorithms.algorithm_dmde import DMDESolver, DMDEConfig
 from utils.utils_dmde.metrics import compute_metrics, format_metrics
-from utils.utils_dmde.visualizer import ExperimentVisualizer
+
+# 可视化模块（实验本地）
+sys.path.insert(0, str(Path(__file__).parent))
+from visualization.visualizer import ExperimentVisualizer
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
