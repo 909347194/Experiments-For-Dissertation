@@ -168,7 +168,8 @@ class DMDESolver(BaseOptimizer):
             for i in range(cfg.pop_size):
                 # 反映射 (公式 3-7, 规则 3.4/3.5/3.6)
                 child = inverse_phi(
-                    trial_vectors[i], cost_matrix, n_uavs, n_targets, model_type
+                    trial_vectors[i], cost_matrix, n_uavs, n_targets, model_type,
+                    rng=rng,
                 )
 
                 # 评估适应度
@@ -205,6 +206,7 @@ class DMDESolver(BaseOptimizer):
                             n_uavs,
                             n_targets,
                             model_type,
+                            rng=rng,
                         )
                         population[i].fitness = self._evaluate(
                             population[i], fitness_evaluator, cost_matrix
