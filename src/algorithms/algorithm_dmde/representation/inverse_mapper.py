@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """inverse_mapper.py — 连续到离散的反映射协调器 φ'（公式 3-7）
 
-修复记录：
-    - 修复 SRP 反映射：正确处理 UAV->Target + Target->Target 基因结构。
-    - 修复确定性问题：引入随机化最近邻匹配（top-k 采样），
-      避免差分扰动被纯贪心最近邻吞掉。
+改进记录：
+    - 温度自适应反映射：top_k 随温度动态调节（早期探索多、后期开发多）。
+    - 匹配后扰动：swap + reassign，概率与温度正相关。
+    - SRP 巡游扰动：swap/insert/reverse，打破贪心顺序。
     - 基因长度：balanced/overloaded = n_uavs, SRP = n_uavs + n_targets。
 """
 
@@ -13,7 +13,11 @@ from __future__ import annotations
 import numpy as np
 
 from .encoder import Gene, Individual
-from .repair_rules.nearest_match import nearest_match, nearest_match_stochastic
+from .repair_rules.nearest_match import (
+    nearest_match,
+    nearest_match_stochastic,
+    nearest_match_adaptive,
+)
 from .repair_rules.unique_filter import (
     mask_balanced,
     mask_overloaded,
@@ -23,6 +27,10 @@ from .repair_rules.unique_filter import (
 from .repair_rules.invalid_mutator import repair_invalid
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 主入口
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 def inverse_phi(
     cost_vector: np.ndarray,
     cost_matrix: np.ndarray,
@@ -30,18 +38,25 @@ def inverse_phi(
     n_targets: int,
     model_type: str,
     rng: np.random.Generator | None = None,
+    temperature: float = 0.5,
 ) -> Individual:
     """反映射：将连续代价值向量还原为离散个体。
 
     对应公式 (3-7) 和算法 3.1 的 17-26 行。
 
+    改进：引入温度参数 temperature (0.0~1.0)，
+    控制反映射的随机程度：
+    - temperature=1.0: 强探索（大 top_k、高扰动概率）
+    - temperature=0.0: 纯开发（贪心匹配、无扰动）
+
     Args:
-        cost_vector:  差分后的连续代价值向量。
-        cost_matrix:  原始代价矩阵。
-        n_uavs:       UAV 数量。
-        n_targets:    目标数量。
-        model_type:   分配模型类型。
-        rng:          随机数生成器。
+        cost_vector:   差分后的连续代价值向量。
+        cost_matrix:   原始代价矩阵。
+        n_uavs:        UAV 数量。
+        n_targets:     目标数量。
+        model_type:    分配模型类型。
+        rng:           随机数生成器。
+        temperature:   温度值 (0.0 ~ 1.0)。
 
     Returns:
         可行的子代个体。
@@ -50,10 +65,14 @@ def inverse_phi(
         rng = np.random.default_rng()
 
     if model_type == "srp":
-        return _inverse_phi_srp(cost_vector, cost_matrix, n_uavs, n_targets, rng)
+        return _inverse_phi_srp(cost_vector, cost_matrix, n_uavs, n_targets, rng, temperature)
     else:
-        return _inverse_phi_standard(cost_vector, cost_matrix, n_uavs, n_targets, model_type, rng)
+        return _inverse_phi_standard(cost_vector, cost_matrix, n_uavs, n_targets, model_type, rng, temperature)
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 标准反映射 (balanced / overloaded)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _inverse_phi_standard(
     cost_vector: np.ndarray,
@@ -62,8 +81,14 @@ def _inverse_phi_standard(
     n_targets: int,
     model_type: str,
     rng: np.random.Generator,
+    temperature: float = 0.5,
 ) -> Individual:
-    """标准反映射（balanced / overloaded）。"""
+    """标准反映射（balanced / overloaded）。
+
+    改进：
+    1. 使用温度自适应最近邻匹配（top_k 随温度衰减）。
+    2. 匹配后以温度相关概率执行随机扰动（交换/重分配）。
+    """
     cm_work = cost_matrix.copy().astype(float)
     mask = np.zeros_like(cm_work, dtype=bool)
 
@@ -75,8 +100,8 @@ def _inverse_phi_standard(
             invalid_indices.append(idx)
             continue
 
-        # 随机化最近邻匹配（top-k 采样，避免纯贪心）
-        result = nearest_match_stochastic(cv, cm_work, mask, top_k=3, rng=rng)
+        # 温度自适应匹配（softmax 采样，距离近的概率更高）
+        result = nearest_match_adaptive(cv, cm_work, mask, temperature=temperature, rng=rng)
         if result is None:
             invalid_indices.append(idx)
             continue
@@ -89,6 +114,10 @@ def _inverse_phi_standard(
         elif model_type == "overloaded":
             mask_overloaded(mask, row, col)
 
+    # 匹配后扰动：以温度相关概率随机交换两对分配
+    if temperature > 0.1 and len(genes) >= 2:
+        _perturb_genes(genes, cm_work, n_uavs, model_type, temperature, rng)
+
     # 规则 3.6: 无效值随机修补
     if invalid_indices:
         repaired = repair_invalid(
@@ -100,64 +129,123 @@ def _inverse_phi_standard(
     return Individual(genes=genes, model_type=model_type)
 
 
+def _perturb_genes(
+    genes: list[Gene],
+    cost_matrix: np.ndarray,
+    n_uavs: int,
+    model_type: str,
+    temperature: float,
+    rng: np.random.Generator,
+) -> None:
+    """对已匹配的基因执行随机扰动。
+
+    扰动类型：
+    - swap: 随机交换两个基因的目标分配。
+    - reassign: 随机将一个基因重新匹配到其他可行位置。
+
+    扰动概率与温度正相关。
+    """
+    n_genes = len(genes)
+    if n_genes < 2:
+        return
+
+    # 扰动概率：温度 1.0 → 40%，温度 0.1 → 2%
+    perturb_prob = temperature * 0.4
+
+    # swap 扰动
+    if rng.random() < perturb_prob and n_genes >= 2:
+        i, j = rng.choice(n_genes, size=2, replace=False)
+        if genes[i].uav_id >= 0 and genes[j].uav_id >= 0:
+            # 交换目标
+            genes[i], genes[j] = Gene(
+                uav_id=genes[i].uav_id, target_id=genes[j].target_id,
+                cost=float(cost_matrix[genes[i].uav_id, genes[j].target_id])
+            ), Gene(
+                uav_id=genes[j].uav_id, target_id=genes[i].target_id,
+                cost=float(cost_matrix[genes[j].uav_id, genes[i].target_id])
+            )
+
+    # reassign 扰动：随机选一个基因，重新匹配到同 UAV 的其他目标
+    if rng.random() < perturb_prob and model_type != "srp":
+        idx = rng.integers(n_genes)
+        g = genes[idx]
+        if g.uav_id >= 0:
+            # 找同 UAV 可达的其他目标
+            row = g.uav_id
+            candidates = []
+            for col in range(cost_matrix.shape[1]):
+                if col != g.target_id and cost_matrix[row, col] < np.inf:
+                    candidates.append(col)
+            if candidates:
+                new_col = rng.choice(candidates)
+                genes[idx] = Gene(
+                    uav_id=row, target_id=new_col,
+                    cost=float(cost_matrix[row, new_col])
+                )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SRP 反映射 (N<M 巡游模型)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 def _inverse_phi_srp(
     cost_vector: np.ndarray,
     cost_matrix: np.ndarray,
     n_uavs: int,
     n_targets: int,
     rng: np.random.Generator,
+    temperature: float = 0.5,
 ) -> Individual:
     """SRP 反映射（N<M 巡游模型）。
 
-    SRP 个体结构：
-        前 n_uavs 个基因: UAV -> first_target (从 cost_matrix 上半部分)
-        后续基因: prev_target -> next_target (从 cost_matrix 下半部分)
-
-    反映射流程：
-        1. 从 cost_vector 前 n_uavs 个值匹配 UAV->Target。
-        2. 对每个 UAV，从剩余 cost_vector 值匹配 Target->Target 巡游。
-        3. 保证所有 target 恰好被分配一次。
+    改进：
+    1. UAV→Target 匹配使用温度自适应采样。
+    2. 巡游顺序构建后执行扰动（swap/insert/reverse），
+       打破贪心最近邻的确定性。
     """
     cm_work = cost_matrix.copy().astype(float)
     mask = np.zeros_like(cm_work, dtype=bool)
     genes: list[Gene] = []
 
-    # 第一阶段：每个 UAV 匹配一个初始目标（从上半部分矩阵）
+    # ── 第一阶段：UAV → 初始目标 ──
     assigned_targets: set[int] = set()
     uav_first_target: dict[int, int] = {}
 
     for i in range(min(n_uavs, len(cost_vector))):
         cv = cost_vector[i]
+        row = i
+
         if not np.isfinite(cv) or cv < 0:
-            # 随机选一个未分配的目标
             available = [t for t in range(n_targets) if t not in assigned_targets]
-            if available:
-                tgt = rng.choice(available)
-            else:
-                tgt = rng.integers(n_targets)
+            tgt = rng.choice(available) if available else rng.integers(n_targets)
         else:
-            # 在 UAV 行中找最近邻（仅看未分配的目标）
-            row = i
-            diff = np.abs(cm_work[row, :n_targets] - cv)
-            for t in assigned_targets:
-                diff[t] = np.inf
-            tgt = int(np.argmin(diff))
+            # 温度自适应：在未分配目标中 softmax 采样
+            available = [t for t in range(n_targets) if t not in assigned_targets]
+            if not available:
+                tgt = rng.integers(n_targets)
+            else:
+                diffs = np.abs(cm_work[row, available] - cv)
+                if temperature < 0.1 or len(available) == 1:
+                    tgt = available[int(np.argmin(diffs))]
+                else:
+                    tau = max(0.01, temperature * 2.0)
+                    logits = -diffs / (diffs.std() + 1e-8) / tau
+                    logits -= logits.max()
+                    probs = np.exp(logits)
+                    probs /= probs.sum()
+                    tgt = available[rng.choice(len(available), p=probs)]
 
         cost = float(cm_work[i, tgt])
         genes.append(Gene(uav_id=i, target_id=tgt, cost=cost))
         assigned_targets.add(tgt)
         uav_first_target[i] = tgt
-
-        # 标记该目标列已使用（上半部分）
         mask[:, tgt] = True
 
-    # 第二阶段：巡游匹配（从下半部分矩阵）
-    # 对每个 UAV，用剩余 cost_vector 值匹配 target->target
+    # ── 第二阶段：巡游顺序（Target → Target）──
     remaining_targets = [t for t in range(n_targets) if t not in assigned_targets]
 
-    # 按最近邻将剩余目标分配给 UAV
+    # 先用贪心构建初始巡游顺序
     for tgt in remaining_targets:
-        # 找到距离该目标最近的 UAV（基于当前 UAV 所在目标的巡游代价）
         best_uav = -1
         best_cost = np.inf
         for uav_id, current_tgt in uav_first_target.items():
@@ -170,6 +258,64 @@ def _inverse_phi_srp(
             prev_tgt = uav_first_target[best_uav]
             cost = float(cm_work[n_uavs + prev_tgt, tgt])
             genes.append(Gene(uav_id=-1, target_id=tgt, cost=cost))
-            uav_first_target[best_uav] = tgt  # 更新该 UAV 当前位置
+            uav_first_target[best_uav] = tgt
+
+    # ── 第三阶段：巡游扰动 ──
+    if temperature > 0.1:
+        _perturb_srp_tour(genes, cm_work, n_uavs, n_targets, temperature, rng)
 
     return Individual(genes=genes, model_type="srp")
+
+
+def _perturb_srp_tour(
+    genes: list[Gene],
+    cost_matrix: np.ndarray,
+    n_uavs: int,
+    n_targets: int,
+    temperature: float,
+    rng: np.random.Generator,
+) -> None:
+    """对 SRP 巡游顺序执行扰动。
+
+    扰动类型（随机选择一种）：
+    - swap: 随机交换两个巡游基因的目标。
+    - insert: 将一个基因插入到另一位置。
+    - reverse: 反转一段子序列。
+
+    扰动概率与温度正相关。
+    """
+    # 找出巡游基因（uav_id == -1）
+    tour_indices = [i for i, g in enumerate(genes) if g.uav_id == -1]
+    if len(tour_indices) < 2:
+        return
+
+    perturb_prob = temperature * 0.5
+    if rng.random() >= perturb_prob:
+        return
+
+    op = rng.choice(['swap', 'insert', 'reverse'])
+
+    if op == 'swap' and len(tour_indices) >= 2:
+        i, j = rng.choice(tour_indices, size=2, replace=False)
+        gi, gj = genes[i], genes[j]
+        # 交换 target_id，重新计算 cost
+        genes[i] = Gene(uav_id=-1, target_id=gj.target_id,
+                        cost=float(cost_matrix[n_uavs + gi.target_id, gj.target_id]) if gi.uav_id == -1 else gj.cost)
+        genes[j] = Gene(uav_id=-1, target_id=gi.target_id,
+                        cost=float(cost_matrix[n_uavs + gj.target_id, gi.target_id]) if gj.uav_id == -1 else gi.cost)
+
+    elif op == 'insert' and len(tour_indices) >= 2:
+        src = rng.choice(tour_indices)
+        dst = rng.choice(tour_indices)
+        if src != dst:
+            g = genes.pop(src)
+            # 重新计算插入位置
+            dst_adjusted = dst if dst < src else dst - 1
+            genes.insert(dst_adjusted, g)
+
+    elif op == 'reverse' and len(tour_indices) >= 3:
+        i, j = sorted(rng.choice(tour_indices, size=2, replace=False))
+        # 反转子序列
+        sub = genes[i:j+1]
+        sub.reverse()
+        genes[i:j+1] = sub

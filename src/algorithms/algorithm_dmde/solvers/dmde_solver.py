@@ -164,12 +164,15 @@ class DMDESolver(BaseOptimizer):
                 cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng
             )
 
+            # 温度：线性衰减 1.0 → 0.0
+            temperature = 1.0 - gen / cfg.max_generations
+
             # 对每个个体执行反映射 + 评估 + 贪婪选择
             for i in range(cfg.pop_size):
                 # 反映射 (公式 3-7, 规则 3.4/3.5/3.6)
                 child = inverse_phi(
                     trial_vectors[i], cost_matrix, n_uavs, n_targets, model_type,
-                    rng=rng,
+                    rng=rng, temperature=temperature,
                 )
 
                 # 评估适应度
