@@ -37,37 +37,76 @@ from utils.utils_dmde.metrics import ExperimentMetrics
 # ── 中文字体配置 ──────────────────────────────────────────────
 def _setup_chinese_font():
     """配置 matplotlib 中文字体支持。"""
-    # 尝试使用系统中文字体
+    import matplotlib
+    import os, glob
+
+    # 清除字体缓存，确保新字体能被检测到
+    cache_dir = matplotlib.get_cachedir()
+    if cache_dir and os.path.isdir(cache_dir):
+        for f in glob.glob(os.path.join(cache_dir, 'fontlist-*.json')):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+    # 强制重新加载字体管理器
+    from matplotlib import font_manager
+    font_manager._load_fontmanager(try_read_cache=False)
+
+    # 按平台优先级排列字体
     chinese_fonts = [
-        'Noto Serif CJK SC',   # Noto Serif CJK (serif)
-        'Noto Sans CJK SC',    # Noto Sans CJK (sans-serif)
-        'SimHei',              # 黑体
-        'Microsoft YaHei',     # 微软雅黑
-        'WenQuanYi Micro Hei', # 文泉驿微米黑
+        'SimHei',              # 黑体 (Windows)
+        'Microsoft YaHei',     # 微软雅黑 (Windows)
+        'SimSun',              # 宋体 (Windows)
+        'FangSong',            # 仿宋 (Windows)
+        'KaiTi',               # 楷体 (Windows)
+        'Noto Serif CJK SC',   # Noto Serif CJK (Linux)
+        'Noto Sans CJK SC',    # Noto Sans CJK (Linux)
+        'WenQuanYi Micro Hei', # 文泉驿微米黑 (Linux)
         'Source Han Sans SC',  # 思源黑体
         'AR PL UMing CN',      # 文鼎
     ]
-    
+
+    # 检查系统中实际可用的字体
+    available_fonts = {f.name for f in font_manager.fontManager.ttflist}
+
     for font in chinese_fonts:
-        try:
+        if font in available_fonts:
             plt.rcParams['font.sans-serif'] = [font] + plt.rcParams['font.sans-serif']
-            plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-            # 测试字体是否可用
-            fig, ax = plt.subplots()
-            ax.set_title('测试')
-            plt.close(fig)
+            plt.rcParams['axes.unicode_minus'] = False
+            print(f"  [visualizer] 使用中文字体: {font}")
             return
-        except:
-            continue
-    
-    # 如果没有中文字体，使用默认字体并警告
+
+    # 如果没找到，尝试用 font_manager 按文件查找
+    for pattern in ['simhei', 'msyh', 'simsun', 'NotoSansCJK', 'NotoSerifCJK', 'wqy']:
+        matches = font_manager.findSystemFonts()
+        for fpath in matches:
+            if pattern.lower() in fpath.lower():
+                try:
+                    font_manager.fontManager.addfont(fpath)
+                    prop = font_manager.FontProperties(fname=fpath)
+                    plt.rcParams['font.sans-serif'] = [prop.get_name()] + plt.rcParams['font.sans-serif']
+                    plt.rcParams['axes.unicode_minus'] = False
+                    print(f"  [visualizer] 使用中文字体: {prop.get_name()} ({fpath})")
+                    return
+                except Exception:
+                    continue
+
     import warnings
-    warnings.warn("未找到中文字体，图表中文可能显示为方块。建议安装中文字体。")
+    warnings.warn("未找到中文字体，图表中文可能显示为方块。建议安装 SimHei 或 Microsoft YaHei 字体。")
 
 _setup_chinese_font()
 
 
 # ── 配色方案 ──────────────────────────────────────────────────
+
+def _sanitize_filename(name: str) -> str:
+    """将场景名转为安全的文件名（移除 Windows 非法字符）。"""
+    # 替换 Windows 文件名非法字符: > < : " / \ | ? *
+    import re
+    safe = re.sub(r'[<>:"/\\|?*]', '', name)
+    safe = safe.replace(' ', '_')
+    return safe
 COLORS = {
     'balanced': '#2E86AB',    # 蓝色
     'overloaded': '#A23B72',  # 紫红
@@ -205,7 +244,7 @@ class ExperimentVisualizer:
         ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=9,
                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
-        filename = f"convergence_{scenario_name.replace(' ', '_').replace('=', 'eq')}.png"
+        filename = f"convergence_{_sanitize_filename(scenario_name)}.png"
         return self._save_figure(fig, filename)
     
     def plot_cost_matrix(
@@ -275,7 +314,7 @@ class ExperimentVisualizer:
         ax.set_xlabel('目标编号', fontsize=12)
         ax.set_ylabel('UAV 编号', fontsize=12)
         
-        filename = f"cost_matrix_{scenario_name.replace(' ', '_').replace('=', 'eq')}.png"
+        filename = f"cost_matrix_{_sanitize_filename(scenario_name)}.png"
         return self._save_figure(fig, filename)
     
     def plot_scenario_comparison(
@@ -535,7 +574,7 @@ class ExperimentVisualizer:
         ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
-        filename = f"assignment_{scenario_name.replace(' ', '_').replace('=', 'eq')}.png"
+        filename = f"assignment_{_sanitize_filename(scenario_name)}.png"
         return self._save_figure(fig, filename)
     
     def plot_all(
