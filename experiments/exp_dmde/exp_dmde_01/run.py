@@ -74,8 +74,8 @@ ESTIMATOR_PARAMS = dict(
 
 # DMDE 求解器参数
 SOLVER_PARAMS = dict(
-    pop_size=50,
-    max_generations=500,
+    pop_size=80,
+    max_generations=1000,
     zeta=3,
     delta=0.3,
 )
@@ -93,63 +93,122 @@ FIGURES_DIR = RESULTS_DIR / "figures"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def make_scenario_balanced():
-    """N=M 平衡指派场景（5 UAV → 5 Target）。"""
+    """N=M 平衡指派场景（10 UAV → 10 Target）。
+
+    约束设计：
+    - max_range: 20000~28000 → 不同 UAV 能力不同，部分组合不可达
+    - time_window: 6/10 目标有时间窗，限制可执行时段
+    - sequence_group: 2 对目标有时序关系
+    """
     uavs = [
-        UAV(id=0, start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=500),
-        UAV(id=1, start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=550),
-        UAV(id=2, start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=600),
-        UAV(id=3, start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=500),
-        UAV(id=4, start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=520),
+        UAV(id=0,  start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=28000),
+        UAV(id=1,  start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=26000),
+        UAV(id=2,  start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=24000),
+        UAV(id=3,  start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=22000),
+        UAV(id=4,  start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=20000),
+        UAV(id=5,  start_pos=(91.25, 29.48, 3610), speed_range=(0.30, 0.60), max_range=27000),
+        UAV(id=6,  start_pos=(91.08, 29.52, 3590), speed_range=(0.20, 0.50), max_range=25000),
+        UAV(id=7,  start_pos=(91.18, 29.42, 3630), speed_range=(0.25, 0.55), max_range=23000),
+        UAV(id=8,  start_pos=(91.03, 29.58, 3600), speed_range=(0.30, 0.60), max_range=21000),
+        UAV(id=9,  start_pos=(91.12, 29.47, 3640), speed_range=(0.20, 0.50), max_range=26000),
     ]
     targets = [
-        Target(id=0, position=(91.30, 29.70, 3700), weight=1.0),
-        Target(id=1, position=(91.18, 29.80, 3650), weight=0.8),
-        Target(id=2, position=(91.25, 29.58, 3700), weight=0.9),
-        Target(id=3, position=(91.35, 29.65, 3680), weight=0.7),
-        Target(id=4, position=(91.22, 29.72, 3720), weight=0.6),
+        Target(id=0, position=(91.30, 29.70, 3700), weight=1.0,
+               time_window=(20000, 35000)),
+        Target(id=1, position=(91.18, 29.80, 3650), weight=0.8,
+               sequence_group=1),
+        Target(id=2, position=(91.25, 29.58, 3700), weight=0.9,
+               sequence_group=1),
+        Target(id=3, position=(91.35, 29.65, 3680), weight=0.7,
+               time_window=(18000, 30000)),
+        Target(id=4, position=(91.22, 29.72, 3720), weight=0.6,
+               time_window=(15000, 28000)),
+        Target(id=5, position=(91.28, 29.55, 3690), weight=0.85,
+               time_window=(20000, 32000)),
+        Target(id=6, position=(91.32, 29.60, 3710), weight=0.75),
+        Target(id=7, position=(91.15, 29.65, 3670), weight=0.65,
+               time_window=(16000, 29000)),
+        Target(id=8, position=(91.20, 29.75, 3700), weight=0.95,
+               sequence_group=2),
+        Target(id=9, position=(91.33, 29.55, 3680), weight=0.7,
+               sequence_group=2),
     ]
-    alpha, beta = 2.5, 1.5  # N≥M 缩放因子
+    alpha, beta = 2.5, 1.5
     return uavs, targets, alpha, beta
 
 
 def make_scenario_overloaded():
-    """N>M 多对一场景（8 UAV → 3 Target）。"""
+    """N>M 多对一场景（12 UAV → 4 Target）。
+
+    约束设计：
+    - max_range: 20000~30000 → 不同 UAV 能力差异大
+    - time_window: 所有目标有时间窗
+    - sync: 多 UAV 同时到达同一目标时需协同
+    """
     uavs = [
-        UAV(id=0, start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=500),
-        UAV(id=1, start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=550),
-        UAV(id=2, start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=600),
-        UAV(id=3, start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=500),
-        UAV(id=4, start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=520),
-        UAV(id=5, start_pos=(91.25, 29.48, 3610), speed_range=(0.30, 0.60), max_range=580),
-        UAV(id=6, start_pos=(91.08, 29.52, 3590), speed_range=(0.20, 0.50), max_range=480),
-        UAV(id=7, start_pos=(91.18, 29.42, 3630), speed_range=(0.25, 0.55), max_range=540),
+        UAV(id=0,  start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=28000),
+        UAV(id=1,  start_pos=(91.10, 29.45, 3650), speed_range=(0.25, 0.55), max_range=26000),
+        UAV(id=2,  start_pos=(91.20, 29.55, 3600), speed_range=(0.30, 0.60), max_range=30000),
+        UAV(id=3,  start_pos=(91.05, 29.60, 3580), speed_range=(0.20, 0.50), max_range=24000),
+        UAV(id=4,  start_pos=(91.15, 29.40, 3620), speed_range=(0.25, 0.55), max_range=22000),
+        UAV(id=5,  start_pos=(91.25, 29.48, 3610), speed_range=(0.30, 0.60), max_range=27000),
+        UAV(id=6,  start_pos=(91.08, 29.52, 3590), speed_range=(0.20, 0.50), max_range=25000),
+        UAV(id=7,  start_pos=(91.18, 29.42, 3630), speed_range=(0.25, 0.55), max_range=23000),
+        UAV(id=8,  start_pos=(91.03, 29.58, 3600), speed_range=(0.30, 0.60), max_range=29000),
+        UAV(id=9,  start_pos=(91.12, 29.47, 3640), speed_range=(0.20, 0.50), max_range=21000),
+        UAV(id=10, start_pos=(91.22, 29.50, 3610), speed_range=(0.25, 0.55), max_range=26000),
+        UAV(id=11, start_pos=(91.07, 29.55, 3595), speed_range=(0.30, 0.60), max_range=28000),
     ]
     targets = [
-        Target(id=0, position=(91.30, 29.70, 3700), weight=1.0),
-        Target(id=1, position=(91.18, 29.80, 3650), weight=0.8),
-        Target(id=2, position=(91.25, 29.58, 3700), weight=0.9),
+        Target(id=0, position=(91.30, 29.70, 3700), weight=1.0,
+               time_window=(20000, 35000)),
+        Target(id=1, position=(91.18, 29.80, 3650), weight=0.8,
+               time_window=(18000, 32000)),
+        Target(id=2, position=(91.25, 29.58, 3700), weight=0.9,
+               time_window=(22000, 38000)),
+        Target(id=3, position=(91.35, 29.65, 3680), weight=0.7,
+               time_window=(16000, 30000)),
     ]
     alpha, beta = 2.5, 1.5
     return uavs, targets, alpha, beta
 
 
 def make_scenario_srp():
-    """N<M 群巡游场景（3 UAV → 7 Target）。"""
+    """N<M 群巡游场景（4 UAV → 10 Target）。
+
+    约束设计：
+    - max_range: 55000~70000 → 每架 UAV 访问多个目标，航程成为硬约束
+    - sequence_group: 目标分两组，组内必须按序执行
+    - time_window: 部分目标有时间窗
+    """
     uavs = [
-        UAV(id=0, start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=900),
-        UAV(id=1, start_pos=(91.15, 29.45, 3650), speed_range=(0.25, 0.55), max_range=950),
-        UAV(id=2, start_pos=(91.10, 29.55, 3600), speed_range=(0.30, 0.60), max_range=1000),
+        UAV(id=0, start_pos=(91.00, 29.50, 3600), speed_range=(0.20, 0.50), max_range=60000),
+        UAV(id=1, start_pos=(91.15, 29.45, 3650), speed_range=(0.25, 0.55), max_range=65000),
+        UAV(id=2, start_pos=(91.10, 29.55, 3600), speed_range=(0.30, 0.60), max_range=70000),
+        UAV(id=3, start_pos=(91.05, 29.48, 3620), speed_range=(0.20, 0.50), max_range=55000),
     ]
     targets = [
-        Target(id=0, position=(91.30, 29.70, 3700), weight=1.0),
-        Target(id=1, position=(91.18, 29.80, 3650), weight=0.8),
-        Target(id=2, position=(91.25, 29.58, 3700), weight=0.9),
-        Target(id=3, position=(91.35, 29.65, 3680), weight=0.7),
-        Target(id=4, position=(91.22, 29.72, 3720), weight=0.6),
-        Target(id=5, position=(91.28, 29.55, 3690), weight=0.85),
+        Target(id=0, position=(91.30, 29.70, 3700), weight=1.0,
+               sequence_group=1),
+        Target(id=1, position=(91.18, 29.80, 3650), weight=0.8,
+               sequence_group=1, time_window=(20000, 40000)),
+        Target(id=2, position=(91.25, 29.58, 3700), weight=0.9,
+               sequence_group=1),
+        Target(id=3, position=(91.35, 29.65, 3680), weight=0.7,
+               sequence_group=2),
+        Target(id=4, position=(91.22, 29.72, 3720), weight=0.6,
+               sequence_group=2, time_window=(18000, 35000)),
+        Target(id=5, position=(91.28, 29.55, 3690), weight=0.85,
+               sequence_group=2),
         Target(id=6, position=(91.32, 29.60, 3710), weight=0.75),
+        Target(id=7, position=(91.15, 29.65, 3670), weight=0.65,
+               time_window=(15000, 30000)),
+        Target(id=8, position=(91.20, 29.75, 3700), weight=0.95,
+               sequence_group=1),
+        Target(id=9, position=(91.33, 29.55, 3680), weight=0.7,
+               sequence_group=2),
     ]
-    alpha, beta = 1.5, 1.0  # N<M 缩放因子
+    alpha, beta = 1.5, 1.0
     return uavs, targets, alpha, beta
 
 
