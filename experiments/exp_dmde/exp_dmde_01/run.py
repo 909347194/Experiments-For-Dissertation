@@ -46,6 +46,7 @@ from models.model_dmde import (
 )
 from algorithms.algorithm_dmde import DMDESolver, DMDEConfig
 from utils.utils_dmde.metrics import compute_metrics, format_metrics
+from utils.utils_dmde.visualizer import ExperimentVisualizer
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -78,6 +79,10 @@ SOLVER_PARAMS = dict(
 
 # 多次运行次数
 N_RUNS = 5
+
+# 可视化配置
+VISUALIZE = True  # 是否生成可视化图表
+FIGURES_DIR = RESULTS_DIR / "figures"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -284,17 +289,25 @@ def main():
 
     # 2. 执行三种场景
     scenarios = []
+    uavs_dict = {}  # 用于可视化
+    targets_dict = {}
 
     # N=M 平衡指派
     uavs, targets, alpha, beta = make_scenario_balanced()
+    uavs_dict["N=M 平衡指派"] = uavs
+    targets_dict["N=M 平衡指派"] = targets
     scenarios.append(run_scenario("N=M 平衡指派", uavs, targets, alpha, beta, estimator))
 
     # N>M 多对一
     uavs, targets, alpha, beta = make_scenario_overloaded()
+    uavs_dict["N>M 多对一"] = uavs
+    targets_dict["N>M 多对一"] = targets
     scenarios.append(run_scenario("N>M 多对一", uavs, targets, alpha, beta, estimator))
 
     # N<M 群巡游
     uavs, targets, alpha, beta = make_scenario_srp()
+    uavs_dict["N<M 群巡游"] = uavs
+    targets_dict["N<M 群巡游"] = targets
     scenarios.append(run_scenario("N<M 群巡游", uavs, targets, alpha, beta, estimator))
 
     # 3. 汇总对比
@@ -313,6 +326,14 @@ def main():
 
     # 4. 保存结果
     save_results(scenarios, RESULTS_DIR)
+
+    # 5. 生成可视化图表
+    if VISUALIZE:
+        print(f"\n[5] 生成可视化图表...")
+        viz = ExperimentVisualizer(output_dir=FIGURES_DIR)
+        saved_files = viz.plot_all(scenarios, uavs_dict, targets_dict)
+        print(f"  共生成 {len(saved_files)} 张图表")
+        print(f"  图表保存位置: {FIGURES_DIR}")
 
     print("\n✅ 实验完成。")
 
