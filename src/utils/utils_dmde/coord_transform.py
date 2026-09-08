@@ -39,7 +39,6 @@ WGS84_E2 = 2 * WGS84_F - WGS84_F ** 2  # 第一偏心率平方
 # ── UTM 投影参数 ────────────────────────────────────────────
 UTM_K0 = 0.9996               # 比例因子
 UTM_E0 = 500000.0             # 东偏 (m)
-UTM_N0_NORTH = 0.0            # 北半球北偏 (m)
 UTM_N0_SOUTH = 10000000.0     # 南半球北偏 (m)
 
 
@@ -364,43 +363,89 @@ def _utm_to_wgs84_raw(
 def _wgs84_to_utm_raw_batch(
     lons: np.ndarray, lats: np.ndarray, zone: int, is_north: bool
 ) -> tuple[np.ndarray, np.ndarray]:
-    """WGS84 → UTM 批量转换。"""
-    lons = np.asarray(lons, dtype=np.float64)
-    lats = np.asarray(lats, dtype=np.float64)
-    shape = lons.shape
-    lons_flat = lons.ravel()
-    lats_flat = lats.ravel()
+    """WGS84 → UTM batch conversion using NumPy vector operations."""
+    lons, lats = np.broadcast_arrays(
+        np.asarray(lons, dtype=np.float64), np.asarray(lats, dtype=np.float64)
+    )
+    lat_rad = np.radians(lats)
+    lon_rad = np.radians(lons)
+    central_meridian = np.radians((zone - 1) * 6 - 180 + 3)
 
-    e_result = np.empty_like(lons_flat)
-    n_result = np.empty_like(lats_flat)
+    e2 = WGS84_E2
+    ep2 = e2 / (1 - e2)
+    sin_lat = np.sin(lat_rad)
+    cos_lat = np.cos(lat_rad)
+    tan_lat = np.tan(lat_rad)
+    radius_n = WGS84_A / np.sqrt(1 - e2 * sin_lat ** 2)
+    tan_sq = tan_lat ** 2
+    c = ep2 * cos_lat ** 2
+    a = cos_lat * (lon_rad - central_meridian)
 
-    for i in range(len(lons_flat)):
-        e_result[i], n_result[i] = _wgs84_to_utm_raw(
-            float(lons_flat[i]), float(lats_flat[i]), zone, is_north
+    meridional_arc = WGS84_A * (
+        (1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256) * lat_rad
+        - (3 * e2 / 8 + 3 * e2 ** 2 / 32 + 45 * e2 ** 3 / 1024) * np.sin(2 * lat_rad)
+        + (15 * e2 ** 2 / 256 + 45 * e2 ** 3 / 1024) * np.sin(4 * lat_rad)
+        - (35 * e2 ** 3 / 3072) * np.sin(6 * lat_rad)
+    )
+    eastings = UTM_K0 * radius_n * (
+        a + (1 - tan_sq + c) * a ** 3 / 6
+        + (5 - 18 * tan_sq + tan_sq ** 2 + 72 * c - 58 * ep2) * a ** 5 / 120
+    ) + UTM_E0
+    northings = UTM_K0 * (
+        meridional_arc + radius_n * tan_lat * (
+            a ** 2 / 2
+            + (5 - tan_sq + 9 * c + 4 * c ** 2) * a ** 4 / 24
+            + (61 - 58 * tan_sq + tan_sq ** 2 + 600 * c - 330 * ep2) * a ** 6 / 720
         )
-
-    return e_result.reshape(shape), n_result.reshape(shape)
+    )
+    if not is_north:
+        northings += UTM_N0_SOUTH
+    return eastings, northings
 
 
 def _utm_to_wgs84_raw_batch(
     eastings: np.ndarray, northings: np.ndarray, zone: int, is_north: bool
 ) -> tuple[np.ndarray, np.ndarray]:
-    """UTM → WGS84 批量转换。"""
-    eastings = np.asarray(eastings, dtype=np.float64)
-    northings = np.asarray(northings, dtype=np.float64)
-    shape = eastings.shape
-    e_flat = eastings.ravel()
-    n_flat = northings.ravel()
+    """UTM → WGS84 batch conversion using NumPy vector operations."""
+    eastings, northings = np.broadcast_arrays(
+        np.asarray(eastings, dtype=np.float64), np.asarray(northings, dtype=np.float64)
+    )
+    if not is_north:
+        northings = northings - UTM_N0_SOUTH
 
-    lon_result = np.empty_like(e_flat)
-    lat_result = np.empty_like(n_flat)
+    central_meridian = np.radians((zone - 1) * 6 - 180 + 3)
+    e2 = WGS84_E2
+    ep2 = e2 / (1 - e2)
+    meridional_arc = northings / UTM_K0
+    mu = meridional_arc / (
+        WGS84_A * (1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256)
+    )
+    e1 = (1 - np.sqrt(1 - e2)) / (1 + np.sqrt(1 - e2))
+    footprint_lat = (
+        mu
+        + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * np.sin(2 * mu)
+        + (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * np.sin(4 * mu)
+        + (151 * e1 ** 3 / 96) * np.sin(6 * mu)
+        + (1097 * e1 ** 4 / 512) * np.sin(8 * mu)
+    )
 
-    for i in range(len(e_flat)):
-        lon_result[i], lat_result[i] = _utm_to_wgs84_raw(
-            float(e_flat[i]), float(n_flat[i]), zone, is_north
-        )
+    sin_footprint = np.sin(footprint_lat)
+    radius_n = WGS84_A / np.sqrt(1 - e2 * sin_footprint ** 2)
+    tan_sq = np.tan(footprint_lat) ** 2
+    c = ep2 * np.cos(footprint_lat) ** 2
+    radius_r = WGS84_A * (1 - e2) / (1 - e2 * sin_footprint ** 2) ** 1.5
+    d = (eastings - UTM_E0) / (radius_n * UTM_K0)
 
-    return lon_result.reshape(shape), lat_result.reshape(shape)
+    lat_rad = footprint_lat - (radius_n * np.tan(footprint_lat) / radius_r) * (
+        d ** 2 / 2
+        - (5 + 3 * tan_sq + 10 * c - 4 * c ** 2 - 9 * ep2) * d ** 4 / 24
+        + (61 + 90 * tan_sq + 298 * c + 45 * tan_sq ** 2 - 252 * ep2 - 3 * c ** 2) * d ** 6 / 720
+    )
+    lon_rad = central_meridian + (
+        d - (1 + 2 * tan_sq + c) * d ** 3 / 6
+        + (5 - 2 * c + 28 * tan_sq - 3 * c ** 2 + 8 * ep2 + 24 * tan_sq ** 2) * d ** 5 / 120
+    ) / np.cos(footprint_lat)
+    return np.degrees(lon_rad), np.degrees(lat_rad)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

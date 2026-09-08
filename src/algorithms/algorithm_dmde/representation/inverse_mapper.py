@@ -298,11 +298,9 @@ def _perturb_srp_tour(
     if op == 'swap' and len(tour_indices) >= 2:
         i, j = rng.choice(tour_indices, size=2, replace=False)
         gi, gj = genes[i], genes[j]
-        # 交换 target_id，重新计算 cost
-        genes[i] = Gene(uav_id=-1, target_id=gj.target_id,
-                        cost=float(cost_matrix[n_uavs + gi.target_id, gj.target_id]) if gi.uav_id == -1 else gj.cost)
-        genes[j] = Gene(uav_id=-1, target_id=gi.target_id,
-                        cost=float(cost_matrix[n_uavs + gj.target_id, gi.target_id]) if gj.uav_id == -1 else gi.cost)
+        # 交换目标；所有巡游边的前驱都可能随之改变，随后统一重算代价。
+        genes[i] = Gene(uav_id=-1, target_id=gj.target_id, cost=gj.cost)
+        genes[j] = Gene(uav_id=-1, target_id=gi.target_id, cost=gi.cost)
 
     elif op == 'insert' and len(tour_indices) >= 2:
         src = rng.choice(tour_indices)
@@ -319,3 +317,34 @@ def _perturb_srp_tour(
         sub = genes[i:j+1]
         sub.reverse()
         genes[i:j+1] = sub
+
+    # insert/reverse（以及非相邻 swap）会改变被移动边之后各边的前驱。
+    # Gene.cost 是连续空间中的编码值，必须和新的巡游顺序保持一致。
+    _recalculate_srp_tour_costs(genes, cost_matrix, n_uavs)
+
+
+def _recalculate_srp_tour_costs(
+    genes: list[Gene],
+    cost_matrix: np.ndarray,
+    n_uavs: int,
+) -> None:
+    """Update every target-to-target gene cost from its current predecessor.
+
+    SRP genes are ordered route legs: a direct ``UAV -> target`` gene starts a
+    route and every following ``uav_id == -1`` gene is a ``target -> target``
+    leg.  Rebuild immutable :class:`Gene` instances so no cost can remain tied
+    to the order before a perturbation.
+    """
+    previous_target: int | None = None
+    for index, gene in enumerate(genes):
+        if gene.uav_id >= 0:
+            previous_target = gene.target_id
+            continue
+
+        if previous_target is not None:
+            genes[index] = Gene(
+                uav_id=-1,
+                target_id=gene.target_id,
+                cost=float(cost_matrix[n_uavs + previous_target, gene.target_id]),
+            )
+        previous_target = gene.target_id

@@ -85,12 +85,15 @@ def temperature_to_top_k(temperature: float) -> int:
     温度 0.0（末期）→ top_k = TOP_K_MIN（纯贪心）
 
     Args:
-        temperature: 0.0 ~ 1.0 的温度值。
+        temperature: 有限且位于 [0.0, 1.0] 的温度值。
 
     Returns:
         top_k 值。
     """
-    return max(TOP_K_MIN, int(round(TOP_K_MIN + (TOP_K_MAX - TOP_K_MIN) * temperature)))
+    if not np.isfinite(temperature) or not 0.0 <= temperature <= 1.0:
+        raise ValueError("temperature must be a finite value in [0.0, 1.0]")
+
+    return int(round(TOP_K_MIN + (TOP_K_MAX - TOP_K_MIN) * temperature))
 
 
 def nearest_match_adaptive(
@@ -110,7 +113,8 @@ def nearest_match_adaptive(
         target_value:  差分后的临时代价值。
         cost_matrix:   代价矩阵。
         mask:          布尔掩码。
-        temperature:   温度值 (0.0 ~ 1.0)。
+        temperature:   有限的温度值 [0.0, 1.0]。0.0 是严格贪心；
+                       1.0 使用最大的候选集和最平缓的 softmax。
         rng:           随机数生成器。
 
     Returns:
@@ -119,10 +123,18 @@ def nearest_match_adaptive(
     if rng is None:
         rng = np.random.default_rng()
 
-    diff = np.abs(cost_matrix - target_value)
-    diff[mask] = np.inf
+    # Keep the public boundary explicit.  In particular, do not silently turn
+    # a negative, NaN, or above-range temperature into a different policy.
+    temperature_to_top_k(temperature)
 
-    available = np.argwhere(~mask)
+    if not np.isfinite(target_value):
+        return None
+
+    diff = np.abs(cost_matrix - target_value)
+    valid = ~mask & np.isfinite(cost_matrix)
+    diff[~valid] = np.inf
+
+    available = np.argwhere(valid)
     if len(available) == 0:
         return None
 
@@ -132,18 +144,25 @@ def nearest_match_adaptive(
     top_k = temperature_to_top_k(temperature)
     k = min(top_k, len(sorted_indices))
 
-    if k <= 1:
-        # 纯贪心
+    if temperature == 0.0 or k <= 1:
+        # The zero-temperature limit is deterministic (strictly greedy), so
+        # no softmax division by a near-zero temperature is performed.
         chosen_idx = sorted_indices[0]
     else:
         # softmax 采样：距离越小概率越高
         top_distances = distances[sorted_indices[:k]]
-        # 温度越高越平坦（均匀），越低越集中（贪心）
-        tau = max(0.01, temperature * 2.0)  # softmax 温度
-        logits = -top_distances / (top_distances.std() + 1e-8) / tau
-        logits -= logits.max()  # 数值稳定
-        probs = np.exp(logits)
-        probs /= probs.sum()
+        spread = float(np.std(top_distances))
+        if spread <= np.finfo(float).eps:
+            # Equal-distance candidates have no preference; choose uniformly
+            # rather than manufacturing a preference via an epsilon divisor.
+            probs = np.full(k, 1.0 / k)
+        else:
+            # Temperature increases softness.  Shifting the logits prevents
+            # overflow while preserving the softmax distribution.
+            logits = -top_distances / spread / temperature
+            logits -= logits.max()
+            probs = np.exp(logits)
+            probs /= probs.sum()
         chosen_local = rng.choice(k, p=probs)
         chosen_idx = sorted_indices[chosen_local]
 

@@ -34,10 +34,20 @@ except ImportError:
     rasterio = None  # type: ignore[assignment]
     rowcol = None  # type: ignore[assignment]
 
+def _degree_to_meters_at_lat_fallback(lat: float) -> tuple[float, float]:
+    """Use the same WGS84 approximation as coord_transform when unavailable."""
+    lat_rad = np.radians(lat)
+    m_per_deg_lat = (
+        111132.92 - 559.82 * np.cos(2 * lat_rad) + 1.175 * np.cos(4 * lat_rad)
+    )
+    m_per_deg_lon = 111412.84 * np.cos(lat_rad) - 93.5 * np.cos(3 * lat_rad)
+    return float(m_per_deg_lon), float(m_per_deg_lat)
+
+
 try:
     from utils.utils_dmde.coord_transform import degree_to_meters_at_lat
 except ImportError:
-    degree_to_meters_at_lat = None  # type: ignore[assignment]
+    degree_to_meters_at_lat = _degree_to_meters_at_lat_fallback
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +362,8 @@ class DEMTerrain:
         dz = np.where(np.isnan(dz), 0.0, dz)
 
         # 经纬度差 → 米（用剖面平均纬度处的换算系数）
-        if degree_to_meters_at_lat is not None:
-            mean_lat = float(np.nanmean(ys))
-            m_per_deg_lon, m_per_deg_lat = degree_to_meters_at_lat(mean_lat)
-        else:
-            # 降级：近似 1° ≈ 111km
-            m_per_deg_lon = 111320.0
-            m_per_deg_lat = 110540.0
+        mean_lat = float(np.nanmean(ys))
+        m_per_deg_lon, m_per_deg_lat = degree_to_meters_at_lat(mean_lat)
 
         dx_m = dx_deg * m_per_deg_lon
         dy_m = dy_deg * m_per_deg_lat
