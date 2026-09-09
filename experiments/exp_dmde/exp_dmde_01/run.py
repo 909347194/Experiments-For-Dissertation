@@ -83,7 +83,7 @@ SOLVER_PARAMS = dict(
 
 # 多次运行次数
 # 可用环境变量 EXP_N_RUNS 覆盖（例如 EXP_N_RUNS=1 快速验证数据保存/绘图链路）
-N_RUNS = int(os.environ.get("EXP_N_RUNS", "5"))
+N_RUNS = int(os.environ.get("EXP_N_RUNS", "2"))
 
 # 可视化配置
 VISUALIZE = True  # 是否生成可视化图表
