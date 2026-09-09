@@ -13,17 +13,8 @@ from __future__ import annotations
 import numpy as np
 
 from .encoder import Gene, Individual
-from .repair_rules.nearest_match import (
-    nearest_match,
-    nearest_match_stochastic,
-    nearest_match_adaptive,
-)
-from .repair_rules.unique_filter import (
-    mask_balanced,
-    mask_overloaded,
-    mask_srp_upper,
-    INF,
-)
+from .repair_rules.nearest_match import nearest_match_adaptive
+from .repair_rules.unique_filter import mask_balanced, mask_overloaded
 from .repair_rules.invalid_mutator import repair_invalid
 
 
