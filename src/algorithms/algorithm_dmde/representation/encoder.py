@@ -65,8 +65,34 @@ class Individual:
 
     @property
     def assignment(self) -> list[tuple[int, int]]:
-        """提取分配方案 [(uav_id, target_id), ...]。"""
-        return [(g.uav_id, g.target_id) for g in self.genes if g.uav_id >= 0]
+        """提取分配方案 [(uav_id, target_id), ...]。
+
+        对于 SRP 模型，巡游基因（uav_id=-1）会被归属到
+        前一个 UAV→Target 基因对应的 UAV。
+        """
+        result = []
+        current_uav = -1
+        for g in self.genes:
+            if g.uav_id >= 0:
+                current_uav = g.uav_id
+                result.append((g.uav_id, g.target_id))
+            else:
+                # 巡游基因：归属到当前 UAV
+                result.append((current_uav, g.target_id))
+        return result
+
+    @property
+    def srp_routes(self) -> dict[int, list[int]]:
+        """SRP 专用：返回 UAV 巡游路线 {uav_id: [target_ids]}。"""
+        routes: dict[int, list[int]] = {}
+        current_uav = -1
+        for g in self.genes:
+            if g.uav_id >= 0:
+                current_uav = g.uav_id
+                routes.setdefault(current_uav, []).append(g.target_id)
+            else:
+                routes[current_uav].append(g.target_id)
+        return routes
 
     @property
     def cost_vector(self) -> np.ndarray:

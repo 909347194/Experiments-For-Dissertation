@@ -86,24 +86,46 @@ class FitnessEvaluator:
         self,
         assignment: list[tuple[int, int]],
         cost_matrix: np.ndarray,
+        n_uavs: int | None = None,
     ) -> FitnessResult:
         """评估分配方案的综合适应度。
 
         Args:
             assignment: 分配方案 [(uav_id, target_id), ...]。
+                        对于 SRP，包含巡游基因（uav_id 可能重复）。
             cost_matrix: 代价矩阵。
+            n_uavs: UAV 数量（SRP 模型必须，用于区分矩阵上下半部分）。
 
         Returns:
             FitnessResult 实例。
         """
+        # 判断是否 SRP 模型（有重复 uav_id 说明是 SRP 巡游）
+        uav_ids_in_assignment = [a[0] for a in assignment]
+        is_srp = len(uav_ids_in_assignment) > len(set(uav_ids_in_assignment))
+
         # ---- 总航程代价 ----
         total_distance = 0.0
         uav_distances: dict[int, float] = {}
-        for uav_id, target_id in assignment:
-            if uav_id < cost_matrix.shape[0] and target_id < cost_matrix.shape[1]:
-                dist = cost_matrix[uav_id, target_id]
-                total_distance += dist
-                uav_distances[uav_id] = uav_distances.get(uav_id, 0.0) + dist
+        if is_srp and n_uavs is not None:
+            # SRP 模型：按 UAV 分组计算巡游总代价
+            routes: dict[int, list[int]] = {}
+            for uav_id, target_id in assignment:
+                routes.setdefault(uav_id, []).append(target_id)
+            for uav_id, tgt_list in routes.items():
+                for seq, tgt_id in enumerate(tgt_list):
+                    if seq == 0:
+                        dist = cost_matrix[uav_id, tgt_id]
+                    else:
+                        prev_tgt = tgt_list[seq - 1]
+                        dist = cost_matrix[n_uavs + prev_tgt, tgt_id]
+                    total_distance += dist
+                    uav_distances[uav_id] = uav_distances.get(uav_id, 0.0) + dist
+        else:
+            for uav_id, target_id in assignment:
+                if uav_id < cost_matrix.shape[0] and target_id < cost_matrix.shape[1]:
+                    dist = cost_matrix[uav_id, target_id]
+                    total_distance += dist
+                    uav_distances[uav_id] = uav_distances.get(uav_id, 0.0) + dist
 
         # ---- 最大飞行时间 ----
         max_flight_time = 0.0

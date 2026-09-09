@@ -528,30 +528,57 @@ class ExperimentVisualizer:
                        xytext=(0, 15), ha='center', fontsize=10, fontweight='bold',
                        color=COLORS['best'])
 
-        # 绘制分配连线
-        for uav_id, target_id in assignment:
-            if uav_id < len(uavs) and target_id < len(targets):
-                uav_pos = uavs[uav_id].start_pos[:2]
-                target_pos = targets[target_id].position[:2]
+        # 绘制分配连线（SRP 模型按 UAV 分组绘制巡游路线）
+        # 判断是否 SRP（同一 UAV 出现多次）
+        uav_ids_in_assignment = [a[0] for a in assignment]
+        is_srp = len(uav_ids_in_assignment) > len(set(uav_ids_in_assignment))
 
-                # 获取代价值
-                cost_text = ""
-                if cost_matrix is not None and uav_id < cost_matrix.shape[0] and target_id < cost_matrix.shape[1]:
-                    cost = cost_matrix[uav_id, target_id]
-                    cost_text = f' ({cost:.0f})'
+        if is_srp:
+            # SRP 模型：按 UAV 分组绘制巡游路线
+            routes: dict[int, list[int]] = {}
+            for uav_id, target_id in assignment:
+                routes.setdefault(uav_id, []).append(target_id)
 
-                # 绘制连线
-                ax.annotate('', xy=target_pos, xytext=uav_pos,
-                           arrowprops=dict(arrowstyle='->', color='gray',
-                                          lw=1.5, connectionstyle='arc3,rad=0.1'))
+            route_colors = plt.cm.Set1(np.linspace(0, 1, max(len(routes), 1)))
+            for idx, (uav_id, tgt_list) in enumerate(routes.items()):
+                color = route_colors[idx % len(route_colors)]
+                # UAV → 第一个目标
+                if uav_id < len(uavs) and tgt_list:
+                    uav_pos = uavs[uav_id].start_pos[:2]
+                    first_tgt_pos = targets[tgt_list[0]].position[:2]
+                    ax.annotate('', xy=first_tgt_pos, xytext=uav_pos,
+                               arrowprops=dict(arrowstyle='->', color=color,
+                                              lw=2.5, connectionstyle='arc3,rad=0.1'))
+                    # 目标 → 目标
+                    for i in range(len(tgt_list) - 1):
+                        t1_pos = targets[tgt_list[i]].position[:2]
+                        t2_pos = targets[tgt_list[i+1]].position[:2]
+                        ax.annotate('', xy=t2_pos, xytext=t1_pos,
+                                   arrowprops=dict(arrowstyle='->', color=color,
+                                                  lw=2.0, connectionstyle='arc3,rad=0.1',
+                                                  linestyle='--'))
+        else:
+            # balanced/overloaded：逐条绘制分配箭头
+            for uav_id, target_id in assignment:
+                if uav_id < len(uavs) and target_id < len(targets):
+                    uav_pos = uavs[uav_id].start_pos[:2]
+                    target_pos = targets[target_id].position[:2]
 
-                # 在连线中点添加代价值
-                mid_x = (uav_pos[0] + target_pos[0]) / 2
-                mid_y = (uav_pos[1] + target_pos[1]) / 2
-                if cost_text:
-                    ax.annotate(cost_text, (mid_x, mid_y), fontsize=8,
-                               ha='center', va='center',
-                               bbox=dict(boxstyle='round,pad=0.2', facecolor='yellow', alpha=0.7))
+                    cost_text = ""
+                    if cost_matrix is not None and uav_id < cost_matrix.shape[0] and target_id < cost_matrix.shape[1]:
+                        cost = cost_matrix[uav_id, target_id]
+                        cost_text = f' ({cost:.0f})'
+
+                    ax.annotate('', xy=target_pos, xytext=uav_pos,
+                               arrowprops=dict(arrowstyle='->', color='gray',
+                                              lw=1.5, connectionstyle='arc3,rad=0.1'))
+
+                    mid_x = (uav_pos[0] + target_pos[0]) / 2
+                    mid_y = (uav_pos[1] + target_pos[1]) / 2
+                    if cost_text:
+                        ax.annotate(cost_text, (mid_x, mid_y), fontsize=8,
+                                   ha='center', va='center',
+                                   bbox=dict(boxstyle='round,pad=0.2', facecolor='yellow', alpha=0.7))
 
         # 设置图表
         ax.set_xlabel('经度', fontsize=12)
@@ -618,7 +645,9 @@ class ExperimentVisualizer:
 
         # 降采样以加速渲染
         h, w = elevation.shape
-        step = max(1, min(h, w) // 200)
+        # 对于大型 DEM (如3601x3601), stride 不能太小, 否则 "像针一样尖"
+        target_grid = 150  # 目标网格分辨率
+        step = max(1, min(h, w) // target_grid)
         elev_ds = elevation[::step, ::step]
 
         # 生成网格坐标
@@ -639,17 +668,19 @@ class ExperimentVisualizer:
         zz = elev_ds * elev_exaggerate
 
         # ── 绘制 DEM 表面 ──
-        # 颜色映射基于原始高程
+        # 颜色映射基于原始高程; stride 随降采样自动调整
         norm = plt.Normalize(np.nanmin(elev_ds), np.nanmax(elev_ds))
         colors = plt.cm.terrain(norm(elev_ds))
 
+        surf_stride = max(1, step // 2)  # 渲染步长与降采样协调
         ax.plot_surface(
             xx_m, yy_m, zz,
             facecolors=colors,
-            alpha=0.7,
-            rstride=1, cstride=1,
-            shade=False,
+            alpha=0.8,
+            rstride=surf_stride, cstride=surf_stride,
+            shade=True,
             antialiased=True,
+            lightsource=plt.matplotlib.colors.LightSource(azdeg=315, altdeg=45),
         )
 
         # ── 绘制 UAV 和 Target ──

@@ -268,7 +268,7 @@ def run_scenario(
         results.append(result)
 
         # 计算约束违背
-        eval_res = evaluator.evaluate(result.best_assignment, cm.matrix)
+        eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
         result.extra["total_violation"] = (
             eval_res.range_violation + eval_res.time_violation
             + eval_res.seq_violation + eval_res.sync_violation

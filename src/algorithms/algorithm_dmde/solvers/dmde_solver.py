@@ -142,7 +142,7 @@ class DMDESolver(BaseOptimizer):
         # 评估初始种群
         best_idx = 0
         for i, ind in enumerate(population):
-            ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix)
+            ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
             if ind.fitness < population[best_idx].fitness:
                 best_idx = i
 
@@ -177,7 +177,7 @@ class DMDESolver(BaseOptimizer):
 
                 # 评估适应度
                 child.fitness = self._evaluate(
-                    child, fitness_evaluator, cost_matrix
+                    child, fitness_evaluator, cost_matrix, n_uavs=n_uavs
                 )
 
                 # 贪婪选择 (算法 3.1 行 28-30)
@@ -212,7 +212,7 @@ class DMDESolver(BaseOptimizer):
                             rng=rng,
                         )
                         population[i].fitness = self._evaluate(
-                            population[i], fitness_evaluator, cost_matrix
+                            population[i], fitness_evaluator, cost_matrix, n_uavs=n_uavs
                         )
 
             # 记录收敛曲线
@@ -248,11 +248,12 @@ class DMDESolver(BaseOptimizer):
         individual: Individual,
         fitness_evaluator: Any,
         cost_matrix: np.ndarray,
+        n_uavs: int | None = None,
     ) -> float:
         """评估个体适应度。"""
         assignment = individual.assignment
         if not assignment:
             return 1e12  # 空方案给极大惩罚
 
-        result = fitness_evaluator.evaluate(assignment, cost_matrix)
+        result = fitness_evaluator.evaluate(assignment, cost_matrix, n_uavs=n_uavs)
         return result.fitness

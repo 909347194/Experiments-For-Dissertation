@@ -126,7 +126,59 @@ def _inverse_phi_standard(
         for uav_id, tgt_id, cost in repaired:
             genes.append(Gene(uav_id=uav_id, target_id=tgt_id, cost=cost))
 
+    # N>M 后处理：确保每个目标至少被一个 UAV 访问
+    if model_type == "overloaded":
+        _ensure_all_targets_covered(genes, cm_work, n_uavs, n_targets, rng)
+
     return Individual(genes=genes, model_type=model_type)
+
+
+def _ensure_all_targets_covered(
+    genes: list[Gene],
+    cost_matrix: np.ndarray,
+    n_uavs: int,
+    n_targets: int,
+    rng: np.random.Generator,
+) -> None:
+    """N>M 后处理：确保每个目标至少被一个 UAV 访问。
+
+    对应规则 3.2（N>M）：每个目标至少被分配一个 UAV。
+    如果某个目标未被覆盖，将代价最高的重复 UAV 重分配给该目标。
+    """
+    covered_targets = set(g.target_id for g in genes)
+    uncovered = [t for t in range(n_targets) if t not in covered_targets]
+
+    if not uncovered:
+        return
+
+    # 找到被分配了多个 UAV 的目标（可以替换掉一个）
+    target_count: dict[int, int] = {}
+    for g in genes:
+        target_count[g.target_id] = target_count.get(g.target_id, 0) + 1
+
+    replaceable = [t for t, c in target_count.items() if c > 1]
+
+    for tgt in uncovered:
+        if not replaceable:
+            break
+
+        # 从可替换目标中选一个，替换其代价最高的 UAV
+        src_tgt = rng.choice(replaceable)
+        src_genes = [i for i, g in enumerate(genes) if g.target_id == src_tgt]
+        if not src_genes:
+            continue
+
+        # 选代价最高的基因替换
+        worst_idx = max(src_genes, key=lambda i: genes[i].cost)
+        old_gene = genes[worst_idx]
+        new_cost = float(cost_matrix[old_gene.uav_id, tgt])
+        genes[worst_idx] = Gene(uav_id=old_gene.uav_id, target_id=tgt, cost=new_cost)
+
+        # 更新可替换列表
+        target_count[src_tgt] -= 1
+        target_count[tgt] = target_count.get(tgt, 0) + 1
+        if target_count[src_tgt] <= 1:
+            replaceable.remove(src_tgt)
 
 
 def _perturb_genes(
