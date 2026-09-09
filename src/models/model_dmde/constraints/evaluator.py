@@ -74,6 +74,9 @@ class FitnessEvaluator:
         targets: list[Target],
         alpha: float = 1.0,
         beta: float = 100.0,
+        enable_seq: bool = True,
+        enable_window: bool = True,
+        enable_sync: bool = True,
     ) -> None:
         self._uavs = uavs
         self._targets = targets
@@ -81,6 +84,9 @@ class FitnessEvaluator:
         self._beta = beta    # 约束违背惩罚缩放因子
         self._uav_map = {u.id: u for u in uavs}
         self._target_map = {t.id: t for t in targets}
+        self._enable_seq = enable_seq
+        self._enable_window = enable_window
+        self._enable_sync = enable_sync
 
     def evaluate(
         self,
@@ -145,13 +151,13 @@ class FitnessEvaluator:
                 time_violation += check_time_constraint(uav, total_dist)
 
         # ---- 协同约束违背 ----
-        seq_violation = check_sequence_constraint(assignment, self._targets)
+        seq_violation = check_sequence_constraint(assignment, self._targets) if self._enable_seq else 0.0
         window_violation = check_time_window_constraint(
             assignment, self._uavs, self._targets, cost_matrix
-        )
+        ) if self._enable_window else 0.0
         sync_violation = check_sync_constraint(
             assignment, self._uavs, cost_matrix
-        )
+        ) if self._enable_sync else 0.0
 
         # ---- 综合适应度（公式 2-14）----
         penalty = (
