@@ -208,7 +208,7 @@ def main():
         meta={"experiment": "exp_dmde_01", "description": "N=M 平衡指派",
               "solver_params": SOLVER_PARAMS, "n_runs": N_RUNS,
               "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")},
-        path=RESULTS_DIR / DEFAULT_DATA_FILE,
+        path=RESULTS_DIR / "exp_dmde_01_data.json",
     )
     print(f"\n数据已保存: {data_file}")
 
