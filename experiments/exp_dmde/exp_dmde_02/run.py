@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""exp_dmde_01 — N=M 平衡指派实验
+"""exp_dmde_02 — N>M 多对一实验
 
 实验目的：
-    在拉萨城关区 DEM 地形上，验证 DMDE 算法对 N=M 平衡指派
+    在拉萨城关区 DEM 地形上，验证 DMDE 算法对 N>M 多对一
     模型的求解能力，并输出统计指标。
 
 约束配置：
     - 航程约束 (max_range): ✓
     - 时间窗约束 (time_window): ✓
-    - 时序约束 (sequence_group): ✓
-    - 同时到达约束 (sync): N/A（每目标仅 1 架 UAV）
+    - 时序约束 (sequence_group): N/A（每 UAV 仅访问 1 个目标）
+    - 同时到达约束 (sync): ✗ 移除（12U/4T 结构下物理上不可满足）
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ import sys
 import time
 from pathlib import Path
 
-# ── 路径设置 ──────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_ROOT = PROJECT_ROOT / "src"
 DATA_DIR = Path(__file__).parent / "data"
@@ -27,7 +26,6 @@ RESULTS_DIR = Path(__file__).parent / "results"
 
 sys.path.insert(0, str(SRC_ROOT))
 
-# ── 导入项目模块 ──────────────────────────────────────────────
 from environments.environment_dmde import (
     DEMTerrain,
     RadarThreat,
@@ -44,6 +42,8 @@ from algorithms.algorithm_dmde import DMDESolver, DMDEConfig
 from utils.utils_dmde.metrics import compute_metrics, format_metrics
 
 sys.path.insert(0, str(Path(__file__).parent))
+# 复用 exp_dmde_01 的可视化和数据存储模块
+sys.path.insert(0, str(PROJECT_ROOT / "experiments" / "exp_dmde" / "exp_dmde_01"))
 from visualization.visualizer import ExperimentVisualizer
 from data_store import DEFAULT_DATA_FILE, save_experiment
 
@@ -78,46 +78,38 @@ FIGURES_DIR = RESULTS_DIR / "figures"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 场景定义：N=M 平衡指派（10 UAV → 10 Target）
+# 场景定义：N>M 多对一（12 UAV → 4 Target）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def make_scenario():
-    """N=M 平衡指派场景。
+    """N>M 多对一场景。
 
-    约束：航程 + 时间窗 + 时序（无 sync，因每目标仅 1 架 UAV）。
+    约束：航程 + 时间窗。
+    移除 sync（12U/4T 结构下多 UAV 挤同一目标，同时到达不可满足）。
     """
     uavs = [
-        UAV(id=0,  start_pos=(91.05, 29.55, 3650), speed_range=(0.20, 0.50), max_range=32000),
-        UAV(id=1,  start_pos=(91.10, 29.53, 3640), speed_range=(0.25, 0.55), max_range=30000),
-        UAV(id=2,  start_pos=(91.15, 29.56, 3660), speed_range=(0.30, 0.60), max_range=29000),
-        UAV(id=3,  start_pos=(91.03, 29.60, 3680), speed_range=(0.20, 0.50), max_range=28000),
-        UAV(id=4,  start_pos=(91.08, 29.58, 3670), speed_range=(0.25, 0.55), max_range=31000),
-        UAV(id=5,  start_pos=(91.18, 29.54, 3650), speed_range=(0.30, 0.60), max_range=33000),
-        UAV(id=6,  start_pos=(91.12, 29.60, 3690), speed_range=(0.20, 0.50), max_range=28000),
-        UAV(id=7,  start_pos=(91.06, 29.57, 3660), speed_range=(0.25, 0.55), max_range=30000),
-        UAV(id=8,  start_pos=(91.20, 29.55, 3670), speed_range=(0.30, 0.60), max_range=35000),
-        UAV(id=9,  start_pos=(91.14, 29.52, 3640), speed_range=(0.20, 0.50), max_range=38000),
+        UAV(id=0,  start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=32000),
+        UAV(id=1,  start_pos=(91.08, 29.53, 3640), speed_range=(0.25, 0.55), max_range=30000),
+        UAV(id=2,  start_pos=(91.12, 29.55, 3660), speed_range=(0.30, 0.60), max_range=35000),
+        UAV(id=3,  start_pos=(91.06, 29.58, 3670), speed_range=(0.20, 0.50), max_range=28000),
+        UAV(id=4,  start_pos=(91.16, 29.54, 3650), speed_range=(0.25, 0.55), max_range=31000),
+        UAV(id=5,  start_pos=(91.20, 29.56, 3660), speed_range=(0.30, 0.60), max_range=34000),
+        UAV(id=6,  start_pos=(91.04, 29.60, 3680), speed_range=(0.20, 0.50), max_range=29000),
+        UAV(id=7,  start_pos=(91.10, 29.57, 3660), speed_range=(0.25, 0.55), max_range=30000),
+        UAV(id=8,  start_pos=(91.18, 29.52, 3650), speed_range=(0.30, 0.60), max_range=36000),
+        UAV(id=9,  start_pos=(91.08, 29.60, 3690), speed_range=(0.20, 0.50), max_range=27000),
+        UAV(id=10, start_pos=(91.14, 29.58, 3670), speed_range=(0.25, 0.55), max_range=32000),
+        UAV(id=11, start_pos=(91.22, 29.55, 3660), speed_range=(0.30, 0.60), max_range=35000),
     ]
     targets = [
         Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
-               time_window=(40000, 120000)),
-        Target(id=1, position=(91.10, 29.70, 3750), weight=0.8,
-               sequence_group=1),
-        Target(id=2, position=(91.16, 29.65, 3680), weight=0.9,
-               sequence_group=1),
-        Target(id=3, position=(91.20, 29.72, 3800), weight=0.7,
                time_window=(35000, 100000)),
-        Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
-               time_window=(30000, 90000)),
-        Target(id=5, position=(91.22, 29.60, 3700), weight=0.85,
-               time_window=(38000, 110000)),
-        Target(id=6, position=(91.15, 29.75, 3900), weight=0.75),
-        Target(id=7, position=(91.06, 29.63, 3690), weight=0.65,
+        Target(id=1, position=(91.16, 29.70, 3750), weight=0.8,
                time_window=(30000, 95000)),
-        Target(id=8, position=(91.18, 29.68, 3750), weight=0.95,
-               sequence_group=2),
-        Target(id=9, position=(91.25, 29.65, 3800), weight=0.7,
-               sequence_group=2),
+        Target(id=2, position=(91.08, 29.68, 3720), weight=0.9,
+               time_window=(38000, 110000)),
+        Target(id=3, position=(91.20, 29.65, 3700), weight=0.7,
+               time_window=(32000, 98000)),
     ]
     return uavs, targets, 2.5, 1.5
 
@@ -128,7 +120,7 @@ def make_scenario():
 
 def main():
     print("=" * 60)
-    print("exp_dmde_01: N=M 平衡指派实验")
+    print("exp_dmde_02: N>M 多对一实验")
     print("=" * 60)
 
     # 1. 加载环境
@@ -147,11 +139,11 @@ def main():
     # 2. 构建场景
     uavs, targets, alpha, beta = make_scenario()
     n, m = len(uavs), len(targets)
-    name = "N=M 平衡指派"
+    name = "N>M 多对一"
 
     print(f"\n{'='*60}")
     print(f"场景: {name} ({n}U/{m}T)")
-    print(f"约束: 航程✓ 时间窗✓ 时序✓ 同步N/A")
+    print(f"约束: 航程✓ 时间窗✓ 时序N/A 同步✗(移除)")
     print(f"{'='*60}")
 
     # 3. 构建代价矩阵
@@ -160,10 +152,10 @@ def main():
     print(f"  代价矩阵: shape={cm.matrix.shape}, "
           f"range=[{cm.matrix.min():.0f}, {cm.matrix.max():.0f}]")
 
-    # 4. 创建评估器（balanced: 启用所有约束，sync 自然不触发）
+    # 4. 创建评估器（overloaded: 禁用 sync 和 seq）
     evaluator = FitnessEvaluator(
         uavs, targets, alpha=alpha, beta=beta,
-        enable_seq=True, enable_window=True, enable_sync=True,
+        enable_seq=False, enable_window=True, enable_sync=False,
     )
 
     # 5. 多次运行
@@ -197,7 +189,7 @@ def main():
     print(f"\n{format_metrics(metrics, name)}")
 
     scenario = {
-        "name": name, "model_type": "balanced",
+        "name": name, "model_type": "overloaded",
         "n_uavs": n, "n_targets": m,
         "metrics": metrics, "results": results, "cost_matrix": cm.matrix,
     }
@@ -205,10 +197,10 @@ def main():
     # 7. 保存数据
     data_file = save_experiment(
         [scenario], {name: uavs}, {name: targets},
-        meta={"experiment": "exp_dmde_01", "description": "N=M 平衡指派",
+        meta={"experiment": "exp_dmde_02", "description": "N>M 多对一",
               "solver_params": SOLVER_PARAMS, "n_runs": N_RUNS,
               "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")},
-        path=RESULTS_DIR / "exp_dmde_01_data.json",
+        path=RESULTS_DIR / "exp_dmde_02_data.json",
     )
     print(f"\n数据已保存: {data_file}")
 
