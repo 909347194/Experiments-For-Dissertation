@@ -102,35 +102,36 @@ def make_scenario_balanced():
     城关区 DEM 范围: 91.01~91.30°E, 29.51~29.80°N, 高程 3611~5660m
     UAV 起飞点分布在城区周边低海拔区域，
     目标点分布在城关区各关键位置。
+    max_range 按实际距离 +30% 余量设置，确保可行解存在。
     """
     uavs = [
-        UAV(id=0,  start_pos=(91.05, 29.55, 3650), speed_range=(0.20, 0.50), max_range=25000),
-        UAV(id=1,  start_pos=(91.10, 29.53, 3640), speed_range=(0.25, 0.55), max_range=23000),
-        UAV(id=2,  start_pos=(91.15, 29.56, 3660), speed_range=(0.30, 0.60), max_range=22000),
-        UAV(id=3,  start_pos=(91.03, 29.60, 3680), speed_range=(0.20, 0.50), max_range=20000),
-        UAV(id=4,  start_pos=(91.08, 29.58, 3670), speed_range=(0.25, 0.55), max_range=24000),
-        UAV(id=5,  start_pos=(91.18, 29.54, 3650), speed_range=(0.30, 0.60), max_range=26000),
-        UAV(id=6,  start_pos=(91.12, 29.60, 3690), speed_range=(0.20, 0.50), max_range=21000),
-        UAV(id=7,  start_pos=(91.06, 29.57, 3660), speed_range=(0.25, 0.55), max_range=23000),
-        UAV(id=8,  start_pos=(91.20, 29.55, 3670), speed_range=(0.30, 0.60), max_range=25000),
-        UAV(id=9,  start_pos=(91.14, 29.52, 3640), speed_range=(0.20, 0.50), max_range=22000),
+        UAV(id=0,  start_pos=(91.05, 29.55, 3650), speed_range=(0.20, 0.50), max_range=32000),
+        UAV(id=1,  start_pos=(91.10, 29.53, 3640), speed_range=(0.25, 0.55), max_range=30000),
+        UAV(id=2,  start_pos=(91.15, 29.56, 3660), speed_range=(0.30, 0.60), max_range=29000),
+        UAV(id=3,  start_pos=(91.03, 29.60, 3680), speed_range=(0.20, 0.50), max_range=28000),
+        UAV(id=4,  start_pos=(91.08, 29.58, 3670), speed_range=(0.25, 0.55), max_range=31000),
+        UAV(id=5,  start_pos=(91.18, 29.54, 3650), speed_range=(0.30, 0.60), max_range=33000),
+        UAV(id=6,  start_pos=(91.12, 29.60, 3690), speed_range=(0.20, 0.50), max_range=28000),
+        UAV(id=7,  start_pos=(91.06, 29.57, 3660), speed_range=(0.25, 0.55), max_range=30000),
+        UAV(id=8,  start_pos=(91.20, 29.55, 3670), speed_range=(0.30, 0.60), max_range=35000),
+        UAV(id=9,  start_pos=(91.14, 29.52, 3640), speed_range=(0.20, 0.50), max_range=38000),
     ]
     targets = [
         Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
-               time_window=(15000, 30000)),
+               time_window=(40000, 120000)),
         Target(id=1, position=(91.10, 29.70, 3750), weight=0.8,
                sequence_group=1),
         Target(id=2, position=(91.16, 29.65, 3680), weight=0.9,
                sequence_group=1),
         Target(id=3, position=(91.20, 29.72, 3800), weight=0.7,
-               time_window=(12000, 25000)),
+               time_window=(35000, 100000)),
         Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
-               time_window=(10000, 22000)),
+               time_window=(30000, 90000)),
         Target(id=5, position=(91.22, 29.60, 3700), weight=0.85,
-               time_window=(14000, 28000)),
+               time_window=(38000, 110000)),
         Target(id=6, position=(91.15, 29.75, 3900), weight=0.75),
         Target(id=7, position=(91.06, 29.63, 3690), weight=0.65,
-               time_window=(11000, 24000)),
+               time_window=(30000, 95000)),
         Target(id=8, position=(91.18, 29.68, 3750), weight=0.95,
                sequence_group=2),
         Target(id=9, position=(91.25, 29.65, 3800), weight=0.7,
@@ -145,30 +146,31 @@ def make_scenario_overloaded():
 
     城关区 DEM 范围内，12 架 UAV 从城区各方向起飞，
     4 个高价值目标分布在城区核心和周边。
+    max_range 按实际距离 +30% 余量设置。
     """
     uavs = [
-        UAV(id=0,  start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=25000),
-        UAV(id=1,  start_pos=(91.08, 29.53, 3640), speed_range=(0.25, 0.55), max_range=23000),
-        UAV(id=2,  start_pos=(91.12, 29.55, 3660), speed_range=(0.30, 0.60), max_range=27000),
-        UAV(id=3,  start_pos=(91.06, 29.58, 3670), speed_range=(0.20, 0.50), max_range=21000),
-        UAV(id=4,  start_pos=(91.16, 29.54, 3650), speed_range=(0.25, 0.55), max_range=24000),
-        UAV(id=5,  start_pos=(91.20, 29.56, 3660), speed_range=(0.30, 0.60), max_range=26000),
-        UAV(id=6,  start_pos=(91.04, 29.60, 3680), speed_range=(0.20, 0.50), max_range=22000),
-        UAV(id=7,  start_pos=(91.10, 29.57, 3660), speed_range=(0.25, 0.55), max_range=23000),
-        UAV(id=8,  start_pos=(91.18, 29.52, 3650), speed_range=(0.30, 0.60), max_range=28000),
-        UAV(id=9,  start_pos=(91.08, 29.60, 3690), speed_range=(0.20, 0.50), max_range=20000),
-        UAV(id=10, start_pos=(91.14, 29.58, 3670), speed_range=(0.25, 0.55), max_range=25000),
-        UAV(id=11, start_pos=(91.22, 29.55, 3660), speed_range=(0.30, 0.60), max_range=27000),
+        UAV(id=0,  start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=32000),
+        UAV(id=1,  start_pos=(91.08, 29.53, 3640), speed_range=(0.25, 0.55), max_range=30000),
+        UAV(id=2,  start_pos=(91.12, 29.55, 3660), speed_range=(0.30, 0.60), max_range=35000),
+        UAV(id=3,  start_pos=(91.06, 29.58, 3670), speed_range=(0.20, 0.50), max_range=28000),
+        UAV(id=4,  start_pos=(91.16, 29.54, 3650), speed_range=(0.25, 0.55), max_range=31000),
+        UAV(id=5,  start_pos=(91.20, 29.56, 3660), speed_range=(0.30, 0.60), max_range=34000),
+        UAV(id=6,  start_pos=(91.04, 29.60, 3680), speed_range=(0.20, 0.50), max_range=29000),
+        UAV(id=7,  start_pos=(91.10, 29.57, 3660), speed_range=(0.25, 0.55), max_range=30000),
+        UAV(id=8,  start_pos=(91.18, 29.52, 3650), speed_range=(0.30, 0.60), max_range=36000),
+        UAV(id=9,  start_pos=(91.08, 29.60, 3690), speed_range=(0.20, 0.50), max_range=27000),
+        UAV(id=10, start_pos=(91.14, 29.58, 3670), speed_range=(0.25, 0.55), max_range=32000),
+        UAV(id=11, start_pos=(91.22, 29.55, 3660), speed_range=(0.30, 0.60), max_range=35000),
     ]
     targets = [
         Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
-               time_window=(12000, 28000)),
+               time_window=(35000, 100000)),
         Target(id=1, position=(91.16, 29.70, 3750), weight=0.8,
-               time_window=(10000, 25000)),
+               time_window=(30000, 95000)),
         Target(id=2, position=(91.08, 29.68, 3720), weight=0.9,
-               time_window=(14000, 30000)),
+               time_window=(38000, 110000)),
         Target(id=3, position=(91.20, 29.65, 3700), weight=0.7,
-               time_window=(11000, 26000)),
+               time_window=(32000, 98000)),
     ]
     alpha, beta = 2.5, 1.5
     return uavs, targets, alpha, beta
@@ -179,29 +181,31 @@ def make_scenario_srp():
 
     城关区 DEM 范围内，4 架 UAV 从城区四角起飞，
     巡游访问分散在城区的 10 个目标点。
+    max_range 按实际巡游距离 +30% 余量设置。
+    时间窗放宽至实际飞行时间量级。
     """
     uavs = [
-        UAV(id=0, start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=60000),
-        UAV(id=1, start_pos=(91.15, 29.53, 3640), speed_range=(0.25, 0.55), max_range=65000),
-        UAV(id=2, start_pos=(91.10, 29.60, 3680), speed_range=(0.30, 0.60), max_range=70000),
-        UAV(id=3, start_pos=(91.20, 29.55, 3660), speed_range=(0.20, 0.50), max_range=55000),
+        UAV(id=0, start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=90000),
+        UAV(id=1, start_pos=(91.15, 29.53, 3640), speed_range=(0.25, 0.55), max_range=95000),
+        UAV(id=2, start_pos=(91.10, 29.60, 3680), speed_range=(0.30, 0.60), max_range=100000),
+        UAV(id=3, start_pos=(91.20, 29.55, 3660), speed_range=(0.20, 0.50), max_range=80000),
     ]
     targets = [
         Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
                sequence_group=1),
         Target(id=1, position=(91.10, 29.70, 3750), weight=0.8,
-               sequence_group=1, time_window=(12000, 30000)),
+               sequence_group=1, time_window=(50000, 200000)),
         Target(id=2, position=(91.16, 29.65, 3680), weight=0.9,
                sequence_group=1),
         Target(id=3, position=(91.20, 29.72, 3800), weight=0.7,
                sequence_group=2),
         Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
-               sequence_group=2, time_window=(10000, 28000)),
+               sequence_group=2, time_window=(40000, 180000)),
         Target(id=5, position=(91.22, 29.60, 3700), weight=0.85,
                sequence_group=2),
         Target(id=6, position=(91.15, 29.75, 3900), weight=0.75),
         Target(id=7, position=(91.06, 29.63, 3690), weight=0.65,
-               time_window=(10000, 25000)),
+               time_window=(40000, 150000)),
         Target(id=8, position=(91.18, 29.68, 3750), weight=0.95,
                sequence_group=1),
         Target(id=9, position=(91.25, 29.65, 3800), weight=0.7,
