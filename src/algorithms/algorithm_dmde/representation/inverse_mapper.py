@@ -121,7 +121,47 @@ def _inverse_phi_standard(
     if model_type == "overloaded":
         _ensure_all_targets_covered(genes, cm_work, n_uavs, n_targets, rng)
 
+    # N=M 保险：确保目标一一对应（修复任何可能的重复/漏分配）
+    if model_type == "balanced":
+        _repair_balanced_unique(genes, cm_work)
+
     return Individual(genes=genes, model_type=model_type)
+
+
+def _repair_balanced_unique(
+    genes: list[Gene],
+    cost_matrix: np.ndarray,
+) -> None:
+    """balanced 模型保险：修复重复目标为缺失目标，保证一一对应。
+
+    正常情况下反映射的掩码机制已经保证互斥，此处作为防御性检查，
+    防止任何上游扰动破坏 N=M 的一一对应关系。
+    """
+    seen: set[int] = set()
+    dup_idx: list[int] = []
+    for i, g in enumerate(genes):
+        if g.target_id in seen:
+            dup_idx.append(i)
+        else:
+            seen.add(g.target_id)
+
+    if not dup_idx:
+        return
+
+    n_targets = cost_matrix.shape[1]
+    missing = [t for t in range(n_targets) if t not in seen]
+
+    for i in dup_idx:
+        if not missing:
+            break
+        g = genes[i]
+        # 在缺失目标中选择对该 UAV 代价最小的一个
+        best_t = min(missing, key=lambda t: cost_matrix[g.uav_id, t])
+        genes[i] = Gene(
+            uav_id=g.uav_id, target_id=best_t,
+            cost=float(cost_matrix[g.uav_id, best_t]),
+        )
+        missing.remove(best_t)
 
 
 def _ensure_all_targets_covered(
@@ -208,8 +248,10 @@ def _perturb_genes(
                 cost=float(cost_matrix[genes[j].uav_id, genes[i].target_id])
             )
 
-    # reassign 扰动：随机选一个基因，重新匹配到同 UAV 的其他目标
-    if rng.random() < perturb_prob and model_type != "srp":
+    # reassign 扰动：仅 overloaded 模型允许（目标可被多个 UAV 重复执行）。
+    # balanced 模型必须保持 UAV↔Target 一一对应，reassign 会把某个目标
+    # 重复指派给多个 UAV，破坏互斥约束（导致部分目标漏分配）。
+    if rng.random() < perturb_prob and model_type == "overloaded":
         idx = rng.integers(n_genes)
         g = genes[idx]
         if g.uav_id >= 0:

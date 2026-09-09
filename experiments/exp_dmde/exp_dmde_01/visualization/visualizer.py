@@ -118,6 +118,52 @@ COLORS = {
 }
 
 
+# ── DEM 渲染辅助（无 scipy 依赖）──────────────────────────────
+
+def _fill_nan(arr: np.ndarray, iterations: int = 80) -> np.ndarray:
+    """用有效邻居均值迭代扩散填充 NaN（平滑填补空洞）。"""
+    out = arr.astype(float)
+    mask = np.isnan(out)
+    if not mask.any():
+        return out
+    out[mask] = float(np.nanmin(arr))
+    for _ in range(iterations):
+        up = np.roll(out, 1, axis=0); up[0, :] = out[0, :]
+        down = np.roll(out, -1, axis=0); down[-1, :] = out[-1, :]
+        left = np.roll(out, 1, axis=1); left[:, 0] = out[:, 0]
+        right = np.roll(out, -1, axis=1); right[:, -1] = out[:, -1]
+        new = (up + down + left + right) / 4.0
+        out[mask] = new[mask]
+    return out
+
+
+def _smooth2d(arr: np.ndarray, sigma: float) -> np.ndarray:
+    """可分离高斯平滑（消除 DEM 针状锯齿）。"""
+    if sigma <= 0:
+        return arr.astype(float)
+    r = max(1, int(np.ceil(3 * sigma)))
+    x = np.arange(-r, r + 1, dtype=float)
+    k = np.exp(-(x * x) / (2 * sigma * sigma))
+    k /= k.sum()
+    out = arr.astype(float)
+    for i in range(out.shape[0]):
+        out[i, :] = np.convolve(out[i, :], k, mode='same')
+    for j in range(out.shape[1]):
+        out[:, j] = np.convolve(out[:, j], k, mode='same')
+    return out
+
+
+def _block_reduce(arr: np.ndarray, target_max: int) -> np.ndarray:
+    """块均值降采样到不超过 target_max 的网格（保持表面平滑）。"""
+    h, w = arr.shape
+    step = max(1, int(np.ceil(max(h, w) / target_max)))
+    if step == 1:
+        return arr.copy()
+    h2 = (h // step) * step
+    w2 = (w // step) * step
+    return arr[:h2, :w2].reshape(h2 // step, step, w2 // step, step).mean(axis=(1, 3))
+
+
 class ExperimentVisualizer:
     """实验可视化器。
 
@@ -481,6 +527,92 @@ class ExperimentVisualizer:
         filename = "metrics_boxplot.png"
         return self._save_figure(fig, filename)
 
+    def export_statistics_tables(
+        self,
+        scenarios: list[dict[str, Any]],
+        prefix: str = "statistics",
+    ) -> list[Path]:
+        """导出实验统计表格（CSV + Markdown）。
+
+        生成三份文件：
+        - {prefix}_summary.csv / .md：每个场景一行，列为各项统计指标。
+        - {prefix}_runs.csv：每个场景每次运行一行的明细。
+
+        Args:
+            scenarios: 场景数据列表（与 plot_all 使用相同结构）。
+            prefix: 文件名前缀。
+
+        Returns:
+            导出的文件路径列表。
+        """
+        import csv
+
+        summary_fields = [
+            ("best_fitness", "最优适应度"),
+            ("mean_fitness", "平均适应度"),
+            ("std_fitness", "适应度标准差"),
+            ("median_fitness", "适应度中位数"),
+            ("worst_fitness", "最差适应度"),
+            ("feasible_rate", "可行解比例"),
+            ("violation_pct", "约束违背率(%)"),
+            ("mean_time", "平均耗时(s)"),
+            ("n_runs", "运行次数"),
+        ]
+
+        # ── 汇总表 ──
+        rows = []
+        for sc in scenarios:
+            m = sc["metrics"]
+            row = {"场景": sc["name"]}
+            for key, label in summary_fields:
+                val = getattr(m, key)
+                if key == "feasible_rate":
+                    val = f"{val:.1%}"
+                elif key in ("mean_time", "violation_pct"):
+                    val = f"{val:.2f}"
+                elif key == "n_runs":
+                    val = f"{int(val)}"
+                else:
+                    val = f"{val:.2f}"
+                row[label] = val
+            rows.append(row)
+
+        headers = ["场景"] + [label for _, label in summary_fields]
+
+        summary_csv = self.output_dir / f"{prefix}_summary.csv"
+        with open(summary_csv, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+        summary_md = self.output_dir / f"{prefix}_summary.md"
+        with open(summary_md, "w", encoding="utf-8") as f:
+            f.write("| " + " | ".join(headers) + " |\n")
+            f.write("|" + "---|" * len(headers) + "\n")
+            for row in rows:
+                f.write("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |\n")
+
+        # ── 逐次运行明细表 ──
+        detail_csv = self.output_dir / f"{prefix}_runs.csv"
+        detail_fields = ["场景", "运行", "最优适应度", "可行", "总违背量", "耗时(s)", "分配方案"]
+        with open(detail_csv, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(detail_fields)
+            for sc in scenarios:
+                for i, r in enumerate(sc["results"]):
+                    assign = "; ".join(f"U{u}→T{t}" for u, t in r.best_assignment)
+                    writer.writerow([
+                        sc["name"], i + 1,
+                        f"{r.best_fitness:.2f}",
+                        "是" if r.extra.get("is_feasible") else "否",
+                        f"{r.extra.get('total_violation', 0.0):.2f}",
+                        f"{r.elapsed_seconds:.2f}",
+                        assign,
+                    ])
+
+        return [summary_csv, summary_md, detail_csv]
+
     def plot_assignment_visualization(
         self,
         uavs: list[Any],
@@ -612,9 +744,12 @@ class ExperimentVisualizer:
         assignment: list[tuple[int, int]],
         scenario_name: str = "",
         cost_matrix: np.ndarray | None = None,
-        elev_exaggerate: float = 2.0,
+        elev_exaggerate: float = 1.5,
         view_elev: float = 35,
         view_azim: float = -60,
+        crop_margin_deg: float = 0.015,
+        smooth_sigma_px: float = 2.5,
+        grid_size: int = 180,
     ) -> Path:
         """在 DEM 地形上三维可视化分配方案。
 
@@ -628,9 +763,12 @@ class ExperimentVisualizer:
             assignment: 分配方案 [(uav_id, target_id), ...]。
             scenario_name: 场景名称。
             cost_matrix: 代价矩阵(可选,显示代价值)。
-            elev_exaggerate: 高程夸张系数(默认 2 倍)。
+            elev_exaggerate: 高程夸张系数(默认 1.5 倍)。
             view_elev: 俯仰角(度)。
             view_azim: 方位角(度)。
+            crop_margin_deg: 任务点范围外扩的裁剪边距(度)。
+            smooth_sigma_px: 高斯平滑核(像素)。
+            grid_size: 降采样后的目标网格尺寸。
 
         Returns:
             保存的文件路径。
@@ -639,48 +777,69 @@ class ExperimentVisualizer:
         ax = fig.add_subplot(111, projection='3d')
 
         # ── 提取 DEM 数据 ──
-        elevation = dem_terrain.elevation
+        elevation = dem_terrain.elevation.astype(float)
         bounds = dem_terrain.bounds  # (left, bottom, right, top)
         left, bottom, right, top = bounds
 
-        # 降采样以加速渲染
-        h, w = elevation.shape
-        # 对于大型 DEM (如3601x3601), stride 不能太小, 否则 "像针一样尖"
-        target_grid = 150  # 目标网格分辨率
-        step = max(1, min(h, w) // target_grid)
-        elev_ds = elevation[::step, ::step]
+        # 裁剪到任务点范围（聚焦任务区域，去掉无关边角）
+        lons = [u.start_pos[0] for u in uavs] + [t.position[0] for t in targets]
+        lats = [u.start_pos[1] for u in uavs] + [t.position[1] for t in targets]
+        if lons and lats:
+            c_left = max(left, min(lons) - crop_margin_deg)
+            c_right = min(right, max(lons) + crop_margin_deg)
+            c_bottom = max(bottom, min(lats) - crop_margin_deg)
+            c_top = min(top, max(lats) + crop_margin_deg)
+        else:
+            c_left, c_right, c_bottom, c_top = left, right, bottom, top
 
-        # 生成网格坐标
-        rows, cols = elev_ds.shape
-        xs_deg = np.linspace(left, right, cols)
-        ys_deg = np.linspace(top, bottom, rows)  # 上→下
+        h, w = elevation.shape
+        col0 = max(0, int((c_left - left) / (right - left) * (w - 1)))
+        col1 = min(w - 1, int((c_right - left) / (right - left) * (w - 1)))
+        row0 = max(0, int((top - c_top) / (top - bottom) * (h - 1)))
+        row1 = min(h - 1, int((top - c_bottom) / (top - bottom) * (h - 1)))
+        elev = elevation[row0:row1 + 1, col0:col1 + 1]
+
+        # 填平 NaN + 高斯平滑 + 块均值降采样（消除针状/锯齿）
+        elev = _fill_nan(elev)
+        if smooth_sigma_px > 0:
+            elev = _smooth2d(elev, smooth_sigma_px)
+        elev = _block_reduce(elev, grid_size)
+
+        rows, cols = elev.shape
+        xs_deg = np.linspace(c_left, c_right, cols)
+        ys_deg = np.linspace(c_top, c_bottom, rows)  # 上→下
         xx_deg, yy_deg = np.meshgrid(xs_deg, ys_deg)
 
-        # 经纬度转平面米(用参考点)
+        # 经纬度转平面米(参考点取裁剪区域中心)
         from utils.utils_dmde.coord_transform import WGS84Transformer
-        ref_lon = (left + right) / 2
-        ref_lat = (top + bottom) / 2
+        ref_lon = (c_left + c_right) / 2
+        ref_lat = (c_top + c_bottom) / 2
         transformer = WGS84Transformer.from_lonlat(ref_lon, ref_lat)
 
         xx_m, yy_m = transformer.to_xy_batch(xx_deg, yy_deg)
 
         # 高程夸张
-        zz = elev_ds * elev_exaggerate
+        zz = elev * elev_exaggerate
 
-        # ── 绘制 DEM 表面 ──
-        # 颜色映射基于原始高程; stride 随降采样自动调整
-        norm = plt.Normalize(np.nanmin(elev_ds), np.nanmax(elev_ds))
-        colors = plt.cm.terrain(norm(elev_ds))
+        # ── 绘制 DEM 表面（光照渲染 + 平滑表面）──
+        from matplotlib.colors import LightSource
+        ls = LightSource(azdeg=315, altdeg=45)
+        dx_m = float(np.abs(xx_m[0, 1] - xx_m[0, 0])) if cols > 1 else 1.0
+        dy_m = float(np.abs(yy_m[1, 0] - yy_m[0, 0])) if rows > 1 else 1.0
+        norm = plt.Normalize(float(elev.min()), float(elev.max()))
+        facecolors = ls.shade(
+            elev, cmap=plt.cm.terrain, norm=norm,
+            blend_mode='soft', vert_exag=1.0, dx=dx_m, dy=dy_m,
+        )
 
-        surf_stride = max(1, step // 2)  # 渲染步长与降采样协调
         ax.plot_surface(
             xx_m, yy_m, zz,
-            facecolors=colors,
-            alpha=0.8,
-            rstride=surf_stride, cstride=surf_stride,
-            shade=True,
+            facecolors=facecolors,
+            alpha=1.0,
+            rstride=1, cstride=1,
+            shade=False,
             antialiased=True,
-            lightsource=plt.matplotlib.colors.LightSource(azdeg=315, altdeg=45),
+            linewidth=0,
         )
 
         # ── 绘制 UAV 和 Target ──
@@ -761,7 +920,7 @@ class ExperimentVisualizer:
         ax.view_init(elev=view_elev, azim=view_azim)
         ax.set_xlabel('东向 (m)', fontsize=11, labelpad=10)
         ax.set_ylabel('北向 (m)', fontsize=11, labelpad=10)
-        ax.set_zlabel(f'高程 ×{elev_exaggerate:.0f} (m)', fontsize=11, labelpad=10)
+        ax.set_zlabel(f'高程 ×{elev_exaggerate:g} (m)', fontsize=11, labelpad=10)
 
         title = 'DEM 地形 + UAV-目标分配方案'
         if scenario_name:
@@ -840,10 +999,13 @@ class ExperimentVisualizer:
                 saved_files.append(filepath)
                 print(f"  ✓ 代价矩阵已保存: {filepath.name}")
 
-        # 3. 场景对比图
-        filepath = self.plot_scenario_comparison(scenarios)
-        saved_files.append(filepath)
-        print(f"  ✓ 场景对比已保存: {filepath.name}")
+        # 3. 场景对比图（仅当存在多个场景时才有对比意义）
+        if len(scenarios) >= 2:
+            filepath = self.plot_scenario_comparison(scenarios)
+            saved_files.append(filepath)
+            print(f"  ✓ 场景对比已保存: {filepath.name}")
+        else:
+            print("  ⏭ 场景对比图已跳过（仅 1 个场景，无需对比）")
 
         # 4. 箱线图
         filepath = self.plot_metrics_boxplot(scenarios)
@@ -882,6 +1044,10 @@ class ExperimentVisualizer:
                     )
                     saved_files.append(filepath)
                     print(f"  ✓ DEM 三维图已保存: {filepath.name}")
+
+        # 7. 统计表格（CSV + Markdown）
+        for table_file in self.export_statistics_tables(scenarios):
+            print(f"  ✓ 统计表格已保存: {table_file.name}")
 
         return saved_files
 
