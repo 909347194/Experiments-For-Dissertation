@@ -1,15 +1,26 @@
 # -*- coding: utf-8 -*-
-"""exp_dmde_03 — N<M 群巡游实验
+"""exp_dmde_03 — N<M 群巡游 (SRP) 实验
 
 实验目的：
     在拉萨城关区 DEM 地形上，验证 DMDE 算法对 N<M 群巡游
-    （SRP）模型的求解能力，并输出统计指标。
+    模型的求解能力，并输出统计指标。
 
-约束配置：
-    - 航程约束 (max_range): ✓
-    - 时间窗约束 (time_window): ✓
-    - 时序约束 (sequence_group): ✓（罚函数惩罚）
-    - 同时到达约束 (sync): N/A（每 UAV 独立巡游）
+约束配置（通过 EXP_CONSTRAINTS 选配）：
+    - 航程约束 (max_range):      每 UAV 总巡游航程限制 ★核心
+    - 最大飞行时间 (max_time):    每 UAV 总巡游时间限制
+    - 时间窗约束 (time_window):   目标的可执行时间窗口
+    - 时序约束 (sequence_group):  目标间的先后执行顺序
+    - 同时到达约束:               N/A（每 UAV 独立巡游）
+
+N<M 特有约束：
+    - 巡游顺序最短：同 UAV 的目标序列按最短路径排列
+    - 每目标恰好一次：每个目标恰好被一架 UAV 访问
+
+用法：
+    python run.py                                    # 默认：航程+时间窗+时序
+    EXP_CONSTRAINTS=range python run.py              # 仅航程
+    EXP_CONSTRAINTS=all python run.py                # 全部约束
+    EXP_N_RUNS=3 python run.py                       # 3次运行
 """
 
 from __future__ import annotations
@@ -44,7 +55,7 @@ from utils.utils_dmde.metrics import compute_metrics, format_metrics
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(PROJECT_ROOT / "experiments" / "exp_dmde" / "exp_dmde_01"))
 from visualization.visualizer import ExperimentVisualizer
-from data_store import DEFAULT_DATA_FILE, save_experiment
+from data_store import save_experiment
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -77,43 +88,109 @@ FIGURES_DIR = RESULTS_DIR / "figures"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 约束选配
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def parse_constraint_config() -> dict[str, bool]:
+    """从环境变量解析约束配置。
+
+    EXP_CONSTRAINTS 支持：
+        all              — 全部启用（航程+时间窗+时序）
+        none             — 仅航程
+        range            — 仅航程
+        range,time       — 航程+时间窗
+        range,seq        — 航程+时序
+        range,time,seq   — 航程+时间窗+时序（默认）
+
+    注意：N<M 不支持同时到达约束（sync），始终禁用。
+    """
+    raw = os.environ.get("EXP_CONSTRAINTS", "range,time,seq").lower().strip()
+
+    if raw == "all":
+        return dict(range=True, time=True, seq=True)
+    if raw == "none":
+        return dict(range=True, time=False, seq=False)
+
+    parts = {p.strip() for p in raw.split(",")}
+    return dict(
+        range="range" in parts,
+        time="time" in parts,
+        seq="seq" in parts,
+    )
+
+
+def describe_constraints(cc: dict[str, bool]) -> str:
+    parts = []
+    parts.append(f"航程{'✓' if cc['range'] else '✗'}")
+    parts.append(f"时间窗{'✓' if cc['time'] else '✗'}")
+    parts.append(f"时序{'✓' if cc['seq'] else '✗'}")
+    parts.append("同步N/A")
+    return " ".join(parts)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 场景定义：N<M 群巡游（4 UAV → 10 Target）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def make_scenario():
-    """N<M 群巡游场景。
+def make_scenario(cc: dict[str, bool]):
+    """N<M 群巡游场景，根据约束配置动态调整。
 
-    约束：航程 + 时序 + 时间窗。
-    移除 sync（每 UAV 独立巡游，不涉及多 UAV 同时到达）。
+    设计思路：
+    - 4 UAV，每架巡游 2~3 个目标
+    - 10 个目标分布在城关区不同位置
+    - 时序约束：group 1 的目标必须按 id 顺序执行
+    - 时间窗：部分目标有执行时间窗口
+    - 航程：UAV 需覆盖所有目标的总巡游距离
     """
-    uavs = [
-        UAV(id=0, start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=90000),
-        UAV(id=1, start_pos=(91.15, 29.53, 3640), speed_range=(0.25, 0.55), max_range=95000),
-        UAV(id=2, start_pos=(91.10, 29.60, 3680), speed_range=(0.30, 0.60), max_range=100000),
-        UAV(id=3, start_pos=(91.20, 29.55, 3660), speed_range=(0.20, 0.50), max_range=80000),
+    # 基础 UAV 配置（SRP 需要较大航程）
+    uav_base = [
+        dict(id=0, start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=90000),
+        dict(id=1, start_pos=(91.15, 29.53, 3640), speed_range=(0.25, 0.55), max_range=95000),
+        dict(id=2, start_pos=(91.10, 29.60, 3680), speed_range=(0.30, 0.60), max_range=100000),
+        dict(id=3, start_pos=(91.20, 29.55, 3660), speed_range=(0.20, 0.50), max_range=85000),
     ]
-    targets = [
-        Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
-               sequence_group=1),
-        Target(id=1, position=(91.10, 29.70, 3750), weight=0.8,
-               sequence_group=1, time_window=(50000, 200000)),
-        Target(id=2, position=(91.16, 29.65, 3680), weight=0.9,
-               sequence_group=1),
-        Target(id=3, position=(91.20, 29.72, 3800), weight=0.7,
-               sequence_group=2),
-        Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
-               sequence_group=2, time_window=(40000, 180000)),
-        Target(id=5, position=(91.22, 29.60, 3700), weight=0.85,
-               sequence_group=2),
-        Target(id=6, position=(91.15, 29.75, 3900), weight=0.75),
-        Target(id=7, position=(91.06, 29.63, 3690), weight=0.65,
-               time_window=(40000, 150000)),
-        Target(id=8, position=(91.18, 29.68, 3750), weight=0.95,
-               sequence_group=1),
-        Target(id=9, position=(91.25, 29.65, 3800), weight=0.7,
-               sequence_group=2),
+
+    # max_time: 2.0x 余量
+    if cc["time"]:
+        for u in uav_base:
+            avg_speed = (u["speed_range"][0] + u["speed_range"][1]) / 2
+            u["max_time"] = u["max_range"] / avg_speed * 2.0
+
+    uavs = [UAV(**u) for u in uav_base]
+
+    # 基础 Target 配置
+    # 时序分组：group 1 = T0,T1,T2,T8（必须按序执行），group 2 = T3,T4,T5,T9
+    tgt_base = [
+        dict(id=0, position=(91.12, 29.66, 3700), weight=1.0),   # group1
+        dict(id=1, position=(91.10, 29.70, 3750), weight=0.8),   # group1
+        dict(id=2, position=(91.16, 29.65, 3680), weight=0.9),   # group1
+        dict(id=3, position=(91.20, 29.72, 3800), weight=0.7),   # group2
+        dict(id=4, position=(91.08, 29.68, 3720), weight=0.6),   # group2
+        dict(id=5, position=(91.22, 29.60, 3700), weight=0.85),  # group2
+        dict(id=6, position=(91.15, 29.75, 3900), weight=0.75),  # 无时序
+        dict(id=7, position=(91.06, 29.63, 3690), weight=0.65),  # 无时序
+        dict(id=8, position=(91.18, 29.68, 3750), weight=0.95),  # group1
+        dict(id=9, position=(91.25, 29.65, 3800), weight=0.7),   # group2
     ]
-    return uavs, targets, 1.5, 1.0
+
+    # 时间窗
+    if cc["time"]:
+        tgt_base[0]["time_window"] = (30000, 200000)
+        tgt_base[1]["time_window"] = (50000, 250000)
+        tgt_base[4]["time_window"] = (40000, 220000)
+        tgt_base[7]["time_window"] = (35000, 180000)
+
+    # 时序约束
+    if cc["seq"]:
+        for i in [0, 1, 2, 8]:
+            tgt_base[i]["sequence_group"] = 1
+        for i in [3, 4, 5, 9]:
+            tgt_base[i]["sequence_group"] = 2
+
+    targets = [Target(**t) for t in tgt_base]
+
+    alpha, beta = 1.5, 1.0  # N<M 缩放因子
+    return uavs, targets, alpha, beta
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -121,9 +198,13 @@ def make_scenario():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def main():
+    cc = parse_constraint_config()
+
     print("=" * 60)
-    print("exp_dmde_03: N<M 群巡游实验")
+    print("exp_dmde_03: N<M 群巡游 (SRP) 实验")
     print("=" * 60)
+    print(f"  约束配置: {describe_constraints(cc)}")
+    print(f"  运行次数: {N_RUNS}")
 
     # 1. 加载环境
     print("\n[1] 加载环境...")
@@ -139,25 +220,39 @@ def main():
     print(f"  环境加载耗时: {time.time()-t0:.2f}s")
 
     # 2. 构建场景
-    uavs, targets, alpha, beta = make_scenario()
+    uavs, targets, alpha, beta = make_scenario(cc)
     n, m = len(uavs), len(targets)
     name = "N<M 群巡游"
 
     print(f"\n{'='*60}")
     print(f"场景: {name} ({n}U/{m}T)")
-    print(f"约束: 航程✓ 时间窗✓ 时序✓ 同步N/A")
+    print(f"  UAV: max_range={min(u.max_range for u in uavs):.0f}~{max(u.max_range for u in uavs):.0f}")
+    if cc["time"]:
+        print(f"       max_time={min(u.max_time for u in uavs):.0f}~{max(u.max_time for u in uavs):.0f}")
+    print(f"  预期每 UAV 巡游 {m//n}~{m//n+1} 个目标")
+    for t in targets:
+        extras = []
+        if t.time_window:
+            extras.append(f"tw={t.time_window}")
+        if t.sequence_group is not None:
+            extras.append(f"grp={t.sequence_group}")
+        print(f"  T{t.id}: w={t.weight:.2f} {' '.join(extras)}")
     print(f"{'='*60}")
 
     # 3. 构建代价矩阵
+    t0 = time.time()
     builder = CostMatrixBuilder(estimator, store_details=False)
     cm = builder.build(uavs, targets)
     print(f"  代价矩阵: shape={cm.matrix.shape}, "
-          f"range=[{cm.matrix.min():.0f}, {cm.matrix.max():.0f}]")
+          f"range=[{cm.matrix.min():.0f}, {cm.matrix.max():.0f}], "
+          f"time={time.time()-t0:.1f}s")
 
-    # 4. 创建评估器（srp: 启用 seq，禁用 sync）
+    # 4. 创建评估器（SRP: seq 可选，sync 禁用）
     evaluator = FitnessEvaluator(
         uavs, targets, alpha=alpha, beta=beta,
-        enable_seq=True, enable_window=True, enable_sync=False,
+        enable_seq=cc["seq"],
+        enable_window=cc["time"],
+        enable_sync=False,
     )
 
     # 5. 多次运行
@@ -175,6 +270,7 @@ def main():
         result = solver.solve(cm.matrix, n, m, fitness_evaluator=evaluator)
         results.append(result)
 
+        # SRP 评估需要 n_uavs 参数
         eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
         result.extra["total_violation"] = (
             eval_res.range_violation + eval_res.time_violation
@@ -182,18 +278,39 @@ def main():
         )
         result.extra["is_feasible"] = eval_res.is_feasible
 
+        assigned_tgts = set(a[1] for a in result.best_assignment)
         print(f"  Run {run_idx}: fitness={result.best_fitness:.1f}, "
               f"feasible={eval_res.is_feasible}, "
+              f"range_vio={eval_res.range_violation:.1f}, "
+              f"time_vio={eval_res.time_violation:.1f}, "
+              f"seq_vio={eval_res.seq_violation:.1f}, "
+              f"targets={len(assigned_tgts)}/{m}, "
               f"time={result.elapsed_seconds:.2f}s")
 
     # 6. 统计
     metrics = compute_metrics(results)
     print(f"\n{format_metrics(metrics, name)}")
 
+    # 目标覆盖检查
+    best = results[metrics.best_run_idx]
+    assigned_tgts = set(a[1] for a in best.best_assignment)
+    print(f"  目标覆盖: {sorted(assigned_tgts)} / {list(range(m))}")
+    if assigned_tgts != set(range(m)):
+        print("  ⚠️  存在未覆盖目标！")
+
+    # UAV 巡游路线
+    print(f"  巡游路线:")
+    routes: dict[int, list[int]] = {}
+    for uid, tid in best.best_assignment:
+        routes.setdefault(uid, []).append(tid)
+    for uid, tgts in routes.items():
+        print(f"    U{uid} → {tgts}")
+
     scenario = {
         "name": name, "model_type": "srp",
         "n_uavs": n, "n_targets": m,
         "metrics": metrics, "results": results, "cost_matrix": cm.matrix,
+        "constraint_config": cc,
     }
 
     # 7. 保存数据
@@ -201,6 +318,8 @@ def main():
         [scenario], {name: uavs}, {name: targets},
         meta={"experiment": "exp_dmde_03", "description": "N<M 群巡游",
               "solver_params": SOLVER_PARAMS, "n_runs": N_RUNS,
+              "constraint_config": cc,
+              "constraint_desc": describe_constraints(cc),
               "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")},
         path=RESULTS_DIR / "exp_dmde_03_data.json",
     )
