@@ -32,6 +32,7 @@ from ..base.base_optimizer import BaseOptimizer, SolverResult
 from ..representation.encoder import PopulationEncoder, Individual
 from ..representation.inverse_mapper import inverse_phi
 from ..operators.crossover import dynamic_crossover_rate
+from ..operators.scale_factor import dynamic_scale_factor
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
 from ..features.population_features import compute_diversity, compute_gene_variance
@@ -235,7 +236,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             # ---- [Hook: before_evolve] LLM CR 控制 ----
             cr_module = self._get_module("cr_control")
             base_cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
-            base_f = 0.5  # 默认缩放因子
+            base_f = dynamic_scale_factor(base_cr, rng)  # 公式 3-11: CR-F 耦合
 
             if cr_module and cr_module.enabled and gen % cr_module.interval == 0:
                 fitness_values = np.array([ind.fitness for ind in population])
