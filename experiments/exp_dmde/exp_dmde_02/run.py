@@ -41,6 +41,14 @@ RESULTS_DIR = Path(__file__).parent / "results"
 
 sys.path.insert(0, str(SRC_ROOT))
 
+# Windows 下控制台/重定向管道默认使用 GBK，print("✓") 等字符会抛
+# UnicodeEncodeError 导致脚本中途退出。这里仅放宽编码错误处理
+# （不改变原编码），保证脚本在管道中也能正常跑完。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if callable(_reconfigure):
+        _reconfigure(errors="replace")
+
 from environments.environment_dmde import (
     DEMTerrain,
     RadarThreat,
@@ -154,8 +162,6 @@ def make_scenario(cc: dict[str, bool]):
         dict(id=7,  start_pos=(91.10, 29.57, 3660), speed_range=(0.25, 0.55), max_range=30000),
         dict(id=8,  start_pos=(91.18, 29.52, 3650), speed_range=(0.30, 0.60), max_range=36000),
         dict(id=9,  start_pos=(91.08, 29.60, 3690), speed_range=(0.20, 0.50), max_range=27000),
-        dict(id=10, start_pos=(91.14, 29.58, 3670), speed_range=(0.25, 0.55), max_range=32000),
-        dict(id=11, start_pos=(91.22, 29.55, 3660), speed_range=(0.30, 0.60), max_range=35000),
     ]
 
     # 启用 max_time 约束时，添加最大飞行时间
@@ -269,10 +275,8 @@ def main():
         results.append(result)
 
         eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
-        result.extra["total_violation"] = (
-            eval_res.range_violation + eval_res.time_violation
-            + eval_res.seq_violation + eval_res.sync_violation
-        )
+        result.extra["total_violation"] = eval_res.total_violation
+        result.extra["violation_breakdown"] = eval_res.violation_breakdown()
         result.extra["is_feasible"] = eval_res.is_feasible
 
         print(f"  Run {run_idx}: fitness={result.best_fitness:.1f}, "
@@ -280,6 +284,7 @@ def main():
               f"range_vio={eval_res.range_violation:.1f}, "
               f"time_vio={eval_res.time_violation:.1f}, "
               f"seq_vio={eval_res.seq_violation:.1f}, "
+              f"window_vio={eval_res.window_violation:.1f}, "
               f"sync_vio={eval_res.sync_violation:.1f}, "
               f"time={result.elapsed_seconds:.2f}s")
 

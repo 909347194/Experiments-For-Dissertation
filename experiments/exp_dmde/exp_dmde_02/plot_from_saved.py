@@ -25,6 +25,14 @@ DEFAULT_OUT_DIR = RESULTS_DIR / "figures"
 sys.path.insert(0, str(SRC_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "experiments" / "exp_dmde" / "exp_dmde_01"))
 
+# Windows 下控制台/重定向管道默认使用 GBK，visualizer 打印的 “✓” 会抛
+# UnicodeEncodeError 导致脚本中途退出。这里仅放宽编码错误处理
+# （不改变原编码），保证脚本在管道中也能正常跑完。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if callable(_reconfigure):
+        _reconfigure(errors="replace")
+
 DEM_FILE = DATA_DIR / "chengguan_district_dem.tif"
 
 

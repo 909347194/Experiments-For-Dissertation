@@ -53,6 +53,35 @@ class FitnessResult:
     sync_violation: float = 0.0
     is_feasible: bool = True
 
+    @property
+    def total_violation(self) -> float:
+        """全部约束违背量之和。
+
+        本属性是违约统计的**唯一口径**：``is_feasible`` 恒等价于
+        ``total_violation == 0.0``，因此不会出现“不可行但违背量为 0”
+        或“违背量非 0 却判为可行”的矛盾。
+
+        注意：各分量量纲不同（航程=米、时间=秒、时序=违反序对个数），
+        求和后仅用于惩罚项与“违背量/代价”比率，不可按物理量单独解读。
+        """
+        return (
+            self.range_violation
+            + self.time_violation
+            + self.seq_violation
+            + self.window_violation
+            + self.sync_violation
+        )
+
+    def violation_breakdown(self) -> dict[str, float]:
+        """按约束类型分解违背量，用于定位不可行的具体原因。"""
+        return {
+            "range": self.range_violation,
+            "time": self.time_violation,
+            "seq": self.seq_violation,
+            "window": self.window_violation,
+            "sync": self.sync_violation,
+        }
+
 
 class FitnessEvaluator:
     """综合适应度评估器。
@@ -174,9 +203,7 @@ class FitnessEvaluator:
             + self._beta * penalty
         )
 
-        is_feasible = penalty == 0.0
-
-        return FitnessResult(
+        result = FitnessResult(
             fitness=fitness,
             total_distance=total_distance,
             max_flight_time=max_flight_time,
@@ -185,5 +212,7 @@ class FitnessEvaluator:
             seq_violation=seq_violation,
             window_violation=window_violation,
             sync_violation=sync_violation,
-            is_feasible=is_feasible,
         )
+        # 以 total_violation 作为唯一判据，保证与统计口径强一致
+        result.is_feasible = result.total_violation == 0.0
+        return result

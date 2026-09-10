@@ -28,6 +28,14 @@ RESULTS_DIR = Path(__file__).parent / "results"
 
 sys.path.insert(0, str(SRC_ROOT))
 
+# Windows 下控制台/重定向管道默认使用 GBK，print("✓") 等字符会抛
+# UnicodeEncodeError 导致脚本中途退出。这里仅放宽编码错误处理
+# （不改变原编码），保证脚本在管道中也能正常跑完。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if callable(_reconfigure):
+        _reconfigure(errors="replace")
+
 # ── 导入项目模块 ──────────────────────────────────────────────
 from environments.environment_dmde import (
     DEMTerrain,
@@ -167,9 +175,8 @@ def main():
         results.append(result)
 
         eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
-        result.extra["total_violation"] = (
-            eval_res.range_violation + eval_res.window_violation
-        )
+        result.extra["total_violation"] = eval_res.total_violation
+        result.extra["violation_breakdown"] = eval_res.violation_breakdown()
         result.extra["is_feasible"] = eval_res.is_feasible
 
         print(f"  Run {run_idx}: fitness={result.best_fitness:.1f}, "

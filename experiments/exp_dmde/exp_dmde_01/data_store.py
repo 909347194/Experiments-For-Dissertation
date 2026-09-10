@@ -13,7 +13,9 @@
                       （收敛曲线）、best_fitness、elapsed_seconds、extra
                       （total_violation / is_feasible 等）——旧版只存了
                       best_assignment
-    - metrics       : ExperimentMetrics 全部 10 个字段（含 best_run_idx）
+    - metrics       : ExperimentMetrics 全部字段（含 best_run_idx），
+                      另附按次数统计的 n_feasible / n_infeasible /
+                      infeasible_rate 派生指标（表 3-3 可直接取用）
     - entities      : 每个场景的 UAV / Target 列表（分配图、3D 图需要坐标）
 
 说明（序列化坑）：
@@ -38,7 +40,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +99,22 @@ def _result_to_dict(r: Any) -> dict:
     }
 
 
+def _metrics_to_dict(m: Any) -> dict:
+    """ExperimentMetrics → dict，并附带按次数统计的派生指标。
+
+    ``asdict`` 只能拿到 dataclass 字段，而 ``n_feasible`` / ``n_infeasible`` /
+    ``infeasible_rate`` 是属性，因此这里显式补上，方便直接从 JSON
+    填论文表 3-3。::
+
+        "infeasible_rate": 0.8   # 5 次里 4 次不可行
+    """
+    d = asdict(m)
+    d["n_feasible"] = m.n_feasible
+    d["n_infeasible"] = m.n_infeasible
+    d["infeasible_rate"] = m.infeasible_rate
+    return d
+
+
 def _scenario_to_dict(sc: dict) -> dict:
     """把可视化器使用的场景 dict 序列化为纯 JSON 结构。"""
     return {
@@ -105,7 +123,7 @@ def _scenario_to_dict(sc: dict) -> dict:
         "n_uavs": sc["n_uavs"],
         "n_targets": sc["n_targets"],
         "cost_matrix": _to_jsonable(sc["cost_matrix"]),
-        "metrics": _to_jsonable(asdict(sc["metrics"])),
+        "metrics": _to_jsonable(_metrics_to_dict(sc["metrics"])),
         "runs": [_result_to_dict(r) for r in sc["results"]],
     }
 
@@ -199,7 +217,11 @@ def _scenario_from_dict(d: dict) -> dict:
     """还原出与可视化器 plot_all 所需完全一致的场景 dict。"""
     from utils.utils_dmde.metrics import ExperimentMetrics
 
-    metrics = ExperimentMetrics(**d["metrics"])
+    # 只取 dataclass 已知字段：既忽略 JSON 里额外的派生指标
+    # （n_feasible / infeasible_rate 等，由属性重新算出），
+    # 也兼容旧版 JSON 缺少新字段的情况。
+    known = {f.name for f in fields(ExperimentMetrics)}
+    metrics = ExperimentMetrics(**{k: v for k, v in d["metrics"].items() if k in known})
     runs = [_result_from_dict(r) for r in d["runs"]]
 
     return {
