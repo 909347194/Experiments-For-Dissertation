@@ -159,11 +159,11 @@ def make_scenario(cc: dict[str, bool]):
     ]
 
     # 启用 max_time 约束时，添加最大飞行时间
+    # 余量系数 2.0：保证 UAV 有能力在时间窗内完成任务
     if cc["time"]:
-        # max_time = max_range / avg_speed * 1.2（留余量）
         for u in uav_base:
             avg_speed = (u["speed_range"][0] + u["speed_range"][1]) / 2
-            u["max_time"] = u["max_range"] / avg_speed * 1.2
+            u["max_time"] = u["max_range"] / avg_speed * 2.0
 
     uavs = [UAV(**u) for u in uav_base]
 
