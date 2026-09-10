@@ -108,13 +108,31 @@ def _sanitize_filename(name: str) -> str:
     safe = safe.replace(' ', '_')
     return safe
 COLORS = {
-    'balanced': '#2E86AB',    # 蓝色
-    'overloaded': '#A23B72',  # 紫红
-    'srp': '#F18F01',         # 橙色
-    'best': '#C73E1D',        # 红色
-    'mean': '#3B1F2B',        # 深色
-    'grid': '#E8E8E8',        # 灰色
-    'background': '#FAFAFA',  # 浅灰
+    'balanced': '#2563EB',    # 亮蓝色 (tailwind blue-600)
+    'overloaded': '#9333EA',  # 紫色 (tailwind violet-600)
+    'srp': '#EA580C',         # 深橙色 (tailwind orange-600)
+    'best': '#DC2626',        # 红色 (tailwind red-600)
+    'mean': '#1F2937',        # 深灰 (tailwind gray-800)
+    'grid': '#E5E7EB',        # 浅灰 (tailwind gray-200)
+    'background': '#F9FAFB',  # 极浅灰 (tailwind gray-50)
+    'uav': '#2563EB',         # UAV 蓝色
+    'target': '#DC2626',      # Target 红色
+    'accent_green': '#059669',  # 强调绿
+    'accent_gold': '#D97706',   # 强调金
+    'text_primary': '#111827',  # 主文字
+    'text_secondary': '#6B7280', # 次文字
+}
+
+PLOT_STYLE = {
+    'title_size': 15,
+    'title_weight': 'bold',
+    'label_size': 12,
+    'tick_size': 10,
+    'legend_size': 10,
+    'annotation_size': 9,
+    'grid_alpha': 0.4,
+    'dpi': 300,
+    'spine_linewidth': 0.8,
 }
 
 
@@ -192,6 +210,42 @@ class ExperimentVisualizer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.dpi = dpi
         self.figsize = figsize
+        self._apply_global_style()
+
+    def _apply_global_style(self) -> None:
+        """应用全局 matplotlib 样式。"""
+        plt.rcParams.update({
+            'figure.dpi': self.dpi,
+            'savefig.dpi': self.dpi,
+            'font.size': PLOT_STYLE['tick_size'],
+            'axes.titlesize': PLOT_STYLE['title_size'],
+            'axes.titleweight': PLOT_STYLE['title_weight'],
+            'axes.labelsize': PLOT_STYLE['label_size'],
+            'axes.linewidth': PLOT_STYLE['spine_linewidth'],
+            'xtick.labelsize': PLOT_STYLE['tick_size'],
+            'ytick.labelsize': PLOT_STYLE['tick_size'],
+            'legend.fontsize': PLOT_STYLE['legend_size'],
+            'legend.framealpha': 0.95,
+            'legend.edgecolor': '#D1D5DB',
+            'grid.alpha': PLOT_STYLE['grid_alpha'],
+            'grid.linestyle': '-',
+            'grid.color': COLORS['grid'],
+            'axes.facecolor': COLORS['background'],
+            'figure.facecolor': 'white',
+            'savefig.facecolor': 'white',
+            'savefig.bbox': 'tight',
+            'savefig.edgecolor': 'none',
+        })
+
+    def _style_axes(self, ax: plt.Axes) -> None:
+        """统一美化坐标轴样式。"""
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(PLOT_STYLE['spine_linewidth'])
+        ax.spines['bottom'].set_linewidth(PLOT_STYLE['spine_linewidth'])
+        ax.tick_params(axis='both', which='both', length=3, width=0.8)
+        ax.grid(True, alpha=PLOT_STYLE['grid_alpha'], linestyle='-', color=COLORS['grid'])
+        ax.set_facecolor(COLORS['background'])
 
     def _save_figure(self, fig: plt.Figure, filename: str) -> Path:
         """保存图表到文件。
@@ -205,7 +259,7 @@ class ExperimentVisualizer:
         """
         filepath = self.output_dir / filename
         fig.savefig(filepath, dpi=self.dpi, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
+                   facecolor='white', edgecolor='none', pad_inches=0.15)
         plt.close(fig)
         return filepath
 
@@ -231,64 +285,59 @@ class ExperimentVisualizer:
         """
         fig, ax = plt.subplots(figsize=self.figsize)
 
-        # 提取所有运行的收敛曲线
         histories = [r.cost_history for r in results]
         min_len = min(len(h) for h in histories)
         histories = [h[:min_len] for h in histories]
-
         generations = np.arange(min_len)
 
-        # 绘制每次运行的曲线(透明)
         for i, history in enumerate(histories):
-            ax.plot(generations, history, alpha=0.3, linewidth=0.8,
-                   color=COLORS['balanced'], label=f'Run {i+1}' if i < 5 else "")
+            ax.plot(generations, history, alpha=0.25, linewidth=0.85,
+                   color=COLORS['balanced'], label=f'单次运行' if i == 0 else "")
 
         if show_mean or show_std:
             histories_array = np.array(histories)
             mean_history = np.mean(histories_array, axis=0)
             std_history = np.std(histories_array, axis=0)
 
-            if show_mean:
-                ax.plot(generations, mean_history, color=COLORS['best'],
-                       linewidth=2, label='平均收敛曲线')
-
             if show_std:
                 ax.fill_between(
                     generations,
-                    mean_history - std_history,
+                    np.maximum(mean_history - std_history, 0),
                     mean_history + std_history,
-                    alpha=0.2, color=COLORS['best'], label='±1 标准差'
+                    alpha=0.2, color=COLORS['mean'], label='±1 标准差',
+                    linewidth=0
                 )
 
-        # 标记最优解
+            if show_mean:
+                ax.plot(generations, mean_history, color=COLORS['srp'],
+                       linewidth=2.2, label='均值曲线', zorder=8)
+
         best_idx = np.argmin([r.best_fitness for r in results])
         best_history = histories[best_idx]
         ax.plot(generations, best_history, color=COLORS['best'],
-               linewidth=2.5, linestyle='--', label=f'最优运行 (Run {best_idx+1})')
+               linewidth=2.2, linestyle='--', label=f'最优运行 (Run {best_idx+1})', zorder=9)
 
-        # 设置图表
-        ax.set_xlabel('迭代代数', fontsize=12)
-        ax.set_ylabel('适应度值', fontsize=12)
+        ax.set_xlabel('迭代代数', fontsize=PLOT_STYLE['label_size'])
+        ax.set_ylabel('适应度值', fontsize=PLOT_STYLE['label_size'])
         title = f'DMDE 算法收敛曲线'
         if scenario_name:
             title += f' - {scenario_name}'
-        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_title(title, fontsize=PLOT_STYLE['title_size'],
+                     fontweight=PLOT_STYLE['title_weight'], pad=12)
 
         if log_scale:
             ax.set_yscale('log')
 
-        ax.grid(True, alpha=0.3, linestyle='-', color=COLORS['grid'])
-        ax.legend(loc='upper right', fontsize=10)
-        ax.set_facecolor(COLORS['background'])
+        self._style_axes(ax)
+        ax.legend(loc='upper right', fontsize=PLOT_STYLE['legend_size'],
+                  frameon=True, fancybox=True, borderpad=0.8)
 
-        # 添加统计信息
         stats_text = (
-            f'运行次数: {len(results)}\n'
-            f'最优值: {results[best_idx].best_fitness:.2f}\n'
-            f'最终代数: {min_len}'
+            f'运行次数: {len(results)}  |  最优值: {results[best_idx].best_fitness:.2f}  |  迭代: {min_len}'
         )
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=9,
-               verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        ax.text(0.02, 0.97, stats_text, transform=ax.transAxes,
+                fontsize=PLOT_STYLE['annotation_size'], ha='left', va='top',
+                bbox=dict(boxstyle='round,pad=0.4', facecolor='wheat', alpha=0.55))
 
         filename = f"convergence_{_sanitize_filename(scenario_name)}.png"
         return self._save_figure(fig, filename)
@@ -313,17 +362,19 @@ class ExperimentVisualizer:
         Returns:
             保存的文件路径。
         """
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        # 绘制热力图
-        im = ax.imshow(cost_matrix, cmap='YlOrRd', aspect='auto')
-
-        # 添加颜色条
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label('代价值', fontsize=12)
-
-        # 设置坐标轴
         n_rows, n_cols = cost_matrix.shape
+        fig_w = max(7.5, n_cols * 0.8 + 2)
+        fig_h = max(5.5, n_rows * 0.7 + 1.5)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+        vmin, vmax = float(cost_matrix.min()), float(cost_matrix.max())
+        im = ax.imshow(cost_matrix, cmap='YlOrRd', aspect='auto',
+                       vmin=vmin, vmax=vmax, interpolation='nearest')
+
+        cbar = plt.colorbar(im, ax=ax, shrink=0.9, pad=0.03)
+        cbar.set_label('代价值', fontsize=PLOT_STYLE['label_size'])
+        cbar.ax.tick_params(labelsize=PLOT_STYLE['tick_size'])
+
         if uav_ids is None:
             uav_ids = list(range(n_rows))
         if target_ids is None:
@@ -331,34 +382,32 @@ class ExperimentVisualizer:
 
         ax.set_xticks(np.arange(n_cols))
         ax.set_yticks(np.arange(n_rows))
-        ax.set_xticklabels([f'T{tid}' for tid in target_ids], fontsize=10)
-        ax.set_yticklabels([f'U{uid}' for uid in uav_ids], fontsize=10)
+        ax.set_xticklabels([f'T{tid}' for tid in target_ids], fontsize=PLOT_STYLE['tick_size'])
+        ax.set_yticklabels([f'U{uid}' for uid in uav_ids], fontsize=PLOT_STYLE['tick_size'])
 
-        # 在单元格中显示数值
         for i in range(n_rows):
             for j in range(n_cols):
                 value = cost_matrix[i, j]
-                # 根据值的大小选择文字颜色
-                text_color = 'white' if value > np.max(cost_matrix) * 0.6 else 'black'
+                text_color = 'white' if value > (vmin + vmax) * 0.55 else 'black'
                 ax.text(j, i, f'{value:.0f}', ha='center', va='center',
-                       color=text_color, fontsize=8, fontweight='bold')
+                       color=text_color, fontsize=9, fontweight='bold')
 
-        # 高亮显示分配方案
         if highlight_assignment:
             for uav_idx, target_idx in highlight_assignment:
                 if uav_idx < n_rows and target_idx < n_cols:
                     rect = plt.Rectangle((target_idx - 0.5, uav_idx - 0.5), 1, 1,
-                                       fill=False, edgecolor='blue', linewidth=3)
+                                       fill=False, edgecolor='blue', linewidth=2.8)
                     ax.add_patch(rect)
 
-        # 设置标题
         title = '代价矩阵热力图'
         if scenario_name:
             title += f' - {scenario_name}'
-        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_title(title, fontsize=PLOT_STYLE['title_size'],
+                     fontweight=PLOT_STYLE['title_weight'], pad=12)
 
-        ax.set_xlabel('目标编号', fontsize=12)
-        ax.set_ylabel('UAV 编号', fontsize=12)
+        ax.set_xlabel('目标编号', fontsize=PLOT_STYLE['label_size'])
+        ax.set_ylabel('UAV 编号', fontsize=PLOT_STYLE['label_size'])
+        ax.set_facecolor(COLORS['background'])
 
         filename = f"cost_matrix_{_sanitize_filename(scenario_name)}.png"
         return self._save_figure(fig, filename)
@@ -381,14 +430,14 @@ class ExperimentVisualizer:
             metrics_to_plot = ['best_fitness', 'mean_fitness', 'feasible_rate', 'mean_time']
 
         n_metrics = len(metrics_to_plot)
-        fig, axes = plt.subplots(1, n_metrics, figsize=(5 * n_metrics, 6))
+        fig, axes = plt.subplots(1, n_metrics, figsize=(5.2 * n_metrics, 5.8))
 
         if n_metrics == 1:
             axes = [axes]
 
         scenario_names = [s['name'] for s in scenarios]
         model_types = [s['model_type'] for s in scenarios]
-        colors = [COLORS.get(mt, '#666666') for mt in model_types]
+        bar_colors = [COLORS.get(mt, '#6B7280') for mt in model_types]
 
         metric_labels = {
             'best_fitness': '最优适应度',
@@ -403,41 +452,49 @@ class ExperimentVisualizer:
         for idx, metric in enumerate(metrics_to_plot):
             ax = axes[idx]
 
-            # 提取指标值
             values = []
             for sc in scenarios:
                 m = sc['metrics']
                 values.append(getattr(m, metric, 0))
 
-            # 绘制柱状图
-            bars = ax.bar(range(len(scenarios)), values, color=colors, alpha=0.8, edgecolor='white')
+            bars = ax.bar(range(len(scenarios)), values,
+                         color=bar_colors, alpha=0.88,
+                         edgecolor='white', linewidth=1.5,
+                         width=0.68, zorder=3)
 
-            # 在柱子上添加数值
-            for bar_idx, (bar, value) in enumerate(zip(bars, values)):
+            ymax = max(values) * 1.2 if max(values) > 0 else 1
+            for bar, value in zip(bars, values):
                 height = bar.get_height()
                 if metric == 'feasible_rate':
-                    text = f'{value:.0%}'
+                    text = f'{value:.1%}'
                 elif metric == 'mean_time':
                     text = f'{value:.2f}s'
+                elif metric in ('violation_pct', 'n_runs'):
+                    text = f'{value:.2f}' if metric == 'violation_pct' else f'{int(value)}'
                 else:
                     text = f'{value:.1f}'
 
-                ax.text(bar.get_x() + bar.get_width()/2., height + max(values) * 0.02,
-                       text, ha='center', va='bottom', fontsize=10, fontweight='bold')
+                ax.text(bar.get_x() + bar.get_width() / 2.,
+                       height + ymax * 0.025,
+                       text, ha='center', va='bottom',
+                       fontsize=9.5, fontweight='bold',
+                       color=COLORS['text_primary'])
 
-            # 设置图表
-            ax.set_xlabel('场景', fontsize=12)
-            ax.set_ylabel(metric_labels.get(metric, metric), fontsize=12)
-            ax.set_title(metric_labels.get(metric, metric), fontsize=13, fontweight='bold')
+            ax.set_xlabel('场景', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+            ax.set_ylabel(metric_labels.get(metric, metric),
+                         fontsize=PLOT_STYLE['label_size'], labelpad=8)
+            ax.set_title(metric_labels.get(metric, metric),
+                        fontsize=PLOT_STYLE['title_size'] - 1,
+                        fontweight=PLOT_STYLE['title_weight'], pad=10)
             ax.set_xticks(range(len(scenarios)))
-            ax.set_xticklabels(scenario_names, rotation=15, ha='right', fontsize=10)
-            ax.grid(True, alpha=0.3, axis='y', linestyle='-', color=COLORS['grid'])
-            ax.set_facecolor(COLORS['background'])
+            ax.set_xticklabels(scenario_names, rotation=18, ha='right',
+                              fontsize=PLOT_STYLE['tick_size'])
+            ax.set_ylim(0, ymax)
+            self._style_axes(ax)
+            ax.grid(axis='x', visible=False)
 
-            # 设置y轴从0开始
-            ax.set_ylim(0, max(values) * 1.15 if max(values) > 0 else 1)
-
-        fig.suptitle('三种模型场景对比', fontsize=16, fontweight='bold', y=1.02)
+        fig.suptitle('模型场景对比', fontsize=PLOT_STYLE['title_size'] + 1,
+                     fontweight=PLOT_STYLE['title_weight'], y=1.03)
         plt.tight_layout()
 
         filename = "scenario_comparison.png"
@@ -455,73 +512,76 @@ class ExperimentVisualizer:
         Returns:
             保存的文件路径。
         """
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        fig, axes = plt.subplots(1, 3, figsize=(15.5, 5.4))
 
-        # 1. 适应度箱线图
+        labels = [sc['name'] for sc in scenarios]
+        colors = [COLORS.get(sc['model_type'], '#6B7280') for sc in scenarios]
+
+        def _style_boxplot(bp, fill_colors):
+            for patch, c in zip(bp['boxes'], fill_colors):
+                patch.set_facecolor(c)
+                patch.set_alpha(0.78)
+                patch.set_edgecolor('#374151')
+                patch.set_linewidth(1.1)
+            for median in bp['medians']:
+                median.set_color('#111827')
+                median.set_linewidth(1.6)
+            for whisker in bp['whiskers']:
+                whisker.set_color('#374151')
+                whisker.set_linewidth(1.1)
+                whisker.set_linestyle('--')
+            for cap in bp['caps']:
+                cap.set_color('#374151')
+                cap.set_linewidth(1.1)
+            for flier in bp['fliers']:
+                flier.set(marker='o', markerfacecolor='#F87171',
+                         markersize=5, alpha=0.7, markeredgecolor='white',
+                         markeredgewidth=0.6)
+
         ax1 = axes[0]
-        fitness_data = []
-        labels = []
-        colors = []
+        fitness_data = [[r.best_fitness for r in sc['results']] for sc in scenarios]
+        bp1 = ax1.boxplot(fitness_data, tick_labels=labels, patch_artist=True,
+                          medianprops={'linewidth': 1.6}, widths=0.62)
+        _style_boxplot(bp1, colors)
+        ax1.set_ylabel('适应度值', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+        ax1.set_title('适应度分布', fontsize=PLOT_STYLE['title_size'] - 1,
+                     fontweight=PLOT_STYLE['title_weight'], pad=10)
+        ax1.tick_params(axis='x', rotation=18, labelsize=PLOT_STYLE['tick_size'])
+        self._style_axes(ax1)
+        ax1.grid(axis='x', visible=False)
 
-        for sc in scenarios:
-            fitnesses = [r.best_fitness for r in sc['results']]
-            fitness_data.append(fitnesses)
-            labels.append(sc['name'])
-            colors.append(COLORS.get(sc['model_type'], '#666666'))
-
-        bp1 = ax1.boxplot(fitness_data, tick_labels=labels, patch_artist=True)
-        for patch, color in zip(bp1['boxes'], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-
-        ax1.set_ylabel('适应度值', fontsize=12)
-        ax1.set_title('适应度分布', fontsize=13, fontweight='bold')
-        ax1.grid(True, alpha=0.3, axis='y', linestyle='-', color=COLORS['grid'])
-        ax1.tick_params(axis='x', rotation=15)
-
-        # 2. 耗时箱线图
         ax2 = axes[1]
-        time_data = []
+        time_data = [[r.elapsed_seconds for r in sc['results']] for sc in scenarios]
+        bp2 = ax2.boxplot(time_data, tick_labels=labels, patch_artist=True,
+                          medianprops={'linewidth': 1.6}, widths=0.62)
+        _style_boxplot(bp2, colors)
+        ax2.set_ylabel('耗时 (秒)', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+        ax2.set_title('求解耗时分布', fontsize=PLOT_STYLE['title_size'] - 1,
+                     fontweight=PLOT_STYLE['title_weight'], pad=10)
+        ax2.tick_params(axis='x', rotation=18, labelsize=PLOT_STYLE['tick_size'])
+        self._style_axes(ax2)
+        ax2.grid(axis='x', visible=False)
 
-        for sc in scenarios:
-            times = [r.elapsed_seconds for r in sc['results']]
-            time_data.append(times)
-
-        bp2 = ax2.boxplot(time_data, tick_labels=labels, patch_artist=True)
-        for patch, color in zip(bp2['boxes'], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-
-        ax2.set_ylabel('耗时(秒)', fontsize=12)
-        ax2.set_title('求解耗时分布', fontsize=13, fontweight='bold')
-        ax2.grid(True, alpha=0.3, axis='y', linestyle='-', color=COLORS['grid'])
-        ax2.tick_params(axis='x', rotation=15)
-
-        # 3. 约束违背箱线图
         ax3 = axes[2]
         violation_data = []
-
         for sc in scenarios:
             violations = []
             for r in sc['results']:
                 vio = r.extra.get('total_violation', 0.0)
-                if r.best_fitness > 0:
-                    violations.append(vio / r.best_fitness * 100)
-                else:
-                    violations.append(0.0)
+                violations.append(vio / r.best_fitness * 100 if r.best_fitness > 0 else 0.0)
             violation_data.append(violations)
+        bp3 = ax3.boxplot(violation_data, tick_labels=labels, patch_artist=True,
+                          medianprops={'linewidth': 1.6}, widths=0.62)
+        _style_boxplot(bp3, colors)
+        ax3.set_ylabel('约束违背率 (%)', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+        ax3.set_title('约束违背分布', fontsize=PLOT_STYLE['title_size'] - 1,
+                     fontweight=PLOT_STYLE['title_weight'], pad=10)
+        ax3.tick_params(axis='x', rotation=18, labelsize=PLOT_STYLE['tick_size'])
+        self._style_axes(ax3)
+        ax3.grid(axis='x', visible=False)
 
-        bp3 = ax3.boxplot(violation_data, tick_labels=labels, patch_artist=True)
-        for patch, color in zip(bp3['boxes'], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-
-        ax3.set_ylabel('约束违背率(%)', fontsize=12)
-        ax3.set_title('约束违背分布', fontsize=13, fontweight='bold')
-        ax3.grid(True, alpha=0.3, axis='y', linestyle='-', color=COLORS['grid'])
-        ax3.tick_params(axis='x', rotation=15)
-
-        fig.suptitle('多次运行指标统计', fontsize=16, fontweight='bold', y=1.02)
+        fig.suptitle('多次运行指标统计', fontsize=PLOT_STYLE['title_size'] + 1,
+                     fontweight=PLOT_STYLE['title_weight'], y=1.03)
         plt.tight_layout()
 
         filename = "metrics_boxplot.png"
@@ -633,105 +693,132 @@ class ExperimentVisualizer:
         Returns:
             保存的文件路径。
         """
-        fig, ax = plt.subplots(figsize=self.figsize)
+        fig, ax = plt.subplots(figsize=(self.figsize[0] + 1, self.figsize[1] + 0.5))
 
-        # 提取位置信息
-        uav_positions = np.array([u.start_pos[:2] for u in uavs])  # 只取经纬度
+        uav_positions = np.array([u.start_pos[:2] for u in uavs])
         target_positions = np.array([t.position[:2] for t in targets])
 
-        # 绘制 UAV 位置
-        ax.scatter(uav_positions[:, 0], uav_positions[:, 1],
-                  c=COLORS['balanced'], s=200, marker='^',
-                  label='UAV', zorder=5, edgecolors='white', linewidth=2)
+        all_x = np.concatenate([uav_positions[:, 0], target_positions[:, 0]])
+        all_y = np.concatenate([uav_positions[:, 1], target_positions[:, 1]])
+        margin_x = (all_x.max() - all_x.min()) * 0.12 if len(all_x) > 1 else 0.01
+        margin_y = (all_y.max() - all_y.min()) * 0.12 if len(all_y) > 1 else 0.01
+        ax.set_xlim(all_x.min() - margin_x, all_x.max() + margin_x)
+        ax.set_ylim(all_y.min() - margin_y, all_y.max() + margin_y)
 
-        # 绘制目标位置
-        ax.scatter(target_positions[:, 0], target_positions[:, 1],
-                  c=COLORS['best'], s=200, marker='o',
-                  label='目标', zorder=5, edgecolors='white', linewidth=2)
-
-        # 添加编号标签
-        for i, (x, y) in enumerate(uav_positions):
-            ax.annotate(f'U{i}', (x, y), textcoords="offset points",
-                       xytext=(0, 15), ha='center', fontsize=10, fontweight='bold',
-                       color=COLORS['balanced'])
-
-        for i, (x, y) in enumerate(target_positions):
-            ax.annotate(f'T{i}', (x, y), textcoords="offset points",
-                       xytext=(0, 15), ha='center', fontsize=10, fontweight='bold',
-                       color=COLORS['best'])
-
-        # 绘制分配连线（SRP 模型按 UAV 分组绘制巡游路线）
-        # 判断是否 SRP（同一 UAV 出现多次）
         uav_ids_in_assignment = [a[0] for a in assignment]
         is_srp = len(uav_ids_in_assignment) > len(set(uav_ids_in_assignment))
 
         if is_srp:
-            # SRP 模型：按 UAV 分组绘制巡游路线
             routes: dict[int, list[int]] = {}
             for uav_id, target_id in assignment:
                 routes.setdefault(uav_id, []).append(target_id)
+            n_routes = max(len(routes), 1)
+            try:
+                cmap = plt.colormaps['tab10'].resampled(n_routes)
+            except (AttributeError, KeyError):
+                cmap = plt.cm.get_cmap('tab10', n_routes)
+            route_colors = [cmap(i) for i in range(n_routes)]
 
-            route_colors = plt.cm.Set1(np.linspace(0, 1, max(len(routes), 1)))
             for idx, (uav_id, tgt_list) in enumerate(routes.items()):
-                color = route_colors[idx % len(route_colors)]
-                # UAV → 第一个目标
+                color = route_colors[idx % n_routes]
                 if uav_id < len(uavs) and tgt_list:
                     uav_pos = uavs[uav_id].start_pos[:2]
-                    first_tgt_pos = targets[tgt_list[0]].position[:2]
-                    ax.annotate('', xy=first_tgt_pos, xytext=uav_pos,
-                               arrowprops=dict(arrowstyle='->', color=color,
-                                              lw=2.5, connectionstyle='arc3,rad=0.1'))
-                    # 目标 → 目标
-                    for i in range(len(tgt_list) - 1):
-                        t1_pos = targets[tgt_list[i]].position[:2]
-                        t2_pos = targets[tgt_list[i+1]].position[:2]
-                        ax.annotate('', xy=t2_pos, xytext=t1_pos,
-                                   arrowprops=dict(arrowstyle='->', color=color,
-                                                  lw=2.0, connectionstyle='arc3,rad=0.1',
-                                                  linestyle='--'))
+                    pts_x = [uav_pos[0]] + [targets[t].position[0] for t in tgt_list]
+                    pts_y = [uav_pos[1]] + [targets[t].position[1] for t in tgt_list]
+                    ax.plot(pts_x, pts_y, color=color, linewidth=2.2, alpha=0.8,
+                           linestyle='-', zorder=3)
+                    for i in range(len(pts_x) - 1):
+                        dx = pts_x[i+1] - pts_x[i]
+                        dy = pts_y[i+1] - pts_y[i]
+                        ax.annotate('', xy=(pts_x[i+1], pts_y[i+1]),
+                                   xytext=(pts_x[i], pts_y[i]),
+                                   arrowprops=dict(arrowstyle='-|>', color=color,
+                                                  lw=1.8, shrinkA=10, shrinkB=10))
         else:
-            # balanced/overloaded：逐条绘制分配箭头
-            for uav_id, target_id in assignment:
+            n_assign = len([a for a in assignment if a[0] < len(uavs) and a[1] < len(targets)])
+            try:
+                cmap = plt.colormaps['viridis'].resampled(max(n_assign, 1))
+            except (AttributeError, KeyError):
+                cmap = plt.cm.get_cmap('viridis', max(n_assign, 1))
+            for idx, (uav_id, target_id) in enumerate(assignment):
                 if uav_id < len(uavs) and target_id < len(targets):
                     uav_pos = uavs[uav_id].start_pos[:2]
                     target_pos = targets[target_id].position[:2]
-
-                    cost_text = ""
+                    color = cmap(idx % max(n_assign, 1))
+                    ax.annotate('', xy=target_pos, xytext=uav_pos,
+                               arrowprops=dict(arrowstyle='-|>', color=color,
+                                              lw=1.8, alpha=0.85,
+                                              shrinkA=12, shrinkB=12,
+                                              connectionstyle='arc3,rad=0.08'),
+                               zorder=3)
                     if cost_matrix is not None and uav_id < cost_matrix.shape[0] and target_id < cost_matrix.shape[1]:
                         cost = cost_matrix[uav_id, target_id]
-                        cost_text = f' ({cost:.0f})'
+                        mid_x = (uav_pos[0] + target_pos[0]) / 2
+                        mid_y = (uav_pos[1] + target_pos[1]) / 2
+                        ax.annotate(f'{cost/1000:.1f}km', (mid_x, mid_y),
+                                   fontsize=8, ha='center', va='center',
+                                   color=COLORS['text_primary'],
+                                   bbox=dict(boxstyle='round,pad=0.3',
+                                            facecolor='#FEF3C7',
+                                            edgecolor='#F59E0B',
+                                            linewidth=0.7, alpha=0.95),
+                                   zorder=7)
 
-                    ax.annotate('', xy=target_pos, xytext=uav_pos,
-                               arrowprops=dict(arrowstyle='->', color='gray',
-                                              lw=1.5, connectionstyle='arc3,rad=0.1'))
+        ax.scatter(uav_positions[:, 0], uav_positions[:, 1],
+                  c=COLORS['uav'], s=260, marker='^',
+                  label='UAV 起飞点', zorder=6,
+                  edgecolors='white', linewidth=2.2)
 
-                    mid_x = (uav_pos[0] + target_pos[0]) / 2
-                    mid_y = (uav_pos[1] + target_pos[1]) / 2
-                    if cost_text:
-                        ax.annotate(cost_text, (mid_x, mid_y), fontsize=8,
-                                   ha='center', va='center',
-                                   bbox=dict(boxstyle='round,pad=0.2', facecolor='yellow', alpha=0.7))
+        ax.scatter(target_positions[:, 0], target_positions[:, 1],
+                  c=COLORS['target'], s=220, marker='o',
+                  label='目标点', zorder=6,
+                  edgecolors='white', linewidth=2.2)
 
-        # 设置图表
-        ax.set_xlabel('经度', fontsize=12)
-        ax.set_ylabel('纬度', fontsize=12)
+        for i, (x, y) in enumerate(uav_positions):
+            ax.annotate(f'U{uavs[i].id}', (x, y), textcoords="offset points",
+                       xytext=(0, 16), ha='center',
+                       fontsize=9.5, fontweight='bold',
+                       color=COLORS['uav'],
+                       bbox=dict(boxstyle='round,pad=0.25',
+                                facecolor='white', edgecolor=COLORS['uav'],
+                                linewidth=0.8, alpha=0.92),
+                       zorder=8)
+
+        for i, (x, y) in enumerate(target_positions):
+            ax.annotate(f'T{targets[i].id}', (x, y), textcoords="offset points",
+                       xytext=(0, -20), ha='center',
+                       fontsize=9.5, fontweight='bold',
+                       color=COLORS['target'],
+                       bbox=dict(boxstyle='round,pad=0.25',
+                                facecolor='white', edgecolor=COLORS['target'],
+                                linewidth=0.8, alpha=0.92),
+                       zorder=8)
+
+        ax.set_xlabel('经度 (°)', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+        ax.set_ylabel('纬度 (°)', fontsize=PLOT_STYLE['label_size'], labelpad=8)
         title = 'UAV-目标分配方案'
         if scenario_name:
-            title += f' - {scenario_name}'
-        ax.set_title(title, fontsize=14, fontweight='bold')
+            title += f' · {scenario_name}'
+        ax.set_title(title, fontsize=PLOT_STYLE['title_size'],
+                     fontweight=PLOT_STYLE['title_weight'], pad=14)
 
-        ax.legend(loc='upper right', fontsize=11)
-        ax.grid(True, alpha=0.3, linestyle='-', color=COLORS['grid'])
-        ax.set_facecolor(COLORS['background'])
+        self._style_axes(ax)
+        ax.set_aspect('equal', adjustable='box')
+        ax.legend(loc='upper right', fontsize=PLOT_STYLE['legend_size'],
+                  fancybox=True, framealpha=0.95)
 
-        # 添加分配统计
         n_assignments = len(assignment)
         total_cost = sum(cost_matrix[u, t] for u, t in assignment
                         if cost_matrix is not None and u < cost_matrix.shape[0] and t < cost_matrix.shape[1]) if cost_matrix is not None else 0
 
-        stats_text = f'分配数: {n_assignments}\n总代价: {total_cost:.0f}' if total_cost > 0 else f'分配数: {n_assignments}'
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
-               verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        stats_text = (f'UAV: {len(uavs)}  |  Target: {len(targets)}  |  '
+                     f'分配数: {n_assignments}'
+                     + (f'  |  总代价: {total_cost/1000:.1f} km' if total_cost > 0 else ''))
+        ax.text(0.5, -0.12, stats_text, transform=ax.transAxes,
+                fontsize=PLOT_STYLE['annotation_size'], ha='center', va='top',
+                color=COLORS['text_secondary'],
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='#FEF3C7',
+                         edgecolor='#FCD34D', linewidth=0.8, alpha=0.92))
 
         filename = f"assignment_{_sanitize_filename(scenario_name)}.png"
         return self._save_figure(fig, filename)
@@ -744,17 +831,17 @@ class ExperimentVisualizer:
         assignment: list[tuple[int, int]],
         scenario_name: str = "",
         cost_matrix: np.ndarray | None = None,
-        elev_exaggerate: float = 1.5,
+        elev_exaggerate: float = 2.0,
         view_elev: float = 35,
         view_azim: float = -60,
-        crop_margin_deg: float = 0.015,
-        smooth_sigma_px: float = 2.5,
-        grid_size: int = 180,
+        crop_margin_deg: float = 0.025,
+        smooth_sigma_px: float = 1.8,
+        grid_size: int = 400,
     ) -> Path:
-        """在 DEM 地形上三维可视化分配方案。
+        """在二维 DEM 地形上可视化分配方案。
 
-        将 UAV 起飞点、目标点、分配连线叠加到 DEM 三维表面上,
-        直观展示任务的空间分布和分配关系。
+        使用等高线填充 + 山体阴影渲染作为底图，叠加 UAV 起飞点、
+        目标点与分配连线，清晰展示 N=M 平衡指派的空间关系。
 
         Args:
             dem_terrain: DEMTerrain 实例。
@@ -763,9 +850,9 @@ class ExperimentVisualizer:
             assignment: 分配方案 [(uav_id, target_id), ...]。
             scenario_name: 场景名称。
             cost_matrix: 代价矩阵(可选,显示代价值)。
-            elev_exaggerate: 高程夸张系数(默认 1.5 倍)。
-            view_elev: 俯仰角(度)。
-            view_azim: 方位角(度)。
+            elev_exaggerate: （保留，2D 中用于山体阴影计算）。
+            view_elev: （保留，参数兼容）。
+            view_azim: （保留，参数兼容）。
             crop_margin_deg: 任务点范围外扩的裁剪边距(度)。
             smooth_sigma_px: 高斯平滑核(像素)。
             grid_size: 降采样后的目标网格尺寸。
@@ -773,15 +860,13 @@ class ExperimentVisualizer:
         Returns:
             保存的文件路径。
         """
-        fig = plt.figure(figsize=(14, 10))
-        ax = fig.add_subplot(111, projection='3d')
+        fig, ax = plt.subplots(figsize=(13, 10))
 
-        # ── 提取 DEM 数据 ──
+        # ── 提取并裁剪 DEM ──
         elevation = dem_terrain.elevation.astype(float)
-        bounds = dem_terrain.bounds  # (left, bottom, right, top)
+        bounds = dem_terrain.bounds
         left, bottom, right, top = bounds
 
-        # 裁剪到任务点范围（聚焦任务区域，去掉无关边角）
         lons = [u.start_pos[0] for u in uavs] + [t.position[0] for t in targets]
         lats = [u.start_pos[1] for u in uavs] + [t.position[1] for t in targets]
         if lons and lats:
@@ -799,7 +884,6 @@ class ExperimentVisualizer:
         row1 = min(h - 1, int((top - c_bottom) / (top - bottom) * (h - 1)))
         elev = elevation[row0:row1 + 1, col0:col1 + 1]
 
-        # 填平 NaN + 高斯平滑 + 块均值降采样（消除针状/锯齿）
         elev = _fill_nan(elev)
         if smooth_sigma_px > 0:
             elev = _smooth2d(elev, smooth_sigma_px)
@@ -807,154 +891,222 @@ class ExperimentVisualizer:
 
         rows, cols = elev.shape
         xs_deg = np.linspace(c_left, c_right, cols)
-        ys_deg = np.linspace(c_top, c_bottom, rows)  # 上→下
+        ys_deg = np.linspace(c_bottom, c_top, rows)  # 下→上，与绘图方向一致
         xx_deg, yy_deg = np.meshgrid(xs_deg, ys_deg)
 
-        # 经纬度转平面米(参考点取裁剪区域中心)
+        # 反经纬度 → 米制平面（UTM-like）
         from utils.utils_dmde.coord_transform import WGS84Transformer
         ref_lon = (c_left + c_right) / 2
         ref_lat = (c_top + c_bottom) / 2
         transformer = WGS84Transformer.from_lonlat(ref_lon, ref_lat)
-
         xx_m, yy_m = transformer.to_xy_batch(xx_deg, yy_deg)
 
-        # 高程夸张
-        zz = elev * elev_exaggerate
-
-        # ── 绘制 DEM 表面（光照渲染 + 平滑表面）──
+        # ── 山体阴影底图 ──
         from matplotlib.colors import LightSource
         ls = LightSource(azdeg=315, altdeg=45)
         dx_m = float(np.abs(xx_m[0, 1] - xx_m[0, 0])) if cols > 1 else 1.0
         dy_m = float(np.abs(yy_m[1, 0] - yy_m[0, 0])) if rows > 1 else 1.0
-        norm = plt.Normalize(float(elev.min()), float(elev.max()))
-        facecolors = ls.shade(
-            elev, cmap=plt.cm.terrain, norm=norm,
-            blend_mode='soft', vert_exag=1.0, dx=dx_m, dy=dy_m,
+        norm_elev = plt.Normalize(float(elev.min()), float(elev.max()))
+        shaded = ls.shade(
+            elev, cmap=plt.cm.terrain, norm=norm_elev,
+            blend_mode='soft', vert_exag=elev_exaggerate,
+            dx=dx_m, dy=dy_m,
+        )
+        ax.imshow(
+            shaded,
+            extent=(xx_m.min(), xx_m.max(), yy_m.min(), yy_m.max()),
+            origin='lower',
+            aspect='equal',
+            zorder=1,
         )
 
-        ax.plot_surface(
-            xx_m, yy_m, zz,
-            facecolors=facecolors,
-            alpha=1.0,
-            rstride=1, cstride=1,
-            shade=False,
-            antialiased=True,
-            linewidth=0,
-        )
+        # ── 叠加等高线 ──
+        try:
+            n_levels = 14
+            levels = np.linspace(float(elev.min()), float(elev.max()), n_levels)
+            ax.contour(xx_m, yy_m, elev,
+                      levels=levels[::2],
+                      colors='#1F2937',
+                      linewidths=0.35,
+                      alpha=0.42,
+                      zorder=2)
+        except Exception:
+            pass
 
-        # ── 绘制 UAV 和 Target ──
-        uav_positions_xy = []
-        uav_positions_z = []
+        # ── 颜色条（高程）──
+        from matplotlib.cm import ScalarMappable
+        sm = ScalarMappable(norm=norm_elev, cmap=plt.cm.terrain)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, shrink=0.82, pad=0.02)
+        cbar.set_label('高程 (m)', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+        cbar.ax.tick_params(labelsize=PLOT_STYLE['tick_size'])
+        cbar.outline.set_linewidth(0.7)
+
+        # ── UAV / Target 坐标转换 ──
+        uav_xy = []
         for u in uavs:
             x, y = transformer.to_xy(u.start_pos[0], u.start_pos[1])
-            z = u.start_pos[2] * elev_exaggerate
-            uav_positions_xy.append((x, y))
-            uav_positions_z.append(z)
-            ax.scatter(
-                [x], [y], [z],
-                c=COLORS['balanced'], s=150, marker='^',
-                edgecolors='white', linewidth=1.5, depthshade=False,
-                zorder=10,
-            )
-            ax.text(
-                x, y, z + 800 * elev_exaggerate,
-                f'U{u.id}', fontsize=8, fontweight='bold',
-                color=COLORS['balanced'], ha='center',
-            )
-
-        target_positions_xy = []
-        target_positions_z = []
+            uav_xy.append((x, y))
+        tgt_xy = []
         for t in targets:
             x, y = transformer.to_xy(t.position[0], t.position[1])
-            z = t.position[2] * elev_exaggerate
-            target_positions_xy.append((x, y))
-            target_positions_z.append(z)
-            ax.scatter(
-                [x], [y], [z],
-                c=COLORS['best'], s=150, marker='o',
-                edgecolors='white', linewidth=1.5, depthshade=False,
-                zorder=10,
-            )
-            ax.text(
-                x, y, z + 800 * elev_exaggerate,
-                f'T{t.id}', fontsize=8, fontweight='bold',
-                color=COLORS['best'], ha='center',
-            )
+            tgt_xy.append((x, y))
 
-        # ── 绘制分配连线 ──
-        for uav_id, target_id in assignment:
+        uav_color = COLORS['uav']
+        target_color = COLORS['target']
+        line_colors = [
+            '#2563EB', '#DC2626', '#059669', '#D97706',
+            '#7C3AED', '#DB2777', '#0891B2', '#4F46E5',
+        ]
+
+        # ── 绘制分配连线（带轻微弧线）──
+        for idx, (uav_id, target_id) in enumerate(assignment):
             if uav_id < len(uavs) and target_id < len(targets):
-                ux, uy = uav_positions_xy[uav_id]
-                uz = uav_positions_z[uav_id]
-                tx, ty = target_positions_xy[target_id]
-                tz = target_positions_z[target_id]
+                ux, uy = uav_xy[uav_id]
+                tx, ty = tgt_xy[target_id]
+                lc = line_colors[idx % len(line_colors)]
 
-                # 绘制三维弧线(中间抬高)
-                n_arc = 20
+                # 轻微弧线（垂直于连线方向偏移一点）
+                n_arc = 40
                 arc_ts = np.linspace(0, 1, n_arc)
                 arc_x = ux + (tx - ux) * arc_ts
                 arc_y = uy + (ty - uy) * arc_ts
-                arc_z = uz + (tz - uz) * arc_ts
-                # 弧线中间抬高
-                arc_lift = np.sin(arc_ts * np.pi) * max(abs(tz - uz), 500) * 0.3
-                arc_z += arc_lift
+
+                dx_vec = tx - ux
+                dy_vec = ty - uy
+                len_vec = np.sqrt(dx_vec ** 2 + dy_vec ** 2) + 1e-9
+                nx = -dy_vec / len_vec
+                ny = dx_vec / len_vec
+                lift = np.sin(arc_ts * np.pi) * len_vec * 0.06
+                arc_x = arc_x + nx * lift
+                arc_y = arc_y + ny * lift
 
                 ax.plot(
-                    arc_x, arc_y, arc_z,
-                    color='gray', linewidth=1.2, alpha=0.7,
+                    arc_x, arc_y,
+                    color='white', linewidth=4.6, alpha=0.7,
                     linestyle='-', zorder=5,
                 )
+                ax.plot(
+                    arc_x, arc_y,
+                    color=lc, linewidth=2.4, alpha=0.96,
+                    linestyle='-', zorder=6,
+                )
 
-                # 连线中点标明代价值
+                # 箭头
+                mid_t = 0.58
+                ax.annotate(
+                    '', xy=(tx, ty), xytext=(ux, uy),
+                    arrowprops=dict(
+                        arrowstyle='-|>', color=lc, lw=2.0,
+                        shrinkA=13, shrinkB=13, alpha=0.96,
+                    ),
+                    zorder=7,
+                )
+
+                # 代价值
                 if cost_matrix is not None and uav_id < cost_matrix.shape[0] and target_id < cost_matrix.shape[1]:
                     mid_idx = n_arc // 2
                     cost_val = cost_matrix[uav_id, target_id]
-                    ax.text(
-                        arc_x[mid_idx], arc_y[mid_idx], arc_z[mid_idx] + 300 * elev_exaggerate,
-                        f'{cost_val/1000:.1f}km',
-                        fontsize=6, color='#333333', ha='center',
-                        bbox=dict(boxstyle='round,pad=0.15', facecolor='yellow', alpha=0.7, edgecolor='none'),
+                    ax.annotate(
+                        f'{cost_val/1000:.1f} km',
+                        xy=(arc_x[mid_idx], arc_y[mid_idx]),
+                        xytext=(0, 11), textcoords='offset points',
+                        fontsize=8.8, color=COLORS['text_primary'],
+                        ha='center', va='bottom', fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='#FFFBEB',
+                                 edgecolor=lc, linewidth=0.9, alpha=0.97),
+                        zorder=20,
                     )
 
-        # ── 设置视角和标签 ──
-        ax.view_init(elev=view_elev, azim=view_azim)
-        ax.set_xlabel('东向 (m)', fontsize=11, labelpad=10)
-        ax.set_ylabel('北向 (m)', fontsize=11, labelpad=10)
-        ax.set_zlabel(f'高程 ×{elev_exaggerate:g} (m)', fontsize=11, labelpad=10)
+        # ── 绘制 UAV 起飞点 ──
+        ux_list = [p[0] for p in uav_xy]
+        uy_list = [p[1] for p in uav_xy]
+        ax.scatter(
+            ux_list, uy_list,
+            c=uav_color, s=380, marker='^',
+            edgecolors='white', linewidth=2.6,
+            zorder=30,
+        )
+        for i, (x, y) in enumerate(uav_xy):
+            ax.annotate(
+                f'U{uavs[i].id}',
+                xy=(x, y), xytext=(0, 22), textcoords='offset points',
+                fontsize=10.5, fontweight='bold', color=uav_color,
+                ha='center', va='bottom',
+                bbox=dict(boxstyle='round,pad=0.28', facecolor='white',
+                         edgecolor=uav_color, linewidth=1.1, alpha=0.98),
+                zorder=40,
+            )
 
-        title = 'DEM 地形 + UAV-目标分配方案'
+        # ── 绘制 Target 目标点 ──
+        tx_list = [p[0] for p in tgt_xy]
+        ty_list = [p[1] for p in tgt_xy]
+        ax.scatter(
+            tx_list, ty_list,
+            c=target_color, s=360, marker='o',
+            edgecolors='white', linewidth=2.6,
+            zorder=30,
+        )
+        for i, (x, y) in enumerate(tgt_xy):
+            ax.annotate(
+                f'T{targets[i].id}',
+                xy=(x, y), xytext=(0, -26), textcoords='offset points',
+                fontsize=10.5, fontweight='bold', color=target_color,
+                ha='center', va='top',
+                bbox=dict(boxstyle='round,pad=0.28', facecolor='white',
+                         edgecolor=target_color, linewidth=1.1, alpha=0.98),
+                zorder=40,
+            )
+
+        # ── 坐标轴与标题 ──
+        ax.set_xlabel('东向 (m)', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+        ax.set_ylabel('北向 (m)', fontsize=PLOT_STYLE['label_size'], labelpad=8)
+        ax.set_aspect('equal', adjustable='box')
+        self._style_axes(ax)
+        ax.grid(True, linestyle='--', alpha=0.35, linewidth=0.5, color='#9CA3AF')
+
+        title = 'DEM 地形分配方案（二维）'
         if scenario_name:
-            title += f' - {scenario_name}'
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+            title += f' · {scenario_name}'
+        ax.set_title(title, fontsize=PLOT_STYLE['title_size'] + 1,
+                     fontweight=PLOT_STYLE['title_weight'], pad=14)
 
-        # 统计信息
+        # ── 统计信息 ──
         total_cost = 0
         for uav_id, target_id in assignment:
             if cost_matrix is not None and uav_id < cost_matrix.shape[0] and target_id < cost_matrix.shape[1]:
                 total_cost += cost_matrix[uav_id, target_id]
 
         stats_text = (
-            f'UAV: {len(uavs)} | Target: {len(targets)} | '
-            f'分配: {len(assignment)} | 总代价: {total_cost/1000:.1f}km'
+            f'UAV: {len(uavs)}   |   Target: {len(targets)}   |   '
+            f'分配: {len(assignment)}   |   总代价: {total_cost/1000:.1f} km'
         )
-        ax.text2D(
-            0.02, 0.02, stats_text,
-            transform=ax.transAxes, fontsize=9,
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+        ax.text(
+            0.5, -0.08, stats_text,
+            transform=ax.transAxes, fontsize=PLOT_STYLE['annotation_size'],
+            ha='center', va='top', color=COLORS['text_secondary'],
+            bbox=dict(boxstyle='round,pad=0.5', facecolor='#FEF3C7',
+                     edgecolor='#FCD34D', linewidth=0.8, alpha=0.95),
+            zorder=50,
         )
 
-        # 手动图例(3D 不支持 ax.legend)
+        # ── 图例 ──
         from matplotlib.lines import Line2D
         legend_elements = [
-            Line2D([0], [0], marker='^', color='w', markerfacecolor=COLORS['balanced'],
-                   markersize=10, label='UAV'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor=COLORS['best'],
-                   markersize=10, label='Target'),
-            Line2D([0], [0], color='gray', linewidth=1.5, label='分配连线'),
+            Line2D([0], [0], marker='^', color='w', markerfacecolor=uav_color,
+                   markeredgecolor='white', markeredgewidth=1.6,
+                   markersize=12, label='UAV 起飞点'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor=target_color,
+                   markeredgecolor='white', markeredgewidth=1.6,
+                   markersize=11, label='目标点'),
+            Line2D([0], [0], color=line_colors[0], linewidth=2.4, label='分配路线'),
         ]
-        ax.legend(handles=legend_elements, loc='upper right', fontsize=9)
+        ax.legend(handles=legend_elements, loc='upper left',
+                  fontsize=PLOT_STYLE['legend_size'],
+                  fancybox=True, framealpha=0.96,
+                  edgecolor='#D1D5DB', borderpad=0.9)
 
-        plt.tight_layout()
+        plt.tight_layout(pad=1.2)
         filename = f"dem3d_{_sanitize_filename(scenario_name)}.png"
         return self._save_figure(fig, filename)
 
@@ -977,19 +1129,16 @@ class ExperimentVisualizer:
         """
         saved_files = []
 
-        # 1. 收敛曲线
         for sc in scenarios:
             filepath = self.plot_convergence(
                 sc['results'],
                 scenario_name=sc['name']
             )
             saved_files.append(filepath)
-            print(f"  ✓ 收敛曲线已保存: {filepath.name}")
+            print(f"  [OK] 收敛曲线已保存: {filepath.name}")
 
-        # 2. 代价矩阵热力图
         for sc in scenarios:
             if 'cost_matrix' in sc:
-                # 获取最优分配方案用于高亮
                 best_result = sc['results'][sc['metrics'].best_run_idx]
                 filepath = self.plot_cost_matrix(
                     sc['cost_matrix'],
@@ -997,22 +1146,19 @@ class ExperimentVisualizer:
                     highlight_assignment=best_result.best_assignment
                 )
                 saved_files.append(filepath)
-                print(f"  ✓ 代价矩阵已保存: {filepath.name}")
+                print(f"  [OK] 代价矩阵已保存: {filepath.name}")
 
-        # 3. 场景对比图（仅当存在多个场景时才有对比意义）
         if len(scenarios) >= 2:
             filepath = self.plot_scenario_comparison(scenarios)
             saved_files.append(filepath)
-            print(f"  ✓ 场景对比已保存: {filepath.name}")
+            print(f"  [OK] 场景对比已保存: {filepath.name}")
         else:
-            print("  ⏭ 场景对比图已跳过（仅 1 个场景，无需对比）")
+            print("  [--] 场景对比图已跳过（仅 1 个场景，无需对比）")
 
-        # 4. 箱线图
         filepath = self.plot_metrics_boxplot(scenarios)
         saved_files.append(filepath)
-        print(f"  ✓ 指标箱线图已保存: {filepath.name}")
+        print(f"  [OK] 指标箱线图已保存: {filepath.name}")
 
-        # 5. 分配方案可视化（如果提供了位置信息）
         if uavs_dict and targets_dict:
             for sc in scenarios:
                 name = sc['name']
@@ -1026,9 +1172,8 @@ class ExperimentVisualizer:
                         cost_matrix=sc.get('cost_matrix')
                     )
                     saved_files.append(filepath)
-                    print(f"  ✓ 分配方案已保存: {filepath.name}")
+                    print(f"  [OK] 分配方案已保存: {filepath.name}")
 
-        # 6. DEM 三维分配可视化
         if dem_terrain is not None and uavs_dict and targets_dict:
             for sc in scenarios:
                 name = sc['name']
@@ -1043,11 +1188,10 @@ class ExperimentVisualizer:
                         cost_matrix=sc.get('cost_matrix'),
                     )
                     saved_files.append(filepath)
-                    print(f"  ✓ DEM 三维图已保存: {filepath.name}")
+                    print(f"  [OK] DEM 三维图已保存: {filepath.name}")
 
-        # 7. 统计表格（CSV + Markdown）
         for table_file in self.export_statistics_tables(scenarios):
-            print(f"  ✓ 统计表格已保存: {table_file.name}")
+            print(f"  [OK] 统计表格已保存: {table_file.name}")
 
         return saved_files
 

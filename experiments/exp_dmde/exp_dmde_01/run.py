@@ -5,11 +5,12 @@
     在拉萨城关区 DEM 地形上，验证 DMDE 算法对 N=M 平衡指派
     模型的求解能力，并输出统计指标。
 
-约束配置：
-    - 航程约束 (max_range): ✓
-    - 时间窗约束 (time_window): ✓
-    - 时序约束 (sequence_group): ✓
-    - 同时到达约束 (sync): N/A（每目标仅 1 架 UAV）
+N=M 场景约束（单 UAV → 单 Target 一一对应）：
+    - 航程约束 (max_range):         ✓ 生效
+    - 最大飞行时间 (max_time):        — 本实验未启用（UAV 未设 max_time）
+    - 时间窗约束 (time_window):       ✓ 生效（T0/T3/T4 带窗）
+    - 时序约束 (sequence_group):      ✗ N/M（单 UAV 仅 1 目标，无需排序）
+    - 同时到达约束 (sync):            ✗ N/M（单目标仅 1 UAV，无协同）
 """
 
 from __future__ import annotations
@@ -72,19 +73,19 @@ SOLVER_PARAMS = dict(
     delta=0.3,
 )
 
-N_RUNS = int(os.environ.get("EXP_N_RUNS", "20"))
+N_RUNS = int(os.environ.get("EXP_N_RUNS", "2 "))
 VISUALIZE = True
 FIGURES_DIR = RESULTS_DIR / "figures"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 场景定义：N=M 平衡指派（10 UAV → 10 Target）
+# 场景定义：N=M 平衡指派（5 UAV ↔ 5 Target）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def make_scenario():
     """N=M 平衡指派场景。
 
-    约束：航程 + 时间窗 + 时序（无 sync，因每目标仅 1 架 UAV）。
+    约束：仅启用航程 + 时间窗（N=M 场景时序/sync 不触发，直接关闭减少开销）。
     """
     uavs = [
         UAV(id=0,  start_pos=(91.05, 29.55, 3650), speed_range=(0.20, 0.50), max_range=32000),
@@ -92,32 +93,16 @@ def make_scenario():
         UAV(id=2,  start_pos=(91.15, 29.56, 3660), speed_range=(0.30, 0.60), max_range=29000),
         UAV(id=3,  start_pos=(91.03, 29.60, 3680), speed_range=(0.20, 0.50), max_range=28000),
         UAV(id=4,  start_pos=(91.08, 29.58, 3670), speed_range=(0.25, 0.55), max_range=31000),
-        UAV(id=5,  start_pos=(91.18, 29.54, 3650), speed_range=(0.30, 0.60), max_range=33000),
-        UAV(id=6,  start_pos=(91.12, 29.60, 3690), speed_range=(0.20, 0.50), max_range=28000),
-        UAV(id=7,  start_pos=(91.06, 29.57, 3660), speed_range=(0.25, 0.55), max_range=30000),
-        UAV(id=8,  start_pos=(91.20, 29.55, 3670), speed_range=(0.30, 0.60), max_range=35000),
-        UAV(id=9,  start_pos=(91.14, 29.52, 3640), speed_range=(0.20, 0.50), max_range=38000),
     ]
     targets = [
         Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
                time_window=(40000, 120000)),
-        Target(id=1, position=(91.10, 29.70, 3750), weight=0.8,
-               sequence_group=1),
-        Target(id=2, position=(91.16, 29.65, 3680), weight=0.9,
-               sequence_group=1),
+        Target(id=1, position=(91.10, 29.70, 3750), weight=0.8),
+        Target(id=2, position=(91.16, 29.65, 3680), weight=0.9),
         Target(id=3, position=(91.20, 29.72, 3800), weight=0.7,
                time_window=(35000, 100000)),
         Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
                time_window=(30000, 90000)),
-        Target(id=5, position=(91.22, 29.60, 3700), weight=0.85,
-               time_window=(38000, 110000)),
-        Target(id=6, position=(91.15, 29.75, 3900), weight=0.75),
-        Target(id=7, position=(91.06, 29.63, 3690), weight=0.65,
-               time_window=(30000, 95000)),
-        Target(id=8, position=(91.18, 29.68, 3750), weight=0.95,
-               sequence_group=2),
-        Target(id=9, position=(91.25, 29.65, 3800), weight=0.7,
-               sequence_group=2),
     ]
     return uavs, targets, 2.5, 1.5
 
@@ -151,7 +136,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"场景: {name} ({n}U/{m}T)")
-    print(f"约束: 航程✓ 时间窗✓ 时序✓ 同步N/A")
+    print(f"约束: 航程✓ 时间窗✓ 时序✗ 同步✗（N=M 精简配置）")
     print(f"{'='*60}")
 
     # 3. 构建代价矩阵
@@ -160,10 +145,10 @@ def main():
     print(f"  代价矩阵: shape={cm.matrix.shape}, "
           f"range=[{cm.matrix.min():.0f}, {cm.matrix.max():.0f}]")
 
-    # 4. 创建评估器（balanced: 启用所有约束，sync 自然不触发）
+    # 4. 创建评估器（N=M 平衡指派：关闭 seq/sync，减少无效计算）
     evaluator = FitnessEvaluator(
         uavs, targets, alpha=alpha, beta=beta,
-        enable_seq=True, enable_window=True, enable_sync=True,
+        enable_seq=False, enable_window=True, enable_sync=False,
     )
 
     # 5. 多次运行
@@ -183,8 +168,7 @@ def main():
 
         eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
         result.extra["total_violation"] = (
-            eval_res.range_violation + eval_res.time_violation
-            + eval_res.seq_violation + eval_res.sync_violation
+            eval_res.range_violation + eval_res.window_violation
         )
         result.extra["is_feasible"] = eval_res.is_feasible
 

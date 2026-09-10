@@ -99,7 +99,7 @@ def main() -> None:
     viz = ExperimentVisualizer(output_dir=args.out)
     saved_files = viz.plot_all(scenarios, uavs_dict, targets_dict, dem_terrain=dem)
 
-    print(f"\n✅ 共生成 {len(saved_files)} 张图表")
+    print(f"\n[OK] 共生成 {len(saved_files)} 张图表")
     print(f"   图表输出目录: {args.out}")
     print(f"   本次绘图总耗时: {time.time() - t_start:.2f}s（未运行求解器）")
     for p in saved_files:
