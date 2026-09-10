@@ -1,0 +1,24 @@
+# LLM 增强 DMDE 实验配置
+llm:
+  api_base: "https://api.openai.com/v1"   # OpenAI-compatible endpoint
+  model: "gpt-4o"                           # Model name
+  temperature: 0.7
+  max_tokens: 512
+  timeout: 30                               # Seconds
+
+algorithm:
+  llm_interval: 50                          # Call LLM every p generations
+  max_history_generations: 10               # Trajectory lookback window
+  enable_llm: true                          # Toggle for ablation studies
+  feature_set:                              # Features to report to LLM
+    - population_diversity
+    - gene_variance
+    - best_fitness_stagnation
+    - convergence_speed
+    - feasible_ratio
+    - constraint_violation_distribution
+  available_operators:                      # Operators LLM can choose from
+    - "DE/rand/1"
+    - "DE/best/2"
+    - "DE/current-to-pbest/1"
+    - "DE/rand/2"
