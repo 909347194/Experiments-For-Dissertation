@@ -205,8 +205,22 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             decision = pop_init_module.inject(state)
             self._record_decision(0, "population_init", decision, state)
 
+            # Apply population changes from LLM init module
+            if state.extra.get("llm_init_applied") and state.extra.get("llm_init_n_modified", 0) > 0:
+                population = list(state.population)  # Copy back modified population
+                # Re-evaluate modified individuals (marked with inf fitness)
+                for i, ind in enumerate(population):
+                    if ind.fitness == float("inf"):
+                        ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
+                    if ind.fitness < population[best_idx].fitness:
+                        best_idx = i
+                best_individual = population[best_idx].copy()
+                cost_history = [best_individual.fitness]
+
             if cfg.verbose and decision:
-                print(f"  [LLM PopInit] {decision.get('init_strategy', 'N/A')}")
+                strategy = decision.get("init_strategy", "N/A")
+                n_mod = state.extra.get("llm_init_n_modified", 0)
+                print(f"  [LLM PopInit] {strategy} (modified {n_mod} individuals)")
 
         # LLM 决策状态缓存
         llm_strategy = "default"

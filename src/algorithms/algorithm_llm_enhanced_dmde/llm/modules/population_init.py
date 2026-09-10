@@ -124,11 +124,204 @@ class LLMPopulationInitModule(BaseLLMModule):
         }
 
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
-        # 种群初始化模块的 apply 是在 solver 中特殊处理的
-        # 这里只记录决策，实际应用在 solver 的初始化阶段
-        state.extra["llm_init_strategy"] = decision.get("init_strategy", "random")
-        state.extra["llm_init_temperature"] = decision.get("temperature")
+        """Apply LLM decision by modifying part of the population.
+
+        Strategies:
+            "greedy"  — replace individuals with greedy-constructed ones
+            "diverse" — perturb existing individuals to increase diversity
+            "hybrid"  — 50/50 mix of greedy and diverse
+            "random"  — no change
+        """
+        strategy = decision.get("init_strategy", "random")
+        temperature = decision.get("temperature")
+
+        if state.population is None or state.cost_matrix is None:
+            return state
+
+        if strategy == "random":
+            state.extra["llm_init_applied"] = "random"
+            state.extra["llm_init_n_modified"] = 0
+            return state
+
+        rng = np.random.default_rng()
+        cm = state.cost_matrix
+        pop = state.population
+        n_uavs = state.n_uavs
+        n_targets = state.n_targets
+
+        # Determine how many individuals to modify (30% of population)
+        n_modify = max(1, int(len(pop) * 0.3))
+        indices_to_modify = rng.choice(len(pop), size=n_modify, replace=False)
+
+        for idx in indices_to_modify:
+            if strategy == "greedy" or (strategy == "hybrid" and rng.random() < 0.5):
+                ind = self._build_greedy_individual(cm, n_uavs, n_targets, state.model_type, rng)
+            else:
+                ind = self._perturb_individual(pop[idx], cm, n_uavs, n_targets, state.model_type, rng)
+
+            ind.fitness = float("inf")  # Force re-evaluation
+            pop[idx] = ind
+
+        state.extra["llm_init_applied"] = strategy
+        state.extra["llm_init_n_modified"] = n_modify
+        state.extra["llm_init_temperature"] = temperature
+
         return state
+
+    # ---- Helper: greedy individual construction ----
+
+    def _build_greedy_individual(
+        self,
+        cm: np.ndarray,
+        n_uavs: int,
+        n_targets: int,
+        model_type: str,
+        rng: np.random.Generator,
+    ) -> "Individual":
+        """Build one individual using a greedy nearest-cost assignment.
+
+        Follows the same encoding rules as encoder.py:
+            - balanced  (N==M): Rule 3.1 — one-to-one, no repeats
+            - overloaded (N>M): Rule 3.2 — each target at least once
+            - srp       (N<M): Rule 3.3 — UAVs visit multiple targets
+        """
+        from ...representation.encoder import Gene, Individual
+
+        if model_type == "balanced":
+            return self._greedy_balanced(cm, n_uavs, rng)
+        elif model_type == "overloaded":
+            return self._greedy_overloaded(cm, n_uavs, n_targets, rng)
+        else:
+            return self._greedy_srp(cm, n_uavs, n_targets, rng)
+
+    def _greedy_balanced(self, cm, n, rng):
+        """Rule 3.1: greedy one-to-one assignment (hungarian-lite)."""
+        from ...representation.encoder import Gene, Individual
+
+        available_targets = set(range(n))
+        genes = []
+        for uav_id in range(n):
+            # Pick lowest-cost available target for this UAV
+            best_tgt = min(available_targets, key=lambda t: cm[uav_id, t])
+            genes.append(Gene(uav_id=uav_id, target_id=best_tgt, cost=float(cm[uav_id, best_tgt])))
+            available_targets.remove(best_tgt)
+        return Individual(genes=genes, model_type="balanced")
+
+    def _greedy_overloaded(self, cm, n_uavs, n_targets, rng):
+        """Rule 3.2: each target at least once, extra UAVs go to cheapest target."""
+        from ...representation.encoder import Gene, Individual
+
+        # Shuffle UAV order to introduce some randomness
+        uav_order = list(range(n_uavs))
+        rng.shuffle(uav_order)
+
+        genes = []
+        assigned_targets = set()
+
+        # First pass: assign each target to its cheapest available UAV
+        for tgt_id in range(n_targets):
+            # Find unassigned UAV with lowest cost to this target
+            candidates = [u for u in uav_order if u not in {g.uav_id for g in genes}]
+            if candidates:
+                best_uav = min(candidates, key=lambda u: cm[u, tgt_id])
+                genes.append(Gene(uav_id=best_uav, target_id=tgt_id, cost=float(cm[best_uav, tgt_id])))
+                assigned_targets.add(tgt_id)
+
+        # Second pass: remaining UAVs → cheapest target
+        used_uavs = {g.uav_id for g in genes}
+        for uav_id in uav_order:
+            if uav_id not in used_uavs:
+                tgt_id = int(rng.integers(0, n_targets))
+                genes.append(Gene(uav_id=uav_id, target_id=tgt_id, cost=float(cm[uav_id, tgt_id])))
+
+        return Individual(genes=genes, model_type="overloaded")
+
+    def _greedy_srp(self, cm, n_uavs, n_targets, rng):
+        """Rule 3.3: greedy nearest-neighbor tour construction."""
+        from ...representation.encoder import Gene, Individual
+
+        # Distribute targets to UAVs: each UAV gets at least one
+        targets = list(range(n_targets))
+        rng.shuffle(targets)
+
+        uav_groups: dict[int, list[int]] = {}
+        for i in range(n_uavs):
+            uav_groups[i] = [targets[i]]
+        for i in range(n_uavs, n_targets):
+            uav_id = int(rng.integers(0, n_uavs))
+            uav_groups[uav_id].append(targets[i])
+
+        # Build genes with greedy tour ordering
+        genes = []
+        for uav_id, tgt_list in uav_groups.items():
+            ordered = self._order_targets_greedy(cm, n_uavs, uav_id, tgt_list)
+            for seq, tgt_id in enumerate(ordered):
+                if seq == 0:
+                    cost = float(cm[uav_id, tgt_id])
+                    genes.append(Gene(uav_id=uav_id, target_id=tgt_id, cost=cost))
+                else:
+                    prev_tgt = ordered[seq - 1]
+                    cost = float(cm[n_uavs + prev_tgt, tgt_id])
+                    genes.append(Gene(uav_id=-1, target_id=tgt_id, cost=cost))
+
+        return Individual(genes=genes, model_type="srp")
+
+    @staticmethod
+    def _order_targets_greedy(cm, n_uavs, uav_id, targets):
+        """Nearest-neighbor ordering for SRP tours."""
+        if len(targets) <= 1:
+            return targets
+        remaining = set(targets)
+        first = min(remaining, key=lambda t: cm[uav_id, t])
+        ordered = [first]
+        remaining.remove(first)
+        while remaining:
+            last = ordered[-1]
+            next_tgt = min(remaining, key=lambda t: cm[n_uavs + last, t])
+            ordered.append(next_tgt)
+            remaining.remove(next_tgt)
+        return ordered
+
+    # ---- Helper: perturb individual for diversity ----
+
+    def _perturb_individual(
+        self,
+        individual: "Individual",
+        cm: np.ndarray,
+        n_uavs: int,
+        n_targets: int,
+        model_type: str,
+        rng: np.random.Generator,
+    ) -> "Individual":
+        """Create a perturbed copy: swap some target assignments randomly."""
+        from ...representation.encoder import Gene, Individual
+
+        new_ind = individual.copy()
+        genes = list(new_ind.genes)
+        n_swap = max(1, len(genes) // 3)
+
+        for _ in range(n_swap):
+            i, j = rng.choice(len(genes), size=2, replace=False)
+            gi, gj = genes[i], genes[j]
+
+            if model_type == "balanced":
+                # Swap targets between two UAVs
+                genes[i] = Gene(uav_id=gi.uav_id, target_id=gj.target_id, cost=float(cm[gi.uav_id, gj.target_id]))
+                genes[j] = Gene(uav_id=gj.uav_id, target_id=gi.target_id, cost=float(cm[gj.uav_id, gi.target_id]))
+            elif model_type == "overloaded":
+                # Reassign one gene to a random target
+                new_tgt = int(rng.integers(0, n_targets))
+                genes[i] = Gene(uav_id=gi.uav_id, target_id=new_tgt, cost=float(cm[gi.uav_id, new_tgt]))
+            else:
+                # SRP: swap two genes' targets (preserve tour structure)
+                if gi.uav_id >= 0 and gj.uav_id >= 0:
+                    # Both are UAV→Target genes
+                    genes[i] = Gene(uav_id=gi.uav_id, target_id=gj.target_id, cost=float(cm[gi.uav_id, gj.target_id]))
+                    genes[j] = Gene(uav_id=gj.uav_id, target_id=gi.target_id, cost=float(cm[gj.uav_id, gi.target_id]))
+                # Skip if either is a tour gene (uav_id=-1) to avoid breaking tour structure
+
+        new_ind.genes = genes
+        return new_ind
 
     @staticmethod
     def _extract_json(text: str) -> str | None:
