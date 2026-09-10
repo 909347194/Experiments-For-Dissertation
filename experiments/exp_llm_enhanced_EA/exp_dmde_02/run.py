@@ -297,16 +297,21 @@ def main():
             delta=SOLVER_PARAMS["delta"],
             seed=run_idx,
             verbose=False,
-            llm_config=llm_config,
+            llm_config_path=str(CONFIG_DIR / "llm_config.yaml"),
+            modules={
+                "population_init": {"enabled": False},
+                "operator_selection": {"enabled": True, "interval": 50},
+                "cr_control": {"enabled": True, "interval": 10},
+            },
         )
         solver = LLMEnhancedDMDESolver(cfg)
         result = solver.solve(cm.matrix, n, m, fitness_evaluator=evaluator)
         results.append(result)
 
         # ★ 收集 LLM 决策日志
-        if hasattr(solver, "llm_decisions"):
-            all_llm_decisions[run_idx] = solver.llm_decisions
-            print(f"  Run {run_idx}: LLM 调用 {len(solver.llm_decisions)} 次")
+        if solver.trajectory is not None:
+            all_llm_decisions[run_idx] = solver.trajectory.get_llm_decisions()
+            print(f"  Run {run_idx}: LLM 调用 {len(solver.trajectory.get_llm_decisions())} 次")
 
         eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
         result.extra["total_violation"] = eval_res.total_violation

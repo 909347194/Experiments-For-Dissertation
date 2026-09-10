@@ -1,174 +1,171 @@
 # -*- coding: utf-8 -*-
-"""llm_enhanced_dmde_solver.py — LLM 增强离散映射差分求解器
+"""llm_enhanced_dmde_solver.py — 模块化 LLM 增强 DMDE 求解器
 
-职责：
-    实现 DMDE 算法的完整求解流程，并在每隔 p 代注入 LLM 决策，
-    动态调整算子策略、交叉率、温度、灭绝参数等。
-
-对应论文扩展：
-    在算法 3.1（DMDE）基础上，引入 LLM 驱动的自适应算子选择。
-    每隔 llm_interval 代：
-    1. 提取搜索状态特征（features/*.py）
-    2. 收集最近 p 代优化轨迹（trajectory_collector.py）
-    3. 构建决策提示（prompt_builder.py）
-    4. 调用 LLM（llm_client.py）
-    5. 解析响应（response_parser.py）
-    6. 应用 LLM 决策（更新 CR/F 策略、温度、灭绝参数）
-
-算法流程：
-    01-06: 初始化种群（encoder 生成离散三元组基因）
-    07-32: DMDE 进化迭代（与 dmde_solver.py 一致）
-        [每 llm_interval 代] 插入 LLM 决策步骤：
-        → 提取特征 → 构建提示 → 调用 LLM → 解析 → 应用决策
-    灭绝操作: GMR 判断（可被 LLM 决策覆盖）
+Architecture:
+    ┌─────────────────────────┐
+    │       LLM Modules       │
+    │  PopInit | OpSel | CR   │  ← 可插拔、可消融
+    └───────────┬─────────────┘
+                │ inject(state)
+                ▼
+    ┌─────────────────────────┐
+    │    DMDE Core Loop       │
+    │  Encode → Map → Mutate  │
+    │  → InvMap → Eval → Sel  │
+    └─────────────────────────┘
+                │
+                ▼
+    ┌─────────────────────────┐
+    │  OptimizationTrajectory │  ← 完整记录
+    └─────────────────────────┘
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
 from ..base.base_optimizer import BaseOptimizer, SolverResult
-from ..representation.encoder import PopulationEncoder, Individual, Gene
-from ..representation.mapper import phi
+from ..representation.encoder import PopulationEncoder, Individual
 from ..representation.inverse_mapper import inverse_phi
 from ..operators.crossover import dynamic_crossover_rate
-from ..operators.scale_factor import dynamic_scale_factor
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
 from ..features.population_features import compute_diversity, compute_gene_variance
 from ..features.convergence_features import compute_convergence_speed, detect_stagnation
 from ..features.constraint_features import compute_feasible_ratio, compute_violation_distribution
-from ..features.trajectory_collector import TrajectoryCollector
+from ..trajectory.optimization_trajectory import OptimizationTrajectory, TrajectoryEntry
+from ..llm.base_module import BaseLLMModule, ModuleState
 from ..llm.llm_client import LLMClient
-from ..llm.prompt_builder import PromptBuilder
-from ..llm.response_parser import ResponseParser, LLMDecision
 
-
-# ---------------------------------------------------------------------------
-# 配置
-# ---------------------------------------------------------------------------
 
 @dataclass
 class LLMEnhancedDMDEConfig:
-    """LLM 增强 DMDE 求解器配置。
+    """模块化 LLM 增强 DMDE 配置。
 
-    继承 DMDE 的全部参数，并新增 LLM 相关参数。
+    支持通过 modules 配置字典启用/禁用各个 LLM 模块，
+    实现灵活的消融实验。
 
     Attributes:
+        # DMDE 核心参数
         pop_size:        种群大小。
         max_generations: 最大迭代代数。
-        zeta:            动态交叉率曲率指数 ζ（默认 3）。
-        delta:           灭绝临界值 δ（默认 0.3）。
-        alpha:           时间代价缩放因子 α。
-        beta:            约束违背惩罚缩放因子 β。
-        seed:            随机种子（可选）。
-        verbose:         是否输出迭代日志。
-        log_interval:    日志输出间隔（代数）。
-        llm_interval:    调用 LLM 的间隔代数（默认 50）。
-        llm_config_path: LLM 配置文件路径（YAML 格式）。
-        enable_llm:      是否启用 LLM（关闭则退化为标准 DMDE）。
-        trajectory_window: 轨迹收集窗口大小（代数）。
-    """
+        zeta:            动态交叉率曲率指数 ζ。
+        delta:           灭绝临界值 δ。
+        seed:            随机种子。
+        verbose:         是否输出日志。
+        log_interval:    日志间隔。
 
+        # LLM 全局参数
+        llm_api_base:    LLM API 地址。
+        llm_api_key:     LLM API 密钥。
+        llm_model:       LLM 模型名。
+        llm_temperature: LLM 生成温度。
+        llm_timeout:     LLM 请求超时。
+        llm_config_path: LLM 配置文件路径（覆盖上述参数）。
+
+        # 模块配置（消融实验的核心）
+        modules: 各模块配置字典。
+            格式: {"module_name": {"enabled": bool, "interval": int, ...}}
+            可用模块名: "population_init", "operator_selection", "cr_control"
+
+        # 轨迹
+        save_trajectory: 是否保存轨迹到 extra。
+    """
     # DMDE 参数
     pop_size: int = 50
     max_generations: int = 1000
     zeta: int = 3
     delta: float = 0.3
-    alpha: float = 2.5
-    beta: float = 1.5
     seed: int | None = None
     verbose: bool = False
     log_interval: int = 100
 
-    # LLM 参数
-    llm_interval: int = 50
+    # LLM 全局参数
+    llm_api_base: str = "https://api.openai.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4"
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 1024
+    llm_timeout: int = 60
     llm_config_path: str | None = None
-    enable_llm: bool = True
-    trajectory_window: int = 10
 
+    # 模块配置
+    modules: dict[str, dict[str, Any]] = field(default_factory=lambda: {
+        "population_init": {"enabled": False, "interval": 1},
+        "operator_selection": {"enabled": True, "interval": 50},
+        "cr_control": {"enabled": True, "interval": 10},
+    })
 
-# ---------------------------------------------------------------------------
-# 主求解器
-# ---------------------------------------------------------------------------
+    # 轨迹
+    save_trajectory: bool = True
+    trajectory_window: int = 20
+
 
 class LLMEnhancedDMDESolver(BaseOptimizer):
-    """LLM 增强离散映射差分求解器。
+    """模块化 LLM 增强 DMDE 求解器。
 
-    在标准 DMDE 基础上，每隔 llm_interval 代调用 LLM，
-    根据搜索状态特征和优化轨迹动态调整算子参数。
+    主循环尽量清晰、可重复：
+    1. 初始化种群（可选 LLM 种群初始化模块）
+    2. 每代进化：
+       a. LLM CR 控制模块调整 CR/F
+       b. 标准 DMDE 进化步骤
+       c. LLM 算子选择模块决定策略
+       d. 记录轨迹
+    3. 输出结果 + 完整轨迹
 
-    使用方式::
+    消融实验示例::
 
-        solver = LLMEnhancedDMDESolver(
-            config=LLMEnhancedDMDEConfig(
-                pop_size=50,
-                max_generations=1000,
-                llm_interval=50,
-                enable_llm=True,
-            )
-        )
-        result = solver.solve(
-            cost_matrix=cm,
-            n_uavs=8,
-            n_targets=8,
-            fitness_evaluator=evaluator,
-        )
+        # Vanilla DMDE（无 LLM）
+        cfg = LLMEnhancedDMDEConfig(modules={})
+
+        # 仅 LLM 算子选择
+        cfg = LLMEnhancedDMDEConfig(modules={
+            "operator_selection": {"enabled": True, "interval": 50}
+        })
+
+        # 仅 LLM CR 控制
+        cfg = LLMEnhancedDMDEConfig(modules={
+            "cr_control": {"enabled": True, "interval": 10}
+        })
+
+        # 全部启用
+        cfg = LLMEnhancedDMDEConfig(modules={
+            "population_init": {"enabled": True},
+            "operator_selection": {"enabled": True, "interval": 50},
+            "cr_control": {"enabled": True, "interval": 10},
+        })
     """
 
     def __init__(self, config: LLMEnhancedDMDEConfig | None = None) -> None:
         self._cfg = config or LLMEnhancedDMDEConfig()
-        self._llm_client: LLMClient | None = None
-        self._prompt_builder: PromptBuilder | None = None
-        self._response_parser: ResponseParser | None = None
-        self._trajectory_collector: TrajectoryCollector | None = None
+        self._modules: list[BaseLLMModule] = []
+        self._trajectory: OptimizationTrajectory | None = None
 
     @property
     def name(self) -> str:
-        return "LLM-Enhanced-DMDE"
+        active = [m.name for m in self._modules if m.enabled]
+        if not active:
+            return "LLM-DMDE(vanilla)"
+        return f"LLM-DMDE({'+'.join(active)})"
 
-    def solve(
-        self,
-        cost_matrix: np.ndarray,
-        n_uavs: int,
-        n_targets: int,
-        **kwargs,
-    ) -> SolverResult:
-        """执行 LLM 增强 DMDE 求解。
+    @property
+    def trajectory(self) -> OptimizationTrajectory | None:
+        """获取优化轨迹（solve 之后可用）。"""
+        return self._trajectory
 
-        每隔 llm_interval 代：
-        1. 提取搜索状态特征（种群多样性、收敛速度、约束满足度等）。
-        2. 收集最近 p 代的优化轨迹。
-        3. 构建决策提示并调用 LLM。
-        4. 解析 LLM 响应，获取算子策略调整建议。
-        5. 应用 LLM 决策（调整 CR/F 策略、温度、灭绝参数等）。
-
-        Args:
-            cost_matrix: 代价矩阵。
-            n_uavs:      UAV 数量。
-            n_targets:   目标数量。
-            **kwargs:
-                fitness_evaluator: 适应度评估器（必须）。
-                uavs: UAV 列表（可选，用于评估器）。
-                targets: 目标列表（可选，用于评估器）。
-
-        Returns:
-            SolverResult 实例。
-        """
+    def solve(self, cost_matrix, n_uavs, n_targets, **kwargs) -> SolverResult:
         cfg = self._cfg
         fitness_evaluator = kwargs.get("fitness_evaluator")
-
         if fitness_evaluator is None:
             raise ValueError("fitness_evaluator must be provided.")
 
-        # 随机数生成器
         rng = np.random.default_rng(cfg.seed)
 
-        # 确定模型类型
+        # 模型类型
         if n_uavs == n_targets:
             model_type = "balanced"
         elif n_uavs > n_targets:
@@ -176,48 +173,82 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         else:
             model_type = "srp"
 
-        # 初始化 LLM 组件（如果启用）
-        if cfg.enable_llm:
-            self._init_llm_components(cfg)
+        # 初始化 LLM 模块
+        self._init_modules(cfg)
 
-        # 初始化轨迹收集器
-        self._trajectory_collector = TrajectoryCollector(
-            max_history=cfg.trajectory_window
-        )
+        # 初始化轨迹
+        self._trajectory = OptimizationTrajectory()
 
-        # ---- Step 1: 初始化种群 (算法 3.1 行 01-06) ----
+        # ---- Step 1: 种群初始化 ----
         encoder = PopulationEncoder(cost_matrix, n_uavs, n_targets)
         population = encoder.generate(cfg.pop_size, seed=cfg.seed)
 
         # 评估初始种群
         best_idx = 0
         for i, ind in enumerate(population):
-            ind.fitness = self._evaluate(
-                ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs
-            )
+            ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
             if ind.fitness < population[best_idx].fitness:
                 best_idx = i
 
         best_individual = population[best_idx].copy()
         cost_history = [best_individual.fitness]
 
-        # LLM 决策状态（可被 LLM 动态调整）
-        llm_decision = LLMDecision(
-            operator_strategy="default",
-            cr_adjustment=None,
-            temperature_adjustment=None,
-            extinction_trigger=None,
-            reasoning="",
-        )
+        # ---- LLM 种群初始化模块 (hook: after_init) ----
+        pop_init_module = self._get_module("population_init")
+        if pop_init_module and pop_init_module.enabled:
+            state = self._build_state(
+                0, cfg.max_generations, population, best_idx,
+                cost_matrix, n_uavs, n_targets, model_type,
+                cost_history, 0.5, 0.5, 1.0,
+            )
+            state.extra["pop_size"] = cfg.pop_size
+            decision = pop_init_module.inject(state)
+            self._record_decision(0, "population_init", decision, state)
+
+            if cfg.verbose and decision:
+                print(f"  [LLM PopInit] {decision.get('init_strategy', 'N/A')}")
+
+        # LLM 决策状态缓存
+        llm_strategy = "default"
+        llm_cr_offset = None
+        llm_f_offset = None
 
         t_start = time.time()
 
-        # ---- Step 2: DMDE 进化迭代 (算法 3.1 行 07-32) ----
+        # ---- Step 2: DMDE 进化迭代 ----
         for gen in range(1, cfg.max_generations + 1):
-            # 动态交叉率（可被 LLM 调整）
-            cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
-            if llm_decision.cr_adjustment is not None:
-                cr = np.clip(cr + llm_decision.cr_adjustment, 0.0, 1.0)
+
+            # ---- [Hook: before_evolve] LLM CR 控制 ----
+            cr_module = self._get_module("cr_control")
+            base_cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
+            base_f = 0.5  # 默认缩放因子
+
+            if cr_module and cr_module.enabled and gen % cr_module.interval == 0:
+                fitness_values = np.array([ind.fitness for ind in population])
+                cost_vectors = np.array([ind.cost_vector for ind in population])
+                prev_best = cost_history[-2] if len(cost_history) >= 2 else cost_history[0]
+                improvement = (prev_best - best_individual.fitness) / abs(prev_best) if abs(prev_best) > 1e-10 else 0.0
+
+                state = self._build_state(
+                    gen, cfg.max_generations, population, best_idx,
+                    cost_matrix, n_uavs, n_targets, model_type,
+                    cost_history, base_cr, base_f, 1.0 - gen / cfg.max_generations,
+                )
+                state.extra["fitness_improvement"] = improvement
+
+                decision = cr_module.inject(state)
+                self._record_decision(gen, "cr_control", decision, state)
+
+                llm_cr_offset = decision.get("cr_offset")
+                llm_f_offset = decision.get("f_offset")
+
+            # 应用 CR/F 偏移
+            cr = base_cr
+            f_scale = base_f
+            if llm_cr_offset is not None:
+                cr = float(np.clip(cr + llm_cr_offset, 0.0, 1.0))
+            if llm_f_offset is not None:
+                f_scale = float(np.clip(f_scale + llm_f_offset, 0.0, 2.0))
 
             # 提取代价值矩阵
             cost_vectors = np.array([ind.cost_vector for ind in population])
@@ -227,85 +258,96 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng
             )
 
-            # 温度：线性衰减 1.0 → 0.0（可被 LLM 调整）
+            # 温度
             temperature = 1.0 - gen / cfg.max_generations
-            if llm_decision.temperature_adjustment is not None:
-                temperature = np.clip(
-                    temperature + llm_decision.temperature_adjustment, 0.0, 1.0
-                )
 
             # 对每个个体执行反映射 + 评估 + 贪婪选择
             for i in range(cfg.pop_size):
-                # 反映射 (公式 3-7, 规则 3.4/3.5/3.6)
                 child = inverse_phi(
-                    trial_vectors[i], cost_matrix, n_uavs, n_targets,
-                    model_type, rng=rng, temperature=temperature,
+                    trial_vectors[i], cost_matrix, n_uavs, n_targets, model_type,
+                    rng=rng, temperature=temperature,
                 )
-
-                # 评估适应度
-                child.fitness = self._evaluate(
-                    child, fitness_evaluator, cost_matrix, n_uavs=n_uavs
-                )
-
-                # 贪婪选择 (算法 3.1 行 28-30)
+                child.fitness = self._evaluate(child, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
                 if child.fitness < population[i].fitness:
                     population[i] = child
                     if child.fitness < best_individual.fitness:
                         best_individual = child.copy()
                         best_idx = i
 
-            # GMR 灭绝判断 (公式 3-12)
-            # LLM 可以强制触发或禁止灭绝
-            do_extinct = should_extinct(cr, cfg.delta, rng)
-            if llm_decision.extinction_trigger is not None:
-                do_extinct = llm_decision.extinction_trigger
-
-            if do_extinct:
+            # GMR 灭绝判断
+            if should_extinct(cr, cfg.delta, rng):
                 fitness_arr = np.array([ind.fitness for ind in population])
-                new_cost_vectors, survived = apply_extinction(
+                new_cv, survived = apply_extinction(
                     fitness_arr, cost_vectors, best_idx,
                     cost_matrix, n_uavs, n_targets, model_type, rng=rng,
                 )
-                # 用新代价值重建种群
                 for i in range(cfg.pop_size):
                     if i not in survived:
                         population[i] = inverse_phi(
-                            new_cost_vectors[i], cost_matrix,
-                            n_uavs, n_targets, model_type, rng=rng,
+                            new_cv[i], cost_matrix, n_uavs, n_targets, model_type, rng=rng,
                         )
                         population[i].fitness = self._evaluate(
-                            population[i], fitness_evaluator,
-                            cost_matrix, n_uavs=n_uavs,
+                            population[i], fitness_evaluator, cost_matrix, n_uavs=n_uavs,
                         )
 
-            # 记录收敛曲线
             cost_history.append(best_individual.fitness)
 
-            # ---- LLM 决策注入 ----
-            if cfg.enable_llm and gen % cfg.llm_interval == 0:
-                llm_decision = self._inject_llm_decision(
-                    population=population,
-                    cost_history=cost_history,
-                    gen=gen,
-                    best_idx=best_idx,
-                    cost_matrix=cost_matrix,
-                    n_uavs=n_uavs,
-                    n_targets=n_targets,
-                    rng=rng,
+            # ---- [Hook: after_evolve] LLM 算子选择 ----
+            op_module = self._get_module("operator_selection")
+            if op_module and op_module.enabled and gen % op_module.interval == 0:
+                state = self._build_state(
+                    gen, cfg.max_generations, population, best_idx,
+                    cost_matrix, n_uavs, n_targets, model_type,
+                    cost_history, cr, f_scale, temperature,
                 )
+                state.extra["current_strategy"] = llm_strategy
+                state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
 
-                if cfg.verbose and llm_decision.reasoning:
-                    print(f"  [LLM @ gen {gen}] {llm_decision.reasoning[:100]}...")
+                decision = op_module.inject(state)
+                self._record_decision(gen, "operator_selection", decision, state)
+                llm_strategy = decision.get("strategy", "default")
+
+            # 记录常规轨迹点
+            if cfg.save_trajectory and gen % max(1, cfg.max_generations // 100) == 0:
+                fitness_values = np.array([ind.fitness for ind in population])
+                self._trajectory.record(TrajectoryEntry(
+                    generation=gen,
+                    strategy=llm_strategy,
+                    cr=cr,
+                    f_scale=f_scale,
+                    temperature=temperature,
+                    fitness_best=best_individual.fitness,
+                    fitness_mean=float(np.mean(fitness_values)),
+                    fitness_worst=float(np.max(fitness_values)),
+                    diversity=compute_diversity(population),
+                    gene_variance=compute_gene_variance(cost_vectors),
+                    convergence_speed=compute_convergence_speed(cost_history),
+                    stagnation_count=detect_stagnation(cost_history),
+                    feasible_ratio=compute_feasible_ratio(population),
+                ))
 
             # 日志
             if cfg.verbose and gen % cfg.log_interval == 0:
                 print(
                     f"  Gen {gen}/{cfg.max_generations}: "
-                    f"best_fitness={best_individual.fitness:.2f}, "
-                    f"CR={cr:.4f}, T={temperature:.4f}"
+                    f"best={best_individual.fitness:.2f}, "
+                    f"CR={cr:.4f}, F={f_scale:.4f}, "
+                    f"strategy={llm_strategy}"
                 )
 
         elapsed = time.time() - t_start
+
+        # 构建结果
+        extra = {
+            "model_type": model_type,
+            "pop_size": cfg.pop_size,
+            "zeta": cfg.zeta,
+            "delta": cfg.delta,
+            "active_modules": [m.name for m in self._modules if m.enabled],
+            "llm_decisions": self._trajectory.get_llm_decisions() if cfg.save_trajectory else [],
+        }
+        if cfg.save_trajectory:
+            extra["trajectory_entries"] = len(self._trajectory)
 
         return SolverResult(
             best_assignment=best_individual.assignment,
@@ -314,143 +356,100 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             total_generations=cfg.max_generations,
             elapsed_seconds=elapsed,
             solver_name=self.name,
-            extra={
-                "model_type": model_type,
-                "pop_size": cfg.pop_size,
-                "zeta": cfg.zeta,
-                "delta": cfg.delta,
-                "llm_interval": cfg.llm_interval,
-                "enable_llm": cfg.enable_llm,
-                "llm_decisions_count": gen // cfg.llm_interval if cfg.enable_llm else 0,
-            },
+            extra=extra,
         )
 
-    def _init_llm_components(self, cfg: LLMEnhancedDMDEConfig) -> None:
-        """初始化 LLM 客户端、提示构建器和响应解析器。
+    def _init_modules(self, cfg: LLMEnhancedDMDEConfig) -> None:
+        """根据配置初始化 LLM 模块。"""
+        from ..llm.modules import create_module
 
-        从 llm_config_path 加载 LLM 配置（API base、key、model 等），
-        如果配置文件不存在，使用默认值。
-
-        Args:
-            cfg: 求解器配置。
-        """
-        import yaml
-        from pathlib import Path
-
+        # 加载 LLM 配置
         llm_params = {}
-        if cfg.llm_config_path and Path(cfg.llm_config_path).exists():
-            with open(cfg.llm_config_path, "r", encoding="utf-8") as f:
-                llm_params = yaml.safe_load(f) or {}
+        if cfg.llm_config_path:
+            from pathlib import Path
+            import yaml
+            p = Path(cfg.llm_config_path)
+            if p.exists():
+                with open(p, "r", encoding="utf-8") as f:
+                    llm_params = yaml.safe_load(f) or {}
 
-        self._llm_client = LLMClient(
-            api_base=llm_params.get("api_base", "https://api.openai.com/v1"),
-            api_key=llm_params.get("api_key", ""),
-            model=llm_params.get("model", "gpt-4"),
-            temperature=llm_params.get("temperature", 0.7),
-            max_tokens=llm_params.get("max_tokens", 1024),
+        llm_client = LLMClient(
+            api_base=llm_params.get("api_base", cfg.llm_api_base),
+            api_key=llm_params.get("api_key", cfg.llm_api_key),
+            model=llm_params.get("model", cfg.llm_model),
+            temperature=llm_params.get("temperature", cfg.llm_temperature),
+            max_tokens=llm_params.get("max_tokens", cfg.llm_max_tokens),
+            timeout=llm_params.get("timeout", cfg.llm_timeout),
         )
-        self._prompt_builder = PromptBuilder()
-        self._response_parser = ResponseParser()
 
-    def _inject_llm_decision(
-        self,
-        population: list[Individual],
-        cost_history: list[float],
-        gen: int,
-        best_idx: int,
-        cost_matrix: np.ndarray,
-        n_uavs: int,
-        n_targets: int,
-        rng: np.random.Generator,
-    ) -> LLMDecision:
-        """提取特征、构建提示、调用 LLM、解析并返回决策。
+        self._modules = []
+        for module_name, module_cfg in cfg.modules.items():
+            try:
+                module = create_module(module_name, llm_client, module_cfg)
+                self._modules.append(module)
+            except ValueError as e:
+                if cfg.verbose:
+                    print(f"  [Warning] {e}")
 
-        Args:
-            population:   当前种群。
-            cost_history: 收敛曲线。
-            gen:          当前代数。
-            best_idx:     最优个体索引。
-            cost_matrix:  代价矩阵。
-            n_uavs:       UAV 数量。
-            n_targets:    目标数量。
-            rng:          随机数生成器。
+    def _get_module(self, name: str) -> BaseLLMModule | None:
+        for m in self._modules:
+            if m.name == name:
+                return m
+        return None
 
-        Returns:
-            LLMDecision 实例，包含算子策略调整建议。
-        """
-        # 1. 提取搜索状态特征
+    def _build_state(
+        self, gen, max_gen, population, best_idx,
+        cost_matrix, n_uavs, n_targets, model_type,
+        cost_history, cr, f_scale, temperature,
+    ) -> ModuleState:
         fitness_values = np.array([ind.fitness for ind in population])
         cost_vectors = np.array([ind.cost_vector for ind in population])
+        violation = compute_violation_distribution(population)
 
-        features = {
-            "generation": gen,
-            "best_fitness": population[best_idx].fitness,
-            "mean_fitness": float(np.mean(fitness_values)),
-            "diversity": compute_diversity(population),
-            "gene_variance": compute_gene_variance(cost_vectors),
-            "convergence_speed": compute_convergence_speed(cost_history),
-            "stagnation_count": detect_stagnation(cost_history),
-            "feasible_ratio": compute_feasible_ratio(population),
-            "violation_distribution": compute_violation_distribution(population),
-        }
-
-        # 2. 收集优化轨迹
-        self._trajectory_collector.record(
+        return ModuleState(
             generation=gen,
-            features=features,
-            decision=None,  # 上一次的决策
-            fitness=population[best_idx].fitness,
+            max_generations=max_gen,
+            population=population,
+            cost_vectors=cost_vectors,
+            best_idx=best_idx,
+            best_fitness=population[best_idx].fitness,
+            mean_fitness=float(np.mean(fitness_values)),
+            diversity=compute_diversity(population),
+            gene_variance=compute_gene_variance(cost_vectors),
+            convergence_speed=compute_convergence_speed(cost_history),
+            stagnation_count=detect_stagnation(cost_history),
+            feasible_ratio=compute_feasible_ratio(population),
+            violation_mean=violation.get("mean", 0.0),
+            violation_max=violation.get("max", 0.0),
+            cr=cr,
+            f_scale=f_scale,
+            temperature=temperature,
+            cost_matrix=cost_matrix,
+            n_uavs=n_uavs,
+            n_targets=n_targets,
+            model_type=model_type,
+            cost_history=list(cost_history),
         )
-        trajectory = self._trajectory_collector.get_trajectory()
 
-        # 3. 构建提示
-        available_operators = [
-            "rand/1", "best/1", "best/2", "current-to-pbest/1",
-            "rand/2", "rand-to-best/1",
-        ]
-        messages = self._prompt_builder.build_decision_prompt(
-            features=features,
-            trajectory=trajectory,
-            available_operators=available_operators,
-        )
-
-        # 4. 调用 LLM
-        try:
-            llm_output = self._llm_client.chat(messages)
-        except Exception as e:
-            # LLM 调用失败时返回默认决策（不影响 DMDE 主循环）
-            return LLMDecision(
-                operator_strategy="default",
-                cr_adjustment=None,
-                temperature_adjustment=None,
-                extinction_trigger=None,
-                reasoning=f"LLM call failed: {e}",
+    def _record_decision(self, gen, module_name, decision, state):
+        if self._trajectory and decision:
+            self._trajectory.record_llm_decision(
+                generation=gen,
+                llm_module=module_name,
+                llm_decision={k: v for k, v in decision.items() if not k.startswith("_")},
+                llm_reasoning=decision.get("_llm_reasoning", ""),
+                llm_call_duration=decision.get("_llm_call_duration", 0.0),
+                fitness_best=state.best_fitness,
+                diversity=state.diversity,
+                feasible_ratio=state.feasible_ratio,
+                convergence_speed=state.convergence_speed,
+                stagnation_count=state.stagnation_count,
             )
 
-        # 5. 解析响应
-        decision = self._response_parser.parse(llm_output)
-
-        # 6. 记录决策到轨迹
-        self._trajectory_collector.record(
-            generation=gen,
-            features=features,
-            decision=decision,
-            fitness=population[best_idx].fitness,
-        )
-
-        return decision
-
     @staticmethod
-    def _evaluate(
-        individual: Individual,
-        fitness_evaluator: Any,
-        cost_matrix: np.ndarray,
-        n_uavs: int | None = None,
-    ) -> float:
-        """评估个体适应度。"""
+    def _evaluate(individual, fitness_evaluator, cost_matrix, n_uavs=None):
         assignment = individual.assignment
         if not assignment:
-            return 1e12  # 空方案给极大惩罚
-
+            return 1e12
         result = fitness_evaluator.evaluate(assignment, cost_matrix, n_uavs=n_uavs)
         return result.fitness
