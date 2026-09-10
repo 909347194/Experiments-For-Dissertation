@@ -264,16 +264,35 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             if llm_f_offset is not None:
                 f_scale = float(np.clip(f_scale + llm_f_offset, 0.0, 2.0))
 
-            # 提取代价值矩阵
-            cost_vectors = np.array([ind.cost_vector for ind in population])
-
-            # 混合变异产生试验向量
-            trial_vectors = mutate_population(
-                cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng
-            )
-
-            # 温度
+            # 计算温度
             temperature = 1.0 - gen / cfg.max_generations
+
+            # 提取代价值矩阵和适应度
+            cost_vectors = np.array([ind.cost_vector for ind in population])
+            fitness_values = np.array([ind.fitness for ind in population])
+
+            # ---- [Hook: before_mutation] LLM 算子选择 ----
+            op_module = self._get_module("operator_selection")
+            if op_module and op_module.enabled and gen % op_module.interval == 0:
+                state = self._build_state(
+                    gen, cfg.max_generations, population, best_idx,
+                    cost_matrix, n_uavs, n_targets, model_type,
+                    cost_history, cr, f_scale, temperature,
+                )
+                state.extra["current_strategy"] = llm_strategy
+                state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
+
+                decision = op_module.inject(state)
+                self._record_decision(gen, "operator_selection", decision, state)
+                llm_strategy = decision.get("strategy", "default")
+
+            # 混合变异产生试验向量（传入 LLM 调整后的 CR/F/strategy）
+            trial_vectors = mutate_population(
+                cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng,
+                cr=cr, f_scale=f_scale,
+                strategy=llm_strategy if llm_strategy != "default" else None,
+                fitness_values=fitness_values,
+            )
 
             # 对每个个体执行反映射 + 评估 + 贪婪选择
             for i in range(cfg.pop_size):
@@ -305,21 +324,6 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                         )
 
             cost_history.append(best_individual.fitness)
-
-            # ---- [Hook: after_evolve] LLM 算子选择 ----
-            op_module = self._get_module("operator_selection")
-            if op_module and op_module.enabled and gen % op_module.interval == 0:
-                state = self._build_state(
-                    gen, cfg.max_generations, population, best_idx,
-                    cost_matrix, n_uavs, n_targets, model_type,
-                    cost_history, cr, f_scale, temperature,
-                )
-                state.extra["current_strategy"] = llm_strategy
-                state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
-
-                decision = op_module.inject(state)
-                self._record_decision(gen, "operator_selection", decision, state)
-                llm_strategy = decision.get("strategy", "default")
 
             # 记录常规轨迹点
             if cfg.save_trajectory and gen % max(1, cfg.max_generations // 100) == 0:
