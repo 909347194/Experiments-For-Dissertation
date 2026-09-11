@@ -39,7 +39,7 @@ from ..features.convergence_features import compute_convergence_speed, detect_st
 from ..features.constraint_features import compute_feasible_ratio, compute_violation_distribution
 from ..trajectory.optimization_trajectory import OptimizationTrajectory, TrajectoryEntry
 from ..llm.base_module import BaseLLMModule, ModuleState
-from ..llm.llm_client import LLMClient
+from ..llm.llm_client import create_llm_client, create_llm_client_from_config
 
 
 @dataclass
@@ -59,19 +59,14 @@ class LLMEnhancedDMDEConfig:
         verbose:         是否输出日志。
         log_interval:    日志间隔。
 
-        # LLM 全局参数
-        llm_api_base:    LLM API 地址。
-        llm_api_key:     LLM API 密钥。
-        llm_model:       LLM 模型名。
-        llm_temperature: LLM 生成温度。
-        llm_timeout:     LLM 请求超时。
-        llm_config_path: LLM 配置文件路径（覆盖上述参数）。
+        # LLM 配置
+        llm_config_path: LLM 配置文件路径（YAML 格式，含 provider/model/api_key 等）。
+                         未设置时默认使用 DeepSeek。
 
         # 模块配置（消融实验的核心）
         modules: 各模块配置字典。
             格式: {"module_name": {"enabled": bool, "interval": int, ...}}
             可用模块名: "population_init", "search_controller"
-            (旧版 "operator_selection" 和 "cr_control" 仍保留但不推荐)
 
         # 轨迹
         save_trajectory: 是否保存轨迹到 extra。
@@ -85,13 +80,7 @@ class LLMEnhancedDMDEConfig:
     verbose: bool = False
     log_interval: int = 100
 
-    # LLM 全局参数
-    llm_api_base: str = "https://api.openai.com/v1"
-    llm_api_key: str = ""
-    llm_model: str = "gpt-4"
-    llm_temperature: float = 0.7
-    llm_max_tokens: int = 1024
-    llm_timeout: int = 60
+    # LLM 配置
     llm_config_path: str | None = None
 
     # 模块配置
@@ -349,24 +338,16 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         """根据配置初始化 LLM 模块。"""
         from ..llm.modules import create_module
 
-        # 加载 LLM 配置
-        llm_params = {}
+        # 优先从配置文件加载，否则默认使用 DeepSeek
         if cfg.llm_config_path:
-            from pathlib import Path
-            import yaml
-            p = Path(cfg.llm_config_path)
-            if p.exists():
-                with open(p, "r", encoding="utf-8") as f:
-                    llm_params = yaml.safe_load(f) or {}
-
-        llm_client = LLMClient(
-            api_base=llm_params.get("api_base", cfg.llm_api_base),
-            api_key=llm_params.get("api_key", cfg.llm_api_key),
-            model=llm_params.get("model", cfg.llm_model),
-            temperature=llm_params.get("temperature", cfg.llm_temperature),
-            max_tokens=llm_params.get("max_tokens", cfg.llm_max_tokens),
-            timeout=llm_params.get("timeout", cfg.llm_timeout),
-        )
+            try:
+                llm_client = create_llm_client_from_config(cfg.llm_config_path)
+            except Exception as e:
+                if cfg.verbose:
+                    print(f"  [Warning] Failed to load LLM config: {e}")
+                llm_client = create_llm_client(provider="deepseek")
+        else:
+            llm_client = create_llm_client(provider="deepseek")
 
         self._modules = []
         for module_name, module_cfg in cfg.modules.items():

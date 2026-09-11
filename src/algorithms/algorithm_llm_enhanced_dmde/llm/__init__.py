@@ -7,11 +7,13 @@
 - modules/: 可插拔模块实现（population_init, search_controller; 旧版 operator_selection, cr_control 保留）
 """
 
-from .llm_client import LLMClient
+from .llm_client import LLMClient, create_llm_client, create_llm_client_from_config
 from .base_module import BaseLLMModule, ModuleState
 
 __all__ = [
     "LLMClient",
+    "create_llm_client",
+    "create_llm_client_from_config",
     "BaseLLMModule",
     "ModuleState",
 ]
