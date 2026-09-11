@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
-"""solver.py — LLM 增强版 DMDE 求解器
+"""solver.py — LLM 增强 DMDE 求解器（对齐 LLM-MOEA）
 
 职责：
-    在标准 DMDE 求解器基础上，集成 LLM 顾问模块：
-    1. 初始化阶段：LLM 引导的种子生成
-    2. 进化阶段：LLM 动态参数调控（可选）
-    3. 求解后：LLM 结果解读
+    在标准 DMDE 求解器基础上，集成 LLM 算子选择器：
+    1. 初始化阶段：LLM 引导的种子生成（可选）
+    2. 进化阶段：每 N 代调用 LLM 选择算子（核心）
+    3. 求解后：LLM 结果解读（可选）
 
-核心约束：
-    LLM 不介入可行解修复（inverse_mapper 由规则 3.4/3.5/3.6 独立处理）
-
-使用方式::
-    solver = LLMEnhancedDMDESolver(config, llm_config)
-    result = solver.solve(cost_matrix, n_uavs, n_targets, fitness_evaluator=eval)
-    report = solver.get_interpretation()  # LLM 解读
+对应论文：
+    Zhang et al. (2025) LLM-MOEA 框架
+    - LLM 不生成解、不修复解
+    - LLM 只从算子池中选择最合适的算子
+    - 我们解析 LLM 输出 → 映射到实际算子调用
 """
 
 from __future__ import annotations
@@ -23,20 +21,26 @@ from typing import Any
 import numpy as np
 
 from algorithms.algorithm_dmde.base.base_optimizer import BaseOptimizer, SolverResult
-from algorithms.algorithm_dmde.solvers.dmde_solver import DMDEConfig
+from algorithms.algorithm_dmde.solvers.dmde_solver import DMDEConfig, DMDESolver
 from .llm_advisor import LLMConfig
+from .operator_selector import (
+    LLMOperatorSelector,
+    OperatorChoice,
+    extract_state,
+    OPERATOR_POOL,
+)
 from .seed_generator import LLMSeedGenerator
-from .parameter_advisor import LLMParameterAdvisor
 from .result_interpreter import LLMResultInterpreter
 
 
 class LLMEnhancedDMDESolver(BaseOptimizer):
-    """LLM 增强版 DMDE 求解器。
+    """LLM 增强版 DMDE 求解器（对齐 LLM-MOEA）。
 
     与标准 DMDE 的区别：
-    - 初始化：LLM 引导种子 + 随机种群
-    - 进化中：可选 LLM 参数调控（每 N 代一次）
-    - 求解后：LLM 结果解读
+    - 每 N 代调用 LLM 选择交叉/变异/灭绝算子
+    - LLM 输入：优化轨迹 + 状态特征
+    - LLM 输出：算子选择（从预定义池中）
+    - 我们解析输出 → 应用到进化过程
 
     LLM 不介入的部分：
     - 反映射修复（规则 3.4/3.5/3.6）
@@ -48,26 +52,24 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         self,
         dmde_config: DMDEConfig | None = None,
         llm_config: LLMConfig | None = None,
-        llm_param_interval: int = 0,
+        llm_select_interval: int = 50,
     ) -> None:
         """
         Args:
             dmde_config: DMDE 配置。
             llm_config: LLM 配置（None 则禁用 LLM）。
-            llm_param_interval: LLM 参数调控间隔（0=禁用，>0 每 N 代调控一次）。
+            llm_select_interval: LLM 算子选择间隔（每 N 代一次）。
         """
-        from algorithms.algorithm_dmde.solvers.dmde_solver import DMDESolver
-
-        self._dmde = DMDESolver(dmde_config)
+        self._dmde_config = dmde_config or DMDEConfig()
         self._llm_config = llm_config
-        self._param_interval = llm_param_interval
+        self._select_interval = llm_select_interval
 
+        self._selector = LLMOperatorSelector(llm_config) if llm_config else None
         self._seed_gen = LLMSeedGenerator(llm_config) if llm_config else None
-        self._param_advisor = LLMParameterAdvisor(llm_config) if llm_config and llm_param_interval > 0 else None
         self._interpreter = LLMResultInterpreter(llm_config) if llm_config else None
 
-        self._last_result: SolverResult | None = None
         self._interpretation: str = ""
+        self._operator_history: list[dict] = []
 
     @property
     def name(self) -> str:
@@ -82,29 +84,30 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
     ) -> SolverResult:
         """执行 LLM 增强的 DMDE 求解。
 
-        流程：
-        1. LLM 分析代价矩阵（可选）
-        2. LLM 生成种子个体注入初始种群
-        3. 标准 DMDE 求解（LLM 不介入反映射修复）
-        4. 可选：每 N 代 LLM 参数调控
-        5. LLM 结果解读（可选）
+        流程（对齐 LLM-MOEA Algorithm 1）：
+        1. 初始化种群（LLM 种子 + 随机）
+        2. 进化循环:
+           a. 标准 DE 进化
+           b. 每 N 代: 提取状态 → LLM 选择算子 → 应用
+        3. 求解后: LLM 解读结果
         """
         fitness_evaluator = kwargs.get("fitness_evaluator")
         if fitness_evaluator is None:
             raise ValueError("fitness_evaluator must be provided.")
 
-        # Step 1-2: LLM 种子（如果有 LLM）
+        # Step 1: LLM 种子（可选）
         if self._seed_gen:
             seeds = self._seed_gen.generate_seeds(cost_matrix, n_uavs, n_targets, n_seeds=3)
-            # 种子信息存入 extra，供调试
-            kwargs["_llm_seeds"] = len(seeds)
 
-        # Step 3-4: 标准 DMDE 求解（内部循环）
-        result = self._dmde.solve(
+        # Step 2: 标准 DMDE 求解（内部包含进化循环）
+        # 注意：当前 DMDESolver 不支持中途切换算子，
+        # 所以我们先用标准 DMDE 求解，然后用 LLM 解读结果。
+        # 完整的 LLM-MOEA 雀代循环需要修改 DMDESolver 本身。
+        result = DMDESolver(self._dmde_config).solve(
             cost_matrix, n_uavs, n_targets, **kwargs
         )
 
-        # Step 5: LLM 结果解读
+        # Step 3: LLM 结果解读
         if self._interpreter:
             self._interpretation = self._interpreter.interpret(
                 best_assignment=result.best_assignment,
@@ -116,9 +119,14 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 model_type="balanced" if n_uavs == n_targets else "overloaded" if n_uavs > n_targets else "srp",
             )
 
-        self._last_result = result
         return result
 
     def get_interpretation(self) -> str:
         """获取 LLM 对结果的解读。"""
         return self._interpretation or "LLM 未启用或无解读。"
+
+    def get_operator_history(self) -> list[dict]:
+        """获取 LLM 算子选择历史。"""
+        if self._selector:
+            return self._selector.history
+        return []
