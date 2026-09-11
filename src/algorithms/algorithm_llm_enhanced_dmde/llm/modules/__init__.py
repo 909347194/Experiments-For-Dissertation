@@ -4,12 +4,14 @@
 from .population_init import LLMPopulationInitModule
 from .operator_selection import LLMOperatorSelectionModule
 from .cr_control import LLMCRControlModule
+from .search_controller import LLMSearchControllerModule
 
 # 模块名称 → 类的映射，用于配置驱动的模块加载
 MODULE_REGISTRY: dict[str, type] = {
     "population_init": LLMPopulationInitModule,
-    "operator_selection": LLMOperatorSelectionModule,
-    "cr_control": LLMCRControlModule,
+    "operator_selection": LLMOperatorSelectionModule,  # backward compat
+    "cr_control": LLMCRControlModule,                  # backward compat
+    "search_controller": LLMSearchControllerModule,
 }
 
 def create_module(name: str, llm_client, config: dict) -> "BaseLLMModule":
@@ -24,6 +26,7 @@ __all__ = [
     "LLMPopulationInitModule",
     "LLMOperatorSelectionModule",
     "LLMCRControlModule",
+    "LLMSearchControllerModule",
     "MODULE_REGISTRY",
     "create_module",
 ]

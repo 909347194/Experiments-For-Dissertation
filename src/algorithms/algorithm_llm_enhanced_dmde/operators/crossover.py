@@ -101,9 +101,13 @@ def hybrid_differential_population(
     cr: float,
     rng: np.random.Generator | None = None,
     strategy: str | None = None,
-    fitness_values: np.ndarray | None = None,
 ) -> np.ndarray:
     """对整个种群执行混合差分（每个个体独立 F 值）。
+
+    支持的策略：
+    - None 或 "default": 原始 CR 切换（公式 3-10）
+    - "rand/1": DE/rand/1 — x_r1 + F * (x_r2 - x_r3)
+    - "best/2": DE/best/2 — best + F * (x_r1 + x_r2 - x_r3 - x_r4)
 
     Args:
         cost_vectors:   种群代价值矩阵。
@@ -111,10 +115,8 @@ def hybrid_differential_population(
         f_values:       每个个体的缩放因子数组，shape = (pop_size,)。
         cr:             当前动态交叉率。
         rng:            随机数生成器。
-        strategy:       强制使用的变异策略。None 或 "default" 使用原始
-                        CR 切换逻辑；否则强制指定策略。大小写不敏感。
-        fitness_values: 种群适应度数组，shape = (pop_size,)。
-                        用于 current-to-pbest/1 策略选取 top-p% 个体。
+        strategy:       变异策略。None 或 "default" 使用原始 CR 切换；
+                        "rand/1" 或 "best/2" 统一应用于所有个体。
 
     Returns:
         试验向量矩阵，shape = (pop_size, gene_len)。
@@ -130,23 +132,10 @@ def hybrid_differential_population(
     pop_size, gene_len = cost_vectors.shape
     trials = np.empty_like(cost_vectors)
 
-    # 计算 top 20% 索引集合（用于 current-to-pbest/1）
-    if fitness_values is not None:
-        # 按适应度排序，取前 pbest_size 个
-        pbest_size = max(1, pop_size // 5)
-        pbest_pool = np.argsort(fitness_values)[:pbest_size]
-    else:
-        pbest_pool = None
-        pbest_size = max(1, pop_size // 5)
-
     for i in range(pop_size):
         # 根据策略选择所需不同随机个体数量
-        if strat == "rand/2":
-            n_needed = 5
-        elif strat in ("rand/1",):
+        if strat == "rand/1":
             n_needed = 3
-        elif strat in ("best/1", "current-to-pbest/1", "rand-to-best/1"):
-            n_needed = 2
         else:
             # default / best/2 / None — 都需要 4 个
             n_needed = 4
@@ -157,7 +146,6 @@ def hybrid_differential_population(
 
         f = f_values[i]
         best = cost_vectors[best_idx]
-        x_i = cost_vectors[i]
 
         if strat is None:
             # 原始 CR 切换逻辑（公式 3-10）
@@ -176,48 +164,20 @@ def hybrid_differential_population(
             trials[i] = np.where(use_rand, trial_rand, trial_best)
 
         elif strat == "rand/1":
+            # DE/rand/1 — 所有个体统一使用此策略
             r1, r2, r3 = indices[:3]
             trials[i] = cost_vectors[r1] + f * (cost_vectors[r2] - cost_vectors[r3])
 
         elif strat == "best/2":
+            # DE/best/2 — 所有个体统一使用此策略
             r1, r2, r3, r4 = indices[:4]
             trials[i] = best + f * (
                 cost_vectors[r1] + cost_vectors[r2]
                 - cost_vectors[r3] - cost_vectors[r4]
             )
 
-        elif strat == "best/1":
-            r1, r2 = indices[:2]
-            trials[i] = best + f * (cost_vectors[r1] - cost_vectors[r2])
-
-        elif strat == "current-to-pbest/1":
-            r1, r2 = indices[:2]
-            if pbest_pool is not None:
-                pbest_idx = rng.choice(pbest_pool)
-            else:
-                pbest_idx = rng.choice(pbest_size)
-            x_pbest = cost_vectors[pbest_idx]
-            trials[i] = x_i + f * (x_pbest - x_i) + f * (cost_vectors[r1] - cost_vectors[r2])
-
-        elif strat == "rand/2":
-            r1, r2, r3, r4, r5 = indices[:5]
-            trials[i] = cost_vectors[r1] + f * (
-                cost_vectors[r2] - cost_vectors[r3]
-                + cost_vectors[r4] - cost_vectors[r5]
-            )
-
-        elif strat == "rand-to-best/1":
-            r1, r2 = indices[:2]
-            trials[i] = x_i + f * (best - x_i) + f * (cost_vectors[r1] - cost_vectors[r2])
-
         else:
             # 未知策略，回退到默认 CR 切换
-            # 确保有足够的随机个体
-            if len(indices) < 4:
-                extra = rng.choice(pop_size, size=4 - len(indices), replace=False)
-                while i in extra:
-                    extra = rng.choice(pop_size, size=4 - len(indices), replace=False)
-                indices = np.concatenate([indices, extra])
             r1, r2, r3, r4 = indices[:4]
             x_r1 = cost_vectors[r1]
             x_r2 = cost_vectors[r2]

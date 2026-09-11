@@ -2,22 +2,22 @@
 """llm_enhanced_dmde_solver.py — 模块化 LLM 增强 DMDE 求解器
 
 Architecture:
-    ┌─────────────────────────┐
-    │       LLM Modules       │
-    │  PopInit | OpSel | CR   │  ← 可插拔、可消融
-    └───────────┬─────────────┘
+    ┌─────────────────────────────┐
+    │       LLM Modules           │
+    │  PopInit | SearchController  │  ← 可插拔、可消融
+    └───────────┬─────────────────┘
                 │ inject(state)
                 ▼
-    ┌─────────────────────────┐
-    │    DMDE Core Loop       │
-    │  Encode → Map → Mutate  │
-    │  → InvMap → Eval → Sel  │
-    └─────────────────────────┘
+    ┌─────────────────────────────┐
+    │      DMDE Core Loop         │
+    │  Encode → Map → Mutate      │
+    │  → InvMap → Eval → Sel      │
+    └─────────────────────────────┘
                 │
                 ▼
-    ┌─────────────────────────┐
-    │  OptimizationTrajectory │  ← 完整记录
-    └─────────────────────────┘
+    ┌─────────────────────────────┐
+    │   OptimizationTrajectory    │  ← 完整记录
+    └─────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ import numpy as np
 from ..base.base_optimizer import BaseOptimizer, SolverResult
 from ..representation.encoder import PopulationEncoder, Individual
 from ..representation.inverse_mapper import inverse_phi
-from ..operators.crossover import dynamic_crossover_rate
 from ..operators.scale_factor import dynamic_scale_factor
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
@@ -71,7 +70,8 @@ class LLMEnhancedDMDEConfig:
         # 模块配置（消融实验的核心）
         modules: 各模块配置字典。
             格式: {"module_name": {"enabled": bool, "interval": int, ...}}
-            可用模块名: "population_init", "operator_selection", "cr_control"
+            可用模块名: "population_init", "search_controller"
+            (旧版 "operator_selection" 和 "cr_control" 仍保留但不推荐)
 
         # 轨迹
         save_trajectory: 是否保存轨迹到 extra。
@@ -96,9 +96,8 @@ class LLMEnhancedDMDEConfig:
 
     # 模块配置
     modules: dict[str, dict[str, Any]] = field(default_factory=lambda: {
-        "population_init": {"enabled": False, "interval": 1},
-        "operator_selection": {"enabled": True, "interval": 50},
-        "cr_control": {"enabled": True, "interval": 10},
+        "population_init": {"enabled": False},
+        "search_controller": {"enabled": True, "interval": 50},
     })
 
     # 轨迹
@@ -123,21 +122,15 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         # Vanilla DMDE（无 LLM）
         cfg = LLMEnhancedDMDEConfig(modules={})
 
-        # 仅 LLM 算子选择
+        # 仅搜索控制器（策略 + CR 联合决策）
         cfg = LLMEnhancedDMDEConfig(modules={
-            "operator_selection": {"enabled": True, "interval": 50}
-        })
-
-        # 仅 LLM CR 控制
-        cfg = LLMEnhancedDMDEConfig(modules={
-            "cr_control": {"enabled": True, "interval": 10}
+            "search_controller": {"enabled": True, "interval": 50}
         })
 
         # 全部启用
         cfg = LLMEnhancedDMDEConfig(modules={
             "population_init": {"enabled": True},
-            "operator_selection": {"enabled": True, "interval": 50},
-            "cr_control": {"enabled": True, "interval": 10},
+            "search_controller": {"enabled": True, "interval": 50},
         })
     """
 
@@ -224,46 +217,36 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 print(f"  [LLM PopInit] {strategy} (modified {n_mod} individuals)")
 
         # LLM 决策状态缓存
-        llm_strategy = "default"
-        llm_cr_offset = None
-        llm_f_offset = None
+        llm_strategy = None   # None = 使用原始 DMDE 默认行为
+        llm_cr = 0.5          # 默认 CR（LLM 调用前）
 
         t_start = time.time()
 
         # ---- Step 2: DMDE 进化迭代 ----
         for gen in range(1, cfg.max_generations + 1):
 
-            # ---- [Hook: before_evolve] LLM CR 控制 ----
-            cr_module = self._get_module("cr_control")
-            base_cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
-            base_f = dynamic_scale_factor(base_cr, rng)  # 公式 3-11: CR-F 耦合
-
-            if cr_module and cr_module.enabled and gen % cr_module.interval == 0:
-                fitness_values = np.array([ind.fitness for ind in population])
-                cost_vectors = np.array([ind.cost_vector for ind in population])
-                prev_best = cost_history[-2] if len(cost_history) >= 2 else cost_history[0]
-                improvement = (prev_best - best_individual.fitness) / abs(prev_best) if abs(prev_best) > 1e-10 else 0.0
-
+            # ---- [Hook: before_mutation] 统一搜索控制器 ----
+            sc_module = self._get_module("search_controller")
+            if sc_module and sc_module.enabled and gen % sc_module.interval == 0:
                 state = self._build_state(
                     gen, cfg.max_generations, population, best_idx,
                     cost_matrix, n_uavs, n_targets, model_type,
-                    cost_history, base_cr, base_f, 1.0 - gen / cfg.max_generations,
+                    cost_history, llm_cr, 0.0, 1.0 - gen / cfg.max_generations,
                 )
-                state.extra["fitness_improvement"] = improvement
+                state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
 
-                decision = cr_module.inject(state)
-                self._record_decision(gen, "cr_control", decision, state)
+                decision = sc_module.inject(state)
+                self._record_decision(gen, "search_controller", decision, state)
 
-                llm_cr_offset = decision.get("cr_offset")
-                llm_f_offset = decision.get("f_offset")
+                if decision and "cr" in decision:
+                    llm_cr = decision["cr"]
+                if decision and "strategy" in decision:
+                    llm_strategy = decision["strategy"]
 
-            # 应用 CR/F 偏移
-            cr = base_cr
-            f_scale = base_f
-            if llm_cr_offset is not None:
-                cr = float(np.clip(cr + llm_cr_offset, 0.0, 1.0))
-            if llm_f_offset is not None:
-                f_scale = float(np.clip(f_scale + llm_f_offset, 0.0, 2.0))
+            # 使用 LLM 确定的 CR（不再是公式 3-9）
+            cr = llm_cr
+            # 根据 LLM 的 CR 通过公式 3-11 计算 F
+            f_scale = dynamic_scale_factor(cr, rng)
 
             # 计算温度
             temperature = 1.0 - gen / cfg.max_generations
@@ -272,27 +255,11 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             cost_vectors = np.array([ind.cost_vector for ind in population])
             fitness_values = np.array([ind.fitness for ind in population])
 
-            # ---- [Hook: before_mutation] LLM 算子选择 ----
-            op_module = self._get_module("operator_selection")
-            if op_module and op_module.enabled and gen % op_module.interval == 0:
-                state = self._build_state(
-                    gen, cfg.max_generations, population, best_idx,
-                    cost_matrix, n_uavs, n_targets, model_type,
-                    cost_history, cr, f_scale, temperature,
-                )
-                state.extra["current_strategy"] = llm_strategy
-                state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
-
-                decision = op_module.inject(state)
-                self._record_decision(gen, "operator_selection", decision, state)
-                llm_strategy = decision.get("strategy", "default")
-
-            # 混合变异产生试验向量（传入 LLM 调整后的 CR/F/strategy）
+            # 混合变异产生试验向量
             trial_vectors = mutate_population(
                 cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng,
                 cr=cr, f_scale=f_scale,
-                strategy=llm_strategy if llm_strategy != "default" else None,
-                fitness_values=fitness_values,
+                strategy=llm_strategy,
             )
 
             # 对每个个体执行反映射 + 评估 + 贪婪选择
