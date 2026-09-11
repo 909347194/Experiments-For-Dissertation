@@ -31,6 +31,7 @@ import numpy as np
 from ..base.base_optimizer import BaseOptimizer, SolverResult
 from ..representation.encoder import PopulationEncoder, Individual
 from ..representation.inverse_mapper import inverse_phi
+from ..operators.crossover import dynamic_crossover_rate
 from ..operators.scale_factor import dynamic_scale_factor
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
@@ -207,7 +208,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
         # LLM 决策状态缓存
         llm_strategy = None   # None = 使用原始 DMDE 默认行为
-        llm_cr = 0.5          # 默认 CR（LLM 调用前）
+        llm_cr = None          # None = 未被 LLM 设置，使用公式 3-9
+        has_active_sc = any(
+            m.name == "search_controller" and m.enabled for m in self._modules
+        )
 
         t_start = time.time()
 
@@ -220,7 +224,8 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 state = self._build_state(
                     gen, cfg.max_generations, population, best_idx,
                     cost_matrix, n_uavs, n_targets, model_type,
-                    cost_history, llm_cr, 0.0, 1.0 - gen / cfg.max_generations,
+                    cost_history, dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta),
+                    0.0, 1.0 - gen / cfg.max_generations,
                 )
                 state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
 
@@ -232,9 +237,12 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 if decision and "strategy" in decision:
                     llm_strategy = decision["strategy"]
 
-            # 使用 LLM 确定的 CR（不再是公式 3-9）
-            cr = llm_cr
-            # 根据 LLM 的 CR 通过公式 3-11 计算 F
+            # CR 来源：LLM 决定 or 公式 3-9（与纯 DMDE 一致）
+            if llm_cr is not None and has_active_sc:
+                cr = llm_cr
+            else:
+                cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
+            # F 从 CR 按公式 3-11 计算
             f_scale = dynamic_scale_factor(cr, rng)
 
             # 计算温度
