@@ -1,0 +1,9 @@
+# LLM 增强 DMDE 实验配置
+# solver._init_modules() 读取顶层 key: api_base, model, temperature, ...
+
+api_base: "https://api.openai.com/v1"   # OpenAI-compatible endpoint
+api_key: ""                              # API key (set via env or here)
+model: "gpt-4o"                          # Model name
+temperature: 0.7
+max_tokens: 512
+timeout: 30                              # Seconds
