@@ -43,7 +43,7 @@ from environments.environment_dmde import (
 )
 from models.model_dmde import UAV, Target, CostMatrixBuilder, FitnessEvaluator
 from algorithms.algorithm_dmde import DMDESolver, DMDEConfig
-from algorithms.algorithm_llm_enhanced_dmde import LLMEnhancedDMDESolver, LLMConfig
+from algorithms.algorithm_llm_enhanced_dmde import LLMEnhancedDMDESolver, LLMEnhancedDMDEConfig
 from utils.utils_dmde.metrics import compute_metrics, format_metrics
 from visualization.visualizer import ExperimentVisualizer
 from data_store import save_experiment
@@ -66,16 +66,16 @@ SOLVER_PARAMS = dict(pop_size=50, max_generations=500, zeta=3, delta=0.3)
 N_RUNS = int(os.environ.get("EXP_N_RUNS", "3"))
 
 
-def get_llm_config() -> LLMConfig | None:
+def get_llm_config() -> dict | None:
     """从环境变量读取 LLM 配置。"""
     api_key = os.environ.get("LLM_API_KEY", "")
     if not api_key:
         return None
-    return LLMConfig(
-        api_key=api_key,
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
-        model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
-    )
+    return {
+        "llm_api_key": api_key,
+        "llm_api_base": os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
+        "llm_model": os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+    }
 
 
 def make_scenario():
@@ -127,7 +127,7 @@ def main():
     print("=" * 60)
     print("exp_llm_enhanced_dmde: LLM 增强 DMDE 实验")
     print("=" * 60)
-    print(f"  LLM: {'✓ ' + llm_config.model if has_llm else '✗ 未配置'}")
+    print(f"  LLM: {'✓ ' + llm_config.get('llm_model', '') if has_llm else '✗ 未配置'}")
     print(f"  运行次数: {N_RUNS}")
 
     # 1. 加载环境
@@ -163,7 +163,7 @@ def main():
     if has_llm:
         print(f"\n{'='*60}")
         print("[3] LLM 增强 DMDE")
-        llm_solver = LLMEnhancedDMDESolver(llm_config=llm_config)
+        llm_solver = LLMEnhancedDMDESolver(LLMEnhancedDMDEConfig(**llm_config))
         llm_results = run_experiment(llm_solver, "LLM-DMDE", cm.matrix, n, m, evaluator)
         llm_metrics = compute_metrics(llm_results)
         print(f"\n{format_metrics(llm_metrics, 'LLM 增强 DMDE')}")
