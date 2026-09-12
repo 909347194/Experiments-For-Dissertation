@@ -34,7 +34,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,11 @@ class LLMClient:
         max_tokens: int = 1024,
         timeout: int = 60,
     ) -> None:
+        if OpenAI is None:
+            raise ImportError(
+                "openai package is required for LLMClient. "
+                "Install it with: pip install openai"
+            )
         self._client = OpenAI(
             api_key=api_key,
             base_url=api_base,

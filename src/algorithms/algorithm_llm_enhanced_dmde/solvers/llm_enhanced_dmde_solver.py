@@ -344,6 +344,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
     def _init_modules(self, cfg: LLMEnhancedDMDEConfig) -> None:
         """根据配置初始化 LLM 模块。"""
+        if not cfg.modules:
+            self._modules = []
+            return
+
         from ..llm.modules import create_module
 
         # 优先从配置文件加载，否则默认使用 DeepSeek
