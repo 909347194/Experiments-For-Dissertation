@@ -364,7 +364,9 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         self._modules = []
         for module_name, module_cfg in cfg.modules.items():
             try:
-                module = create_module(module_name, llm_client, module_cfg)
+                # 注入全局种子到模块配置，保证可复现
+                merged_cfg = {**module_cfg, "seed": cfg.seed}
+                module = create_module(module_name, llm_client, merged_cfg)
                 self._modules.append(module)
             except ValueError as e:
                 if cfg.verbose:

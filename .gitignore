@@ -15,3 +15,4 @@ wheels/
 # Generated outputs are reproducible from the corresponding experiment input.
 experiments/**/results/*
 !experiments/**/results/.gitkeep
+.openclaw/

@@ -81,7 +81,7 @@ SOLVER_PARAMS = dict(
     delta=0.3,
 )
 
-N_RUNS = int(os.environ.get("EXP_N_RUNS", "2 "))
+N_RUNS = int(os.environ.get("EXP_N_RUNS", "2"))
 VISUALIZE = True
 FIGURES_DIR = RESULTS_DIR / "figures"
 

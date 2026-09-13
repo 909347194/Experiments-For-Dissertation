@@ -4,7 +4,7 @@
 模块化架构：
 - llm_client.py: LLM API 客户端（请求发送、响应接收）
 - base_module.py: 可插拔 LLM 模块基类（BaseLLMModule + ModuleState）
-- modules/: 可插拔模块实现（population_init, search_controller; 旧版 operator_selection, cr_control 保留）
+- modules/: 可插拔模块实现（population_init, search_controller）
 """
 
 from .llm_client import LLMClient, create_llm_client, create_llm_client_from_config

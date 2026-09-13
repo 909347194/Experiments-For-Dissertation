@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -210,6 +211,23 @@ class BaseLLMModule(ABC):
         except Exception as e:
             logger.warning("[%s @ gen %d] LLM module failed: %s", self.name, state.generation, e)
             return {"_error": str(e), "_llm_call_duration": time.time() - t0}
+
+    @staticmethod
+    def _extract_json(text: str) -> str | None:
+        """从 LLM 输出中提取 JSON 字符串。
+
+        支持三种格式：纯 JSON、```json``` 代码块、文本中嵌入的 JSON。
+        """
+        text = text.strip()
+        if text.startswith("{"):
+            return text
+        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return text[start:end + 1]
+        return None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name!r}, enabled={self._enabled})"

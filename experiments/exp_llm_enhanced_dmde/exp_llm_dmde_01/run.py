@@ -215,8 +215,7 @@ def main():
             llm_config_path=str(CONFIG_DIR / "llm_config.yaml"),
             modules={
                 "population_init": {"enabled": False},
-                "operator_selection": {"enabled": True, "interval": 50},
-                "cr_control": {"enabled": True, "interval": 10},
+                "search_controller": {"enabled": True, "interval": 50},
             },
         )
 

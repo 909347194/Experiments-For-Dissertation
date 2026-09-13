@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -98,30 +99,55 @@ class LLMClient:
         self.max_tokens = max_tokens
         self.api_base = api_base
 
-    def chat(self, messages: list[dict[str, str]]) -> str:
-        """发送 Chat Completions 请求。
+    def chat(self, messages: list[dict[str, str]], max_retries: int = 3) -> str:
+        """发送 Chat Completions 请求（带重试）。
 
         Args:
             messages: [{"role": "user", "content": "Hello"}]
+            max_retries: 最大重试次数（针对 429/5xx 错误）。
 
         Returns:
             助手回复文本。
         """
-        try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stream=False,
-            )
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("Empty response from LLM")
-            return content.strip()
-        except Exception as e:
-            logger.warning("LLM call failed: %s", e)
-            raise
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    stream=False,
+                )
+                content = response.choices[0].message.content
+                if not content:
+                    raise ValueError("Empty response from LLM")
+                result = content.strip()
+                logger.debug(
+                    "[LLM] model=%s, messages=%d, response=%d chars",
+                    self.model, len(messages), len(result),
+                )
+                logger.debug(
+                    "[LLM] model=%s, messages=%d, response=%d chars",
+                    self.model, len(messages), len(result),
+                )
+                return result
+            except Exception as e:
+                last_exc = e
+                # 判断是否可重试：429 限流 或 5xx 服务端错误
+                status = getattr(e, "status_code", None)
+                if status in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    logger.warning(
+                        "[LLM] attempt %d/%d failed (status=%s), retrying in %ds: %s",
+                        attempt + 1, max_retries, status, wait, e,
+                    )
+                    time.sleep(wait)
+                    continue
+                logger.warning("LLM call failed: %s", e)
+                raise
+        # 所有重试用尽
+        raise last_exc  # type: ignore[misc]
 
     def __repr__(self) -> str:
         return f"LLMClient(model={self.model!r}, base={self.api_base!r})"

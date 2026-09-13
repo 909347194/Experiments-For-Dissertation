@@ -74,7 +74,7 @@ pip install openai python-dotenv
 
 # 配置 API Key（LLM-DMDE 需要）
 # 在项目根目录 .env 中设置：
-DEEPSEEK_API_KEY=***
+DEEPSEEK_API_KEY=sk-***
 ```
 
 ### Step 2: 运行 DMDE 基线（30 次）
@@ -99,7 +99,7 @@ EXP_N_RUNS=30 python experiments/exp_llm_enhanced_dmde/exp_dmde_01/run.py
 修改 `run.py` 中的 `modules` 参数：
 
 ```python
-# 仅搜索控制
+# 仅搜索控制（策略 + CR 联合决策）
 modules={"search_controller": {"enabled": True, "interval": 50}}
 
 # 仅种群初始化
@@ -114,13 +114,13 @@ modules={
 
 ## 实验配置矩阵
 
-| 配置                  | solver                  | modules                                | 说明           |
-| --------------------- | ----------------------- | -------------------------------------- | -------------- |
-| A: DMDE 基线          | `DMDESolver`            | N/A                                    | 纯 DMDE        |
-| B: LLM-DMDE (vanilla) | `LLMEnhancedDMDESolver` | `{}`                                   | 退化一致性验证 |
-| C: LLM-DMDE (SC)      | `LLMEnhancedDMDESolver` | `{search_controller}`                  | 仅搜索控制     |
-| D: LLM-DMDE (PI)      | `LLMEnhancedDMDESolver` | `{population_init}`                    | 仅种群初始化   |
-| E: LLM-DMDE (full)    | `LLMEnhancedDMDESolver` | `{search_controller, population_init}` | 全部启用       |
+| 配置                  | solver                  | modules                                                        | 说明           |
+| --------------------- | ----------------------- | -------------------------------------------------------------- | -------------- |
+| A: DMDE 基线          | `DMDESolver`            | N/A                                                            | 纯 DMDE        |
+| B: LLM-DMDE (vanilla) | `LLMEnhancedDMDESolver` | `{}`                                                           | 退化一致性验证 |
+| C: LLM-DMDE (SC)      | `LLMEnhancedDMDESolver` | `{"search_controller": {"enabled": true, "interval": 50}}`     | 仅搜索控制     |
+| D: LLM-DMDE (PI)      | `LLMEnhancedDMDESolver` | `{"population_init": {"enabled": true}}`                       | 仅种群初始化   |
+| E: LLM-DMDE (full)    | `LLMEnhancedDMDESolver` | `{"population_init": {"enabled": true}, "search_controller": {"enabled": true, "interval": 50}}` | 全部启用       |
 
 ## 评价指标
 
@@ -133,7 +133,7 @@ modules={
 | `metrics.n_feasible`     | `compute_metrics`                | 可行解次数             |
 | `result.elapsed_seconds` | `SolverResult`                   | 单次运行时间           |
 | 收敛代数                 | `cost_history` 首次达 95% 最终值 | 收敛速度               |
-| Wilco秩和检验            | 配对检验                         | 统计显著性 (p<0.05)    |
+| Wilco 秩和检验           | 配对检验                         | 统计显著性 (p<0.05)    |
 
 ## 场景定义
 
@@ -155,79 +155,18 @@ Target(4, pos=(91.08,29.68,3720), w=0.6, tw=(30000,90000))
 # 约束：航程✓ 时间窗✓ 时序✗ 同步✗
 ```
 
-# 其他说明与补充
+## 结果展示
 
-## LLM-DMDE vs 纯 DMDE 对比实验方案
-
-### 1. 实验矩阵
-
-| 配置  | 名称               | modules 参数                                                                                     | 说明           |
-| ----- | ------------------ | ------------------------------------------------------------------------------------------------ | -------------- |
-| **A** | DMDE 基线          | N/A（`DMDESolver`）                                                                              | 纯 DMDE        |
-| **B** | LLM-DMDE (vanilla) | `{}`                                                                                             | 验证退化一致性 |
-| **C** | LLM-DMDE (SC)      | `{"search_controller": {"enabled": True, "interval": 50}}`                                       | 仅搜索控制     |
-| **D** | LLM-DMDE (PI)      | `{"population_init": {"enabled": True}}`                                                         | 仅种群初始化   |
-| **E** | LLM-DMDE (full)    | `{"population_init": {"enabled": True}, "search_controller": {"enabled": True, "interval": 50}}` | 全部启用       |
-
-**场景**：N=M (5U/5T), N>M (8U/4T), N<M (5U/10T) — 各 30 次运行
-
-text
-
-```
-核心对比: A vs C vs E × 3 场景 × 30 次 = 270 次
-消融实验: B, D × 3 场景 × 30 次 = 180 次
-总计: 450 次运行
-```
-
-```
-核心对比: A vs C vs E × 3 场景 × 30 次 = 270 次
-消融实验: B, D × 3 场景 × 30 次 = 180 次
-总计: 450 次运行
-```
-
-### 2. 评价指标
-
-| 指标             | 来源                                  | 说明         |
-| ---------------- | ------------------------------------- | ------------ |
-| Best Fitness     | `result.best_fitness`                 | 越低越好     |
-| 可行解比例       | `metrics.n_feasible / 30`             | 约束满足能力 |
-| 收敛代数         | `cost_history`首次达 95% 最终值的代数 | 收敛速度     |
-| 标准差           | `metrics.std_fitness`                 | 稳定性       |
-| 运行时间         | `result.elapsed_seconds`              | LLM 开销     |
-| Wilcoxon p-value | 配对检验                              | 统计显著性   |
-
-### 3. 运行方式
-
-bash
-
-```
-# DMDE 基线
-EXP_N_RUNS=30 python experiments/exp_dmde/exp_dmde_01/run.py
-
-# LLM-DMDE
-EXP_N_RUNS=30 python experiments/exp_llm_enhanced_dmde/exp_dmde_01/run.py
-```
-
-```
-# DMDE 基线
-EXP_N_RUNS=30 python experiments/exp_dmde/exp_dmde_01/run.py
-
-# LLM-DMDE
-EXP_N_RUNS=30 python experiments/exp_llm_enhanced_dmde/exp_dmde_01/run.py
-```
-
-### 4. 结果展示
-
-| 图表         | 内容                                        |
-| ------------ | ------------------------------------------- |
-| 收敛曲线对比 | DMDE vs LLM-DMDE，30 次均值±标准差阴影      |
-| 箱线图       | 各配置 fitness 分布                         |
-| 改进热力图   | 场景×规模，颜色=改进幅度%                   |
-| 消融柱状图   | 各 modules 配置的 fitness 对比              |
+| 图表         | 内容                                   |
+| ------------ | -------------------------------------- |
+| 收敛曲线对比 | DMDE vs LLM-DMDE，30 次均值±标准差阴影 |
+| 箱线图       | 各配置 fitness 分布                    |
+| 消融柱状图   | 各 modules 配置的 fitness 对比         |
 | 主结果表     | 均值±标准差，最优加粗，Wilcoxon p<0.05 标 † |
 
-### 5. 注意事项
+## 注意事项
 
-- **API 成本**：30 次 × 5 配置 × 3 场景 = 450 次 LLM 调用，提前估算费用
+- **API 成本**：30 次 × 4 配置(B~E) ≈ 1200 次 LLM 调用，提前估算费用
 - **种子对齐**：DMDE 和 LLM-DMDE 用相同 `seed=run_idx`，支持配对检验
 - **先小后大**：先用 `EXP_N_RUNS=3` 跑通脚本，再跑正式 30 次
+- **search_controller**：统一搜索控制器，一次 LLM 调用同时决定变异策略和 CR（替代旧版分离的 operator_selection + cr_control）

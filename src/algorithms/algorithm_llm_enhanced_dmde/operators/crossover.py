@@ -46,54 +46,6 @@ def dynamic_crossover_rate(
     return 1.0 - (np.log(current_gen) / np.log(total_gens)) ** zeta
 
 
-def hybrid_differential(
-    cost_vectors: np.ndarray,
-    best_idx: int,
-    f: float,
-    cr: float,
-    rng: np.random.Generator | None = None,
-) -> np.ndarray:
-    """混合差分策略产生临时解向量。
-
-    对应公式 (3-10)。
-
-    Args:
-        cost_vectors: 种群代价值矩阵，shape = (pop_size, gene_len)。
-        best_idx:     当前最优个体的索引。
-        f:            缩放因子 F。
-        cr:           当前动态交叉率。
-        rng:          随机数生成器。
-
-    Returns:
-        临时解向量，shape = (gene_len,)。
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    pop_size, gene_len = cost_vectors.shape
-
-    # 随机选择 4 个不同个体
-    indices = rng.choice(pop_size, size=4, replace=False)
-    r1, r2, r3, r4 = indices
-
-    best = cost_vectors[best_idx]
-    x_r1 = cost_vectors[r1]
-    x_r2 = cost_vectors[r2]
-    x_r3 = cost_vectors[r3]
-    x_r4 = cost_vectors[r4]
-
-    # 对每个基因位独立判断使用哪种策略
-    rand_vals = rng.random(gene_len)
-    use_rand = rand_vals <= cr  # CR >= rand → 用 rand/1
-
-    # DE/rand/1 (探索)
-    trial_rand = x_r1 + f * (x_r2 - x_r3)
-    # DE/best/2 (开发)
-    trial_best = best + f * (x_r1 + x_r2 - x_r3 - x_r4)
-
-    return np.where(use_rand, trial_rand, trial_best)
-
-
 def hybrid_differential_population(
     cost_vectors: np.ndarray,
     best_idx: int,
@@ -140,9 +92,13 @@ def hybrid_differential_population(
             # default / best/2 / None — 都需要 4 个
             n_needed = 4
 
-        indices = rng.choice(pop_size, size=n_needed, replace=False)
-        while i in indices:
-            indices = rng.choice(pop_size, size=n_needed, replace=False)
+        # 排除自身后采样，避免小种群死循环
+        candidates = [j for j in range(pop_size) if j != i]
+        if len(candidates) < n_needed:
+            # 种群太小，无法产生足够的不同个体，保持不变
+            trials[i] = cost_vectors[i]
+            continue
+        indices = rng.choice(candidates, size=n_needed, replace=False)
 
         f = f_values[i]
         best = cost_vectors[best_idx]

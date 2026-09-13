@@ -148,20 +148,38 @@ def _repair_balanced_unique(
     if not dup_idx:
         return
 
+    n = len(genes)
     n_targets = cost_matrix.shape[1]
     missing = [t for t in range(n_targets) if t not in seen]
 
+    # 修复重复目标：替换为缺失目标中代价最小的
     for i in dup_idx:
         if not missing:
             break
         g = genes[i]
-        # 在缺失目标中选择对该 UAV 代价最小的一个
         best_t = min(missing, key=lambda t: cost_matrix[g.uav_id, t])
         genes[i] = Gene(
             uav_id=g.uav_id, target_id=best_t,
             cost=float(cost_matrix[g.uav_id, best_t]),
         )
         missing.remove(best_t)
+
+    # 补齐缺失的基因（反映射失败导致基因数不足）
+    if missing:
+        used_uavs = {g.uav_id for g in genes if g.uav_id >= 0}
+        for tgt in missing:
+            # 找到代价最小的未使用 UAV
+            best_uav = -1
+            best_cost = float("inf")
+            for uav in range(cost_matrix.shape[0]):
+                if uav not in used_uavs:
+                    c = float(cost_matrix[uav, tgt])
+                    if c < best_cost:
+                        best_cost = c
+                        best_uav = uav
+            if best_uav >= 0:
+                genes.append(Gene(uav_id=best_uav, target_id=tgt, cost=best_cost))
+                used_uavs.add(best_uav)
 
 
 def _ensure_all_targets_covered(
@@ -239,14 +257,18 @@ def _perturb_genes(
     if rng.random() < perturb_prob and n_genes >= 2:
         i, j = rng.choice(n_genes, size=2, replace=False)
         if genes[i].uav_id >= 0 and genes[j].uav_id >= 0:
-            # 交换目标
-            genes[i], genes[j] = Gene(
-                uav_id=genes[i].uav_id, target_id=genes[j].target_id,
-                cost=float(cost_matrix[genes[i].uav_id, genes[j].target_id])
-            ), Gene(
-                uav_id=genes[j].uav_id, target_id=genes[i].target_id,
-                cost=float(cost_matrix[genes[j].uav_id, genes[i].target_id])
-            )
+            # 交换前检查：确保不会产生重复目标
+            new_tgt_i = genes[j].target_id
+            new_tgt_j = genes[i].target_id
+            existing_targets = {g.target_id for k, g in enumerate(genes) if k not in (i, j)}
+            if new_tgt_i not in existing_targets and new_tgt_j not in existing_targets:
+                genes[i], genes[j] = Gene(
+                    uav_id=genes[i].uav_id, target_id=new_tgt_i,
+                    cost=float(cost_matrix[genes[i].uav_id, new_tgt_i])
+                ), Gene(
+                    uav_id=genes[j].uav_id, target_id=new_tgt_j,
+                    cost=float(cost_matrix[genes[j].uav_id, new_tgt_j])
+                )
 
     # reassign 扰动：仅 overloaded 模型允许（目标可被多个 UAV 重复执行）。
     # balanced 模型必须保持 UAV↔Target 一一对应，reassign 会把某个目标
