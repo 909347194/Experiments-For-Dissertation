@@ -1,6 +1,0 @@
-# LLM 增强 DMDE 实验配置
-provider: deepseek
-model: deepseek-flash
-temperature: 0.7
-max_tokens: 1024
-timeout: 60
