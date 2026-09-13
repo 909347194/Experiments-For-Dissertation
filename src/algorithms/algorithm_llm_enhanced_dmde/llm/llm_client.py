@@ -104,7 +104,7 @@ class LLMClient:
 
         Args:
             messages: [{"role": "user", "content": "Hello"}]
-            max_retries: 最大重试次数（针对 429/5xx 错误）。
+            max_retries: 最大重试次数（针对 429/5xx/空响应 错误）。
 
         Returns:
             助手回复文本。
@@ -119,14 +119,18 @@ class LLMClient:
                     max_tokens=self.max_tokens,
                     stream=False,
                 )
+                # 检查响应结构
+                if not response.choices:
+                    raise ValueError(
+                        f"Empty choices from LLM (finish_reason={getattr(response, 'finish_reason', 'N/A')})"
+                    )
                 content = response.choices[0].message.content
                 if not content:
-                    raise ValueError("Empty response from LLM")
+                    finish_reason = getattr(response.choices[0], "finish_reason", "N/A")
+                    raise ValueError(
+                        f"Empty response from LLM (finish_reason={finish_reason})"
+                    )
                 result = content.strip()
-                logger.debug(
-                    "[LLM] model=%s, messages=%d, response=%d chars",
-                    self.model, len(messages), len(result),
-                )
                 logger.debug(
                     "[LLM] model=%s, messages=%d, response=%d chars",
                     self.model, len(messages), len(result),
@@ -134,13 +138,17 @@ class LLMClient:
                 return result
             except Exception as e:
                 last_exc = e
-                # 判断是否可重试：429 限流 或 5xx 服务端错误
+                # 判断是否可重试：429 限流、5xx 服务端错误、或空响应
                 status = getattr(e, "status_code", None)
-                if status in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                is_retryable = (
+                    status in (429, 500, 502, 503, 504)
+                    or isinstance(e, ValueError)  # 空响应也重试
+                )
+                if is_retryable and attempt < max_retries - 1:
                     wait = 2 ** attempt  # 1s, 2s, 4s
                     logger.warning(
-                        "[LLM] attempt %d/%d failed (status=%s), retrying in %ds: %s",
-                        attempt + 1, max_retries, status, wait, e,
+                        "[LLM] attempt %d/%d failed, retrying in %ds: %s",
+                        attempt + 1, max_retries, wait, e,
                     )
                     time.sleep(wait)
                     continue
