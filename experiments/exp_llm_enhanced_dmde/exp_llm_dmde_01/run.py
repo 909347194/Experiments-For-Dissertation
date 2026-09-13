@@ -92,6 +92,7 @@ SOLVER_PARAMS = dict(
 )
 
 N_RUNS = int(os.environ.get("EXP_N_RUNS", "2"))
+LLM_INTERVAL = 100          # search_controller 触发间隔（代数）
 VISUALIZE = True
 FIGURES_DIR = RESULTS_DIR / "figures"
 
@@ -115,8 +116,9 @@ def load_llm_config() -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    print(f"  LLM 配置已加载: model={cfg.get('llm', {}).get('model', 'default')}, "
-          f"interval={cfg.get('algorithm', {}).get('llm_interval', 50)}")
+    print(f"  LLM 配置已加载: {cfg.get('provider', 'deepseek')}/{cfg.get('model', 'default')}, "
+          f"reasoning_effort={cfg.get('reasoning_effort', '服务端默认')}, "
+          f"interval={LLM_INTERVAL}")
     return cfg
 
 
@@ -167,10 +169,12 @@ def main():
     print(f"  DMDE 参数: pop_size={SOLVER_PARAMS['pop_size']}, "
           f"max_gen={SOLVER_PARAMS['max_generations']}, "
           f"zeta={SOLVER_PARAMS['zeta']}, delta={SOLVER_PARAMS['delta']}")
-    print(f"  LLM 模块: search_controller (interval=50)")
+    print(f"  LLM 模块: search_controller (interval={LLM_INTERVAL})")
     llm_model = llm_config.get('model', 'default')
     llm_provider = llm_config.get('provider', 'deepseek')
     print(f"  LLM 模型: {llm_provider}/{llm_model}")
+    print(f"  LLM 思考强度: reasoning_effort={llm_config.get('reasoning_effort', '服务端默认')}, "
+          f"max_tokens={llm_config.get('max_tokens', '默认')}")
     print(f"  运行次数: {N_RUNS}")
     print(f"  随机种子: 0 ~ {N_RUNS - 1}（每轮 seed=run_idx）")
     print(f"  输出目录: {RESULTS_DIR}")
@@ -231,7 +235,7 @@ def main():
             llm_config_path=str(CONFIG_DIR / "llm_config.yaml"),
             modules={
                 "population_init": {"enabled": False},
-                "search_controller": {"enabled": True, "interval": 100},
+                "search_controller": {"enabled": True, "interval": LLM_INTERVAL},
             },
         )
 
@@ -244,13 +248,21 @@ def main():
         if solver.trajectory is not None:
             decisions = solver.trajectory.get_llm_decisions()
             all_llm_decisions[run_idx] = decisions
-            print(f"    LLM 调用: {len(decisions)} 次")
+            n_failed = sum(1 for d in decisions if "cr" not in d.get("decision", {}))
+            print(f"    LLM 调用: {len(decisions)} 次"
+                  + (f"（其中 {n_failed} 次失败，已回退公式 3-9 的 CR）" if n_failed else ""))
             for d in decisions:
-                dec = d.get('decision', {})
-                print(f"      gen={d['generation']:>4d}: "
-                      f"strategy={dec.get('strategy', 'N/A'):>8s}, "
-                      f"CR={dec.get('cr', 'N/A')}, "
-                      f"耗时={d.get('duration', 0):.1f}s")
+                dec = d.get("decision", {})
+                if "cr" not in dec:
+                    print(f"      gen={d['generation']:>4d}: ❌ 调用失败（回退公式 CR）, "
+                          f"耗时={d.get('duration', 0):.1f}s, "
+                          f"原因: {dec.get('error', '未知')}")
+                    continue
+                reason = ' '.join((dec.get('reasoning') or '').split())
+                if len(reason) > 56:
+                    reason = reason[:53] + '...'
+                print(f"      gen={d['generation']:>4d}: CR={dec['cr']}, "
+                      f"耗时={d.get('duration', 0):.1f}s, 理由: {reason or '(无)'}")
 
         eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
         result.extra["total_violation"] = eval_res.total_violation

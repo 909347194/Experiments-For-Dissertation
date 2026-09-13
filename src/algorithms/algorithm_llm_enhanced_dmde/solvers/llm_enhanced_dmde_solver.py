@@ -22,6 +22,7 @@ Architecture:
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,6 +42,8 @@ from ..features.constraint_features import compute_feasible_ratio, compute_viola
 from ..trajectory.optimization_trajectory import OptimizationTrajectory, TrajectoryEntry
 from ..llm.base_module import BaseLLMModule, ModuleState
 from ..llm.llm_client import create_llm_client, create_llm_client_from_config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -406,10 +409,18 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
     def _record_decision(self, gen, module_name, decision, state):
         if self._trajectory and decision:
+            clean = {k: v for k, v in decision.items() if not k.startswith("_")}
+            # LLM 调用失败时保留错误信息，避免决策记录看起来像“空决策”
+            if "_error" in decision:
+                clean.setdefault("error", decision["_error"])
+                logger.warning(
+                    "[%s @ gen %d] LLM 调用失败，回退默认参数: %s",
+                    module_name, gen, decision["_error"],
+                )
             self._trajectory.record_llm_decision(
                 generation=gen,
                 llm_module=module_name,
-                llm_decision={k: v for k, v in decision.items() if not k.startswith("_")},
+                llm_decision=clean,
                 llm_reasoning=decision.get("_llm_reasoning", ""),
                 llm_raw_output=decision.get("_llm_raw_output", ""),
                 llm_call_duration=decision.get("_llm_call_duration", 0.0),

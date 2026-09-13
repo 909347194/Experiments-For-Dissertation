@@ -7,11 +7,19 @@
 - modules/: 可插拔模块实现（population_init, search_controller）
 """
 
-from .llm_client import LLMClient, create_llm_client, create_llm_client_from_config
+from .llm_client import (
+    LLMClient,
+    LLMEmptyResponseError,
+    LLMTruncatedResponseError,
+    create_llm_client,
+    create_llm_client_from_config,
+)
 from .base_module import BaseLLMModule, ModuleState
 
 __all__ = [
     "LLMClient",
+    "LLMEmptyResponseError",
+    "LLMTruncatedResponseError",
     "create_llm_client",
     "create_llm_client_from_config",
     "BaseLLMModule",

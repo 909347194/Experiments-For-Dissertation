@@ -25,6 +25,15 @@
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Hello"},
     ])
+
+思维链（thinking）模型注意事项::
+
+    思考型模型（如 DeepSeek ``deepseek-flash``）默认开启 thinking，
+    思维链以 ``reasoning_content`` 返回，且**计入 max_tokens**。
+    若 ``max_tokens`` 过小，思考会吃光全部预算，导致
+    ``finish_reason="length"`` 且 ``content`` 为空。
+    通过 ``reasoning_effort`` 控制思考强度（"none" 关闭思考），
+    并通过 ``max_tokens_cap`` 限制截断重试时的 token 上限。
 """
 
 from __future__ import annotations
@@ -41,6 +50,19 @@ except ImportError:
     OpenAI = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
+
+
+class LLMEmptyResponseError(ValueError):
+    """LLM 返回内容为空（choices 为空或 content 为空）。"""
+
+
+class LLMTruncatedResponseError(ValueError):
+    """LLM 输出被 max_tokens 截断（finish_reason="length"）。
+
+    思考型模型会把思维链计入 max_tokens，因此该错误常见于
+    "思考吃光预算、正文没来得及输出" 的场景。
+    """
+
 
 # Provider 预设
 PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
@@ -83,6 +105,9 @@ class LLMClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         timeout: int = 60,
+        reasoning_effort: str | None = None,
+        max_tokens_cap: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> None:
         if OpenAI is None:
             raise ImportError(
@@ -98,64 +123,114 @@ class LLMClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.api_base = api_base
+        # 思维链强度：None=用服务端默认，"none"/"low"/"high"/"max" 显式指定。
+        # 思考型模型（deepseek-flash 等）默认 effort="high"，思维链计入
+        # max_tokens，不限制时容易把预算吃光导致正文为空。
+        self.reasoning_effort = reasoning_effort
+        # 截断重试时 max_tokens 允许增长到的上限
+        self.max_tokens_cap = max_tokens_cap or max(max_tokens * 2, 16384)
+        self._extra_body = dict(extra_body or {})
 
     def chat(self, messages: list[dict[str, str]], max_retries: int = 3) -> str:
         """发送 Chat Completions 请求（带重试）。
 
+        重试策略：
+            - 429 限流 / 5xx 服务端错误：退避重试。
+            - 空响应（content 为空）：退避重试。
+            - 输出截断（finish_reason="length"）：**加倍 max_tokens** 后重试，
+              因为用同样的预算重发同样的请求只会再次被截断。
+
         Args:
             messages: [{"role": "user", "content": "Hello"}]
-            max_retries: 最大重试次数（针对 429/5xx/空响应 错误）。
+            max_retries: 最大重试次数（针对 429/5xx/空响应/输出截断）。
 
         Returns:
-            助手回复文本。
+            助手回复文本（已 strip）。
+
+        Raises:
+            LLMEmptyResponseError: 重试后仍返回空内容。
+            LLMTruncatedResponseError: 重试后输出仍被 max_tokens 截断。
         """
         last_exc: Exception | None = None
+        budget = self.max_tokens
         for attempt in range(max_retries):
             try:
-                response = self._client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    stream=False,
-                )
-                # 检查响应结构
-                if not response.choices:
-                    raise ValueError(
-                        f"Empty choices from LLM (finish_reason={getattr(response, 'finish_reason', 'N/A')})"
-                    )
-                content = response.choices[0].message.content
-                if not content:
-                    finish_reason = getattr(response.choices[0], "finish_reason", "N/A")
-                    raise ValueError(
-                        f"Empty response from LLM (finish_reason={finish_reason})"
-                    )
-                result = content.strip()
+                response = self._request(messages, budget)
+                content = self._extract_content(response, budget)
                 logger.debug(
                     "[LLM] model=%s, messages=%d, response=%d chars",
-                    self.model, len(messages), len(result),
+                    self.model, len(messages), len(content),
                 )
-                return result
+                return content
             except Exception as e:
                 last_exc = e
-                # 判断是否可重试：429 限流、5xx 服务端错误、或空响应
+                truncated = isinstance(e, LLMTruncatedResponseError)
+                # 判断是否可重试：429 限流、5xx 服务端错误、空响应、输出截断
                 status = getattr(e, "status_code", None)
                 is_retryable = (
                     status in (429, 500, 502, 503, 504)
-                    or isinstance(e, ValueError)  # 空响应也重试
+                    or isinstance(e, (LLMEmptyResponseError, LLMTruncatedResponseError))
                 )
-                if is_retryable and attempt < max_retries - 1:
-                    wait = 2 ** attempt  # 1s, 2s, 4s
-                    logger.warning(
-                        "[LLM] attempt %d/%d failed, retrying in %ds: %s",
-                        attempt + 1, max_retries, wait, e,
-                    )
-                    time.sleep(wait)
-                    continue
-                logger.warning("LLM call failed: %s", e)
-                raise
+                if not is_retryable or attempt >= max_retries - 1:
+                    logger.warning("LLM call failed: %s", e)
+                    raise
+                if truncated:
+                    new_budget = min(budget * 2, self.max_tokens_cap)
+                    if new_budget > budget:
+                        logger.warning(
+                            "[LLM] output truncated at max_tokens=%d, escalating to %d",
+                            budget, new_budget,
+                        )
+                        budget = new_budget
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning(
+                    "[LLM] attempt %d/%d failed, retrying in %ds: %s",
+                    attempt + 1, max_retries, wait, e,
+                )
+                time.sleep(wait)
         # 所有重试用尽
         raise last_exc  # type: ignore[misc]
+
+    def _request(self, messages: list[dict[str, str]], max_tokens: int):
+        """发起一次 Chat Completions 请求（不含重试）。"""
+        extra_body = dict(self._extra_body)
+        if self.reasoning_effort is not None:
+            extra_body["reasoning_effort"] = self.reasoning_effort
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        return self._client.chat.completions.create(**kwargs)
+
+    @staticmethod
+    def _extract_content(response: Any, max_tokens: int) -> str:
+        """从响应中提取正文；截断或为空时抛出可重试异常。"""
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise LLMEmptyResponseError("Empty choices from LLM")
+        choice = choices[0]
+        finish_reason = getattr(choice, "finish_reason", None)
+        raw = choice.message.content
+        content = raw.strip() if isinstance(raw, str) else ""
+        if finish_reason == "length":
+            detail = (
+                "no answer content emitted (thinking likely consumed the budget)"
+                if not content else "answer may be incomplete"
+            )
+            raise LLMTruncatedResponseError(
+                f"LLM output truncated by max_tokens={max_tokens} "
+                f"(finish_reason=length): {detail}"
+            )
+        if not content:
+            raise LLMEmptyResponseError(
+                f"Empty response from LLM (finish_reason={finish_reason})"
+            )
+        return content
 
     def __repr__(self) -> str:
         return f"LLMClient(model={self.model!r}, base={self.api_base!r})"
@@ -169,6 +244,9 @@ def create_llm_client(
     temperature: float = 0.7,
     max_tokens: int = 1024,
     timeout: int = 60,
+    reasoning_effort: str | None = None,
+    max_tokens_cap: int | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> LLMClient:
     """创建 LLM 客户端（推荐入口）。
 
@@ -177,9 +255,12 @@ def create_llm_client(
         model:       模型名（None 时使用预设默认值）。
         api_base:    API 地址（None 时使用预设值）。
         api_key:     API 密钥（None 时从环境变量读取）。
-        temperature: 生成温度。
-        max_tokens:  最大 token 数。
+        temperature: 生成温度（思考模式下服务端会忽略）。
+        max_tokens:  最大生成 token 数（含思维链）。
         timeout:     超时秒数。
+        reasoning_effort: 思维链强度 "none"/"low"/"high"/"max"，None=服务端默认。
+        max_tokens_cap:   截断重试时 max_tokens 的上限。
+        extra_body:  透传给 API 的额外请求体字段。
 
     Returns:
         LLMClient 实例。
@@ -196,6 +277,9 @@ def create_llm_client(
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            reasoning_effort=reasoning_effort,
+            max_tokens_cap=max_tokens_cap,
+            extra_body=extra_body,
         )
 
     preset = PROVIDER_PRESETS.get(provider)
@@ -222,6 +306,9 @@ def create_llm_client(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
+        max_tokens_cap=max_tokens_cap,
+        extra_body=extra_body,
     )
 
 
@@ -233,8 +320,12 @@ def create_llm_client_from_config(config_path: str | Path) -> LLMClient:
         provider: deepseek
         model: deepseek-flash
         temperature: 0.7
-        max_tokens: 1024
+        max_tokens: 8192
         timeout: 60
+        # 思维链强度（"none" 关闭思考，可大幅降低耗时与 token 消耗）
+        reasoning_effort: low
+        # 截断重试时的 token 上限
+        max_tokens_cap: 16384
         # 以下可选（覆盖 provider 默认值）
         # api_base: https://custom.api.com/v1
         # api_key: sk-...
@@ -262,4 +353,7 @@ def create_llm_client_from_config(config_path: str | Path) -> LLMClient:
         temperature=cfg.get("temperature", 0.7),
         max_tokens=cfg.get("max_tokens", 1024),
         timeout=cfg.get("timeout", 60),
+        reasoning_effort=cfg.get("reasoning_effort"),
+        max_tokens_cap=cfg.get("max_tokens_cap"),
+        extra_body=cfg.get("extra_body"),
     )
