@@ -12,7 +12,7 @@ max_tokens: 8192
 timeout: 60
 
 # 思维链强度：none（关闭思考，最快且最省）/ low / high（服务端默认）/ max
-reasoning_effort: low
+reasoning_effort: none
 
 # 输出被截断时 LLMClient 会自动加倍 max_tokens 重试，上限由该值约束
 max_tokens_cap: 16384

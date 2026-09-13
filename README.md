@@ -2,80 +2,91 @@
 
 > 多无人机协同目标分配实验平台 — 基于离散映射差分进化 (DMDE) 与 LLM 增强
 
-> 多无人机协同目标分配实验平台 — 基于离散映射差分进化 (DMDE) 与 LLM 增强
-
 ## LLM-DMDE 框架设计
 
 ### 概述
 
-LLM-DMDE 采用**分层干预框架**，LLM 在三个层级参与进化优化过程：
+LLM-DMDE 采用**分层干预框架**，LLM 在两个层级参与进化优化过程：
 
-1. **种群初始化干预** — LLM 为部分个体提供知识驱动的种子解，其余个体由原始 DMDE 初始化机制生成以保持种群多样性。
-2. **搜索策略控制** — 每隔 _p_ 代，LLM 观察当前优化状态与近期搜索轨迹，作为高层搜索控制器，联合决定后续 _p_ 代的差分变异策略与交叉率。
-3. **自适应参数调节** — 交叉率 CR 由 LLM 自适应确定，缩放因子 F 根据原始 DMDE 参数关系由 CR 推导得出。
+1. **种群初始化干预**（可选） — LLM 为部分个体提供知识驱动的种子解，其余个体由原始 DMDE 初始化机制生成以保持种群多样性。
+2. **搜索控制** — 每隔 _p_ 代，LLM 观察当前优化状态与近期搜索轨迹，自适应选择交叉率 CR。CR 天然影响公式 3-10 中 `DE/rand/1`（探索）与 `DE/best/2`（开发）的基因比例，从而间接控制搜索策略。
 
-通过上述分层设计，LLM-DMDE 将**高层自适应搜索决策**与**低层数值进化**解耦：LLM 负责"从哪里开始、如何搜索"，DMDE 负责差分进化、离散-连续映射、逆映射、约束处理、目标评估和环境选择。
+通过上述设计，LLM-DMDE 将**高层自适应参数决策**与**低层数值进化**解耦：LLM 负责"用多大的 CR 搜索"，DMDE 负责差分进化、离散-连续映射、逆映射、约束处理、目标评估和环境选择。
+
+### 核心机制：LLM 通过 CR 控制搜索策略
+
+原始 DMDE 的混合策略（公式 3-10）中，每个基因独立掷骰：
+
+- `rand <= CR` → 使用 `DE/rand/1`（探索）
+- `rand > CR` → 使用 `DE/best/2`（开发）
+
+因此 CR 值直接决定了种群中探索与开发的基因比例：
+
+| CR 值   | rand/1 基因比例 | 搜索倾向 | 适用场景               |
+| ------- | -------------- | -------- | ---------------------- |
+| 0.1/0.3 | 低             | 开发为主 | 多样性高、收敛慢       |
+| 0.5     | 中等           | 平衡     | 一般情况               |
+| 0.7/0.9 | 高             | 探索为主 | 多样性低、停滞严重     |
+
+LLM 根据优化状态（多样性、停滞、可行解比例等）动态选择 CR，间接控制搜索策略，同时保留原始 DMDE 的逐基因随机混合机制。
 
 ### 三层干预详解
 
-#### 第一层：LLM 引导的种群初始化
+#### 第一层：LLM 引导的种群初始化（可选）
 
 - 采用可选的 LLM 引导种群初始化模块，为部分个体提供基于领域知识的种子解
 - 剩余个体使用原始 DMDE 初始化机制随机生成，确保种群多样性
 - 初始化完成后，标准 DMDE 作为底层数值优化引擎开始运行
 
-#### 第二层：搜索策略周期性控制
+#### 第二层：搜索控制（CR 自适应选择）
 
 - 进化过程中，LLM 每隔 _p_ 代观察一次当前优化状态和近期搜索轨迹
-- 基于观察信息，LLM 作为高层搜索控制器，联合决定后续 _p_ 代的差分变异策略和交叉率
-- 变异策略在 `DE/rand/1`（探索性搜索）和 `DE/best/2`（开发性搜索）之间选择
-- 交叉率 CR 由 LLM 自适应确定，缩放因子 F 根据原始 DMDE 参数关系由 CR 推导
-- 所选搜索配置由 DMDE 在后续 _p_ 代中执行，之后优化状态和轨迹更新并反馈给 LLM 进行下一轮决策
-
-#### 第三层：自适应参数调节
-
-- 交叉率 CR 由 LLM 根据优化进展动态确定
-- 缩放因子 F 按原始 DMDE 的参数关系由 CR 计算得出
-- 参数调节与策略选择协同进行，实现搜索行为的自适应切换
+- 基于观察信息，LLM 选择交叉率 CR（从 {0.1, 0.3, 0.5, 0.7, 0.9} 中选取）
+- 缩放因子 F 按原始 DMDE 公式 3-11 由 CR 批量计算（每个个体独立 F 值）
+- CR 决定后续 _p_ 代的搜索倾向（探索 vs 开发），之后优化状态和轨迹更新并反馈给 LLM 进行下一轮决策
 
 ### LLM 与 DMDE 职责边界
 
-| 职责                   | LLM                                    | DMDE                |
-| ---------------------- | -------------------------------------- | ------------------- |
-| 种群初始化（种子解）   | ✅ 提供知识驱动的种子解                | ✅ 随机生成剩余个体 |
-| 差分变异策略选择       | ✅ 在`DE/rand/1` 与 `DE/best/2` 间决策 | —                   |
-| 交叉率 CR 确定         | ✅ 自适应确定                          | —                   |
-| 缩放因子 F 计算        | —                                      | ✅ 由 CR 推导       |
-| 差分进化执行           | —                                      | ✅                  |
-| 离散-连续映射 / 逆映射 | —                                      | ✅                  |
-| 约束处理               | —                                      | ✅                  |
-| 目标评估               | —                                      | ✅                  |
-| 环境选择               | —                                      | ✅                  |
-| 搜索状态观测与决策     | ✅ 每*p* 代观测并决策                  | —                   |
+| 职责                   | LLM                          | DMDE                |
+| ---------------------- | ---------------------------- | ------------------- |
+| 种群初始化（种子解）   | ✅ 提供知识驱动的种子解（可选） | ✅ 随机生成剩余个体 |
+| 交叉率 CR 确定         | ✅ 自适应选择                | —                   |
+| 缩放因子 F 计算        | —                            | ✅ 由 CR 按公式 3-11 批量计算 |
+| 混合变异策略执行       | —                            | ✅ 逐基因随机选择 rand/1 或 best/2 |
+| 差分进化执行           | —                            | ✅                  |
+| 离散-连续映射 / 逆映射 | —                            | ✅                  |
+| 约束处理               | —                            | ✅                  |
+| 目标评估               | —                            | ✅                  |
+| 环境选择               | —                            | ✅                  |
+| 搜索状态观测与决策     | ✅ 每 _p_ 代观测并决策       | —                   |
 
 ### 框架流程图
 
 ```mermaid
 flowchart TD
-    A[LLM 引导种群初始化] -->|部分个体：知识驱动种子解| B[DMDE 随机初始化剩余个体]
+    A["LLM 引导种群初始化（可选）"] -->|部分个体：知识驱动种子解| B[DMDE 随机初始化剩余个体]
     A -->|保持多样性| B
     B --> C[标准 DMDE 进化运行]
     C --> D{"每 p 代触发 LLM"}
     D -->|未到周期| C
     D -->|到达周期| E[LLM 观察优化状态与搜索轨迹]
-    E --> F[LLM 决策：变异策略 + CR]
-    F --> G[DMDE 执行：差分进化 / 映射 / 约束 / 评估 / 选择]
-    G --> H[更新优化状态与轨迹]
-    H --> D
+    E --> F["LLM 决策：选择 CR ∈ {0.1, 0.3, 0.5, 0.7, 0.9}"]
+    F --> G["CR 影响公式 3-10 中 rand/1 vs best/2 的基因比例"]
+    G --> H[DMDE 执行：差分进化 / 映射 / 约束 / 评估 / 选择]
+    H --> I[更新优化状态与轨迹]
+    I --> D
 
     style A fill:#fff3e0,stroke:#f57c00
     style E fill:#fff3e0,stroke:#f57c00
     style F fill:#fff3e0,stroke:#f57c00
+    style G fill:#fff3e0,stroke:#f57c00
     style B fill:#e8f5e9,stroke:#388e3c
     style C fill:#e8f5e9,stroke:#388e3c
-    style G fill:#e8f5e9,stroke:#388e3c
     style H fill:#e8f5e9,stroke:#388e3c
+    style I fill:#e8f5e9,stroke:#388e3c
 ```
+
+---
 
 ## 项目架构
 
@@ -92,7 +103,7 @@ graph TB
     subgraph Experiments ["实验层 experiments/"]
         direction TB
         E1["exp_dmde<br/>(01/02/03)"]:::exp
-        E2["exp_llm_enhanced_EA<br/>(01/02/03)"]:::exp
+        E2["exp_llm_enhanced_dmde<br/>(01/02/03)"]:::exp
     end
 
     subgraph Algorithms ["算法层 src/algorithms/"]
@@ -113,10 +124,9 @@ graph TB
             subgraph LLM_Layer ["llm/ (可插拔模块)"]
                 direction TB
                 LLM_base["BaseLLMModule<br/>+ ModuleState"]:::llm
-                LLM_client["LLMClient"]:::llm
+                LLM_client["LLMClient<br/>reasoning_effort 支持"]:::llm
                 LLM_pop["population_init"]:::llm
-                LLM_op["operator_selection"]:::llm
-                LLM_cr["cr_control"]:::llm
+                LLM_sc["search_controller<br/>（统一 CR 控制）"]:::llm
             end
 
             LLM_traj["trajectory/<br/>OptimizationTrajectory"]:::infra
@@ -161,11 +171,9 @@ graph TB
 
     %% LLM 模块 → LLM 客户端
     LLM_pop --> LLM_client
-    LLM_op --> LLM_client
-    LLM_cr --> LLM_client
+    LLM_sc --> LLM_client
     LLM_pop --> LLM_base
-    LLM_op --> LLM_base
-    LLM_cr --> LLM_base
+    LLM_sc --> LLM_base
 
     %% 两个算法模块 → 共享环境/模型层
     D_solver --> ENV
@@ -212,11 +220,10 @@ Experiments-For-Dissertation/
 │   │       ├── solvers/      LLMEnhancedDMDESolver
 │   │       ├── llm/          LLM 交互层
 │   │       │   ├── base_module.py    BaseLLMModule + ModuleState
-│   │       │   ├── llm_client.py     OpenAI 兼容 API 客户端
+│   │       │   ├── llm_client.py     OpenAI 兼容 API 客户端（含 reasoning_effort）
 │   │       │   └── modules/          可插拔 LLM 模块
 │   │       │       ├── population_init.py     种群初始化建议
-│   │       │       ├── operator_selection.py  DE 算子策略选择
-│   │       │       └── cr_control.py          CR/F 动态控制
+│   │       │       └── search_controller.py   统一搜索控制器（CR 自适应选择）
 │   │       ├── features/     搜索状态特征提取
 │   │       └── trajectory/   OptimizationTrajectory 轨迹记录
 │   │
@@ -229,14 +236,14 @@ Experiments-For-Dissertation/
 │   │   ├── exp_dmde_01/    N=M 平衡指派
 │   │   ├── exp_dmde_02/    N>M 多对一
 │   │   └── exp_dmde_03/    N<M 群巡游
-│   └── exp_llm_enhanced_EA/                      # LLM 增强实验
-│       ├── exp_dmde_01/    LLM + N=M（含 llm_config.yaml）
-│       ├── exp_dmde_02/    LLM + N>M
-│       └── exp_dmde_03/    LLM + N<M
+│   └── exp_llm_enhanced_dmde/                    # LLM 增强实验
+│       ├── exp_llm_dmde_01/  LLM + N=M（含 config/llm_config.yaml）
+│       ├── exp_llm_dmde_02/  LLM + N>M
+│       └── exp_llm_dmde_03/  LLM + N<M
 │
 ├── tests/                                        # 单元测试
 │   ├── dmde/               DMDE 算法测试
-│   └── llm_enhanced_dmde/  LLM 模块测试
+│   └── llm_enhanced_dmde/  LLM 模块测试（含 llm_client 测试）
 │
 └── docs/                                         # 文档
     ├── AI_guide/             LLM 增强设计指南
@@ -244,6 +251,51 @@ Experiments-For-Dissertation/
     ├── references/           参考论文
     └── reviews/              代码审查报告
 ```
+
+---
+
+## LLM 配置
+
+### 基本配置（llm_config.yaml）
+
+```yaml
+provider: deepseek
+model: deepseek-flash
+temperature: 0.7
+max_tokens: 8192
+timeout: 60
+
+# 思维链强度：none（最快最省）/ low / high（默认）/ max
+reasoning_effort: none
+
+# 截断重试时 max_tokens 加倍的上限
+max_tokens_cap: 16384
+```
+
+### Prompt 可配置化
+
+不同场景（balanced/overloaded/srp）可在实验配置中定义不同的 system prompt：
+
+```yaml
+# llm_config.yaml
+modules:
+  search_controller:
+    enabled: true
+    interval: 100
+    # 方式 1: 内联（适合短 prompt）
+    system_prompt: "You are an expert in DE optimization..."
+    # 方式 2: 文件路径（适合长 prompt 或多场景复用）
+    # system_prompt_path: config/prompts/search_controller_balanced.txt
+```
+
+不指定时使用代码内置的默认 prompt。
+
+### LLM 客户端特性
+
+- **自动重试**：429 限流、5xx 错误、空响应均自动重试（最多 3 次，指数退避）
+- **截断保护**：`finish_reason=length` 时自动加倍 `max_tokens` 重试（受 `max_tokens_cap` 约束）
+- **reasoning_effort**：通过 `extra_body` 透传给 DeepSeek API，控制 thinking 模式强度
+- **错误分类**：`LLMEmptyResponseError` / `LLMTruncatedResponseError` 便于上层模块区分处理
 
 ---
 
@@ -257,14 +309,9 @@ from algorithms.algorithm_llm_enhanced_dmde import LLMEnhancedDMDEConfig
 # Vanilla DMDE（无 LLM）
 cfg = LLMEnhancedDMDEConfig(modules={})
 
-# 仅 LLM 算子选择
+# 仅搜索控制器（LLM 选择 CR）
 cfg = LLMEnhancedDMDEConfig(modules={
-    "operator_selection": {"enabled": True, "interval": 50}
-})
-
-# 仅 LLM CR/F 控制
-cfg = LLMEnhancedDMDEConfig(modules={
-    "cr_control": {"enabled": True, "interval": 10}
+    "search_controller": {"enabled": True, "interval": 100}
 })
 
 # 仅 LLM 种群初始化
@@ -275,8 +322,7 @@ cfg = LLMEnhancedDMDEConfig(modules={
 # 全部启用
 cfg = LLMEnhancedDMDEConfig(modules={
     "population_init": {"enabled": True},
-    "operator_selection": {"enabled": True, "interval": 50},
-    "cr_control": {"enabled": True, "interval": 10},
+    "search_controller": {"enabled": True, "interval": 100},
 })
 ```
 
@@ -288,11 +334,15 @@ cfg = LLMEnhancedDMDEConfig(modules={
 # 安装依赖
 uv sync
 
+# 配置 API Key
+cp .env.example .env
+# 编辑 .env 填入 DEEPSEEK_API_KEY
+
 # 运行 DMDE 基线实验
 python experiments/exp_dmde/exp_dmde_01/run.py
 
 # 运行 LLM 增强实验（需配置 API）
-python experiments/exp_llm_enhanced_EA/exp_dmde_01/run.py
+python experiments/exp_llm_enhanced_dmde/exp_llm_dmde_01/run.py
 
 # 运行测试
 pytest tests/
