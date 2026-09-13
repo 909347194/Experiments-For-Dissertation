@@ -162,6 +162,19 @@ def main():
     # ★ 加载 LLM 配置
     llm_config = load_llm_config()
 
+    # ── 实验配置汇总 ─────────────────────────────────────────
+    print("\n[配置汇总]")
+    print(f"  DMDE 参数: pop_size={SOLVER_PARAMS['pop_size']}, "
+          f"max_gen={SOLVER_PARAMS['max_generations']}, "
+          f"zeta={SOLVER_PARAMS['zeta']}, delta={SOLVER_PARAMS['delta']}")
+    print(f"  LLM 模块: search_controller (interval=50)")
+    llm_model = llm_config.get('model', 'default')
+    llm_provider = llm_config.get('provider', 'deepseek')
+    print(f"  LLM 模型: {llm_provider}/{llm_model}")
+    print(f"  运行次数: {N_RUNS}")
+    print(f"  随机种子: 0 ~ {N_RUNS - 1}（每轮 seed=run_idx）")
+    print(f"  输出目录: {RESULTS_DIR}")
+
     # 1. 加载环境
     print("\n[1] 加载环境...")
     t0 = time.time()
@@ -202,7 +215,10 @@ def main():
     all_llm_decisions: dict[int, list] = {}
 
     results = []
+    run_start_time = time.time()
     for run_idx in range(N_RUNS):
+        print(f"\n  ── Run {run_idx + 1}/{N_RUNS} " + "─" * 40)
+
         # ★ 使用 LLMEnhancedDMDEConfig 替代 DMDEConfig
         # ★ 额外传入 llm_config 参数
         cfg = LLMEnhancedDMDEConfig(
@@ -224,23 +240,55 @@ def main():
         result = solver.solve(cm.matrix, n, m, fitness_evaluator=evaluator)
         results.append(result)
 
-        # ★ 收集 LLM 决策日志
+        # ★ 收集 LLM 决策日志并打印摘要
         if solver.trajectory is not None:
-            all_llm_decisions[run_idx] = solver.trajectory.get_llm_decisions()
-            print(f"  Run {run_idx}: LLM 调用 {len(solver.trajectory.get_llm_decisions())} 次")
+            decisions = solver.trajectory.get_llm_decisions()
+            all_llm_decisions[run_idx] = decisions
+            print(f"    LLM 调用: {len(decisions)} 次")
+            for d in decisions:
+                dec = d.get('decision', {})
+                print(f"      gen={d['generation']:>4d}: "
+                      f"strategy={dec.get('strategy', 'N/A'):>8s}, "
+                      f"CR={dec.get('cr', 'N/A')}, "
+                      f"耗时={d.get('duration', 0):.1f}s")
 
         eval_res = evaluator.evaluate(result.best_assignment, cm.matrix, n_uavs=n)
         result.extra["total_violation"] = eval_res.total_violation
         result.extra["violation_breakdown"] = eval_res.violation_breakdown()
         result.extra["is_feasible"] = eval_res.is_feasible
 
-        print(f"  Run {run_idx}: fitness={result.best_fitness:.1f}, "
-              f"feasible={eval_res.is_feasible}, "
-              f"time={result.elapsed_seconds:.2f}s")
+        # 打印本轮结果
+        print(f"    适应度: {result.best_fitness:.1f}")
+        print(f"    可行性: {'✅ 可行' if eval_res.is_feasible else '❌ 不可行'}")
+        if not eval_res.is_feasible:
+            print(f"    违反总量: {eval_res.total_violation:.2f}")
+            for k, v in eval_res.violation_breakdown().items():
+                if v > 0:
+                    print(f"      {k}: {v}")
+        print(f"    耗时: {result.elapsed_seconds:.2f}s")
+        print(f"    分配方案: {result.best_assignment}")
+
+        # 进度和 ETA
+        elapsed = time.time() - run_start_time
+        avg_per_run = elapsed / (run_idx + 1)
+        remaining = avg_per_run * (N_RUNS - run_idx - 1)
+        print(f"    进度: {run_idx + 1}/{N_RUNS}, "
+              f"已用 {elapsed:.0f}s, 预计剩余 {remaining:.0f}s")
 
     # 6. 统计
+    total_time = time.time() - run_start_time
     metrics = compute_metrics(results)
-    print(f"\n{format_metrics(metrics, name)}")
+    print(f"\n{'='*60}")
+    print(f"[实验结果汇总]")
+    print(f"{'='*60}")
+    print(format_metrics(metrics, name))
+    print(f"\n  总耗时: {total_time:.1f}s ({total_time/60:.1f}min)")
+    print(f"  平均每轮: {total_time/N_RUNS:.1f}s")
+    feasible_count = sum(1 for r in results if r.extra.get('is_feasible', False))
+    print(f"  可行解率: {feasible_count}/{N_RUNS} ({100*feasible_count/N_RUNS:.0f}%)")
+    if all_llm_decisions:
+        total_decisions = sum(len(v) for v in all_llm_decisions.values())
+        print(f"  LLM 总调用: {total_decisions} 次")
 
     scenario = {
         "name": name, "model_type": "balanced",
@@ -249,6 +297,7 @@ def main():
     }
 
     # 7. 保存数据（★ 包含 LLM 决策日志）
+    print(f"\n[保存数据]")
     data_file = save_experiment(
         [scenario], {name: uavs}, {name: targets},
         meta={
@@ -258,11 +307,12 @@ def main():
             "llm_config": llm_config,
             "n_runs": N_RUNS,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "total_seconds": total_time,
         },
         path=RESULTS_DIR / "exp_llm_dmde_01_data.json",
         llm_decisions=all_llm_decisions,
     )
-    print(f"\n数据已保存: {data_file}")
+    print(f"  数据文件: {data_file}")
     if all_llm_decisions:
         total_decisions = sum(len(v) for v in all_llm_decisions.values())
         print(f"  LLM 决策记录: {total_decisions} 条（{len(all_llm_decisions)} 次运行）")
