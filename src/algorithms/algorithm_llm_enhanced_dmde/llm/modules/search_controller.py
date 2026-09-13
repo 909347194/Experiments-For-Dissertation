@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from ..base_module import BaseLLMModule, ModuleState
@@ -50,14 +49,14 @@ using the DMDE parameter relationship (formula 3-11).
 
 ## CR Selection Guidelines
 - Low CR (0.1): More exploitation — smaller perturbations, fine-tuning
-- Mid CR (0.5): Balanced exploration/exploitation
-- High CR (0.9): More exploration — larger perturbations, broader search
+- Mid CR (0.3/0.5): Balanced exploration/exploitation
+- High CR (0.7/0.9): More exploration — larger perturbations, broader search
 
 ## Decision Format
 Respond with a JSON object only (no markdown):
 {{
     "strategy": "rand/1" or "best/2",
-    "cr": <one of {cr_choices}>,
+    "cr": <one of {cr_choices}>,  ← MUST be exactly one of these values
     "reasoning": "<brief explanation>"
 }}
 """.format(cr_choices=str(CR_CHOICES))
@@ -164,15 +163,4 @@ class LLMSearchControllerModule(BaseLLMModule):
         state.extra["llm_strategy"] = decision.get("strategy", "rand/1")
         return state
 
-    @staticmethod
-    def _extract_json(text: str) -> str | None:
-        text = text.strip()
-        if text.startswith("{"):
-            return text
-        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start:end + 1]
-        return None
+

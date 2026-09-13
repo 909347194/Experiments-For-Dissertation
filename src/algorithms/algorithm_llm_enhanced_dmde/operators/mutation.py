@@ -28,7 +28,6 @@ def mutate_population(
     cr: float | None = None,
     f_scale: float | None = None,
     strategy: str | None = None,
-    fitness_values: np.ndarray | None = None,
 ) -> np.ndarray:
     """对整个种群执行混合变异。
 
@@ -54,7 +53,6 @@ def mutate_population(
         strategy:       变异策略。None = 原始 CR 切换；
                         "rand/1" = 全部使用 DE/rand/1；
                         "best/2" = 全部使用 DE/best/2。
-        fitness_values: 种群适应度数组（当前未使用，保留接口兼容）。
 
     Returns:
         试验向量矩阵。

@@ -113,28 +113,18 @@ def apply_extinction(
         if best_idx not in survived:
             survived.append(best_idx)
 
+    # 预创建编码器，复用生成随机个体
+    from ..representation.encoder import PopulationEncoder
+    encoder = PopulationEncoder(cost_matrix, n_uavs, n_targets)
+
     # 重置未存活的个体
     new_cost_vectors = cost_vectors.copy()
     for i in range(pop_size):
         if i not in survived:
-            # 生成随机新个体的代价值向量
-            new_cost_vectors[i] = _random_cost_vector(
-                cost_matrix, n_uavs, n_targets, model_type, rng
-            )
+            ind = encoder.generate(1)[0]
+            new_cost_vectors[i] = ind.cost_vector
 
     return new_cost_vectors, survived
 
 
-def _random_cost_vector(
-    cost_matrix: np.ndarray,
-    n_uavs: int,
-    n_targets: int,
-    model_type: str,
-    rng,
-) -> np.ndarray:
-    """生成随机个体的代价值向量。"""
-    from ..representation.encoder import PopulationEncoder
 
-    encoder = PopulationEncoder(cost_matrix, n_uavs, n_targets)
-    ind = encoder.generate(1)[0]
-    return ind.cost_vector

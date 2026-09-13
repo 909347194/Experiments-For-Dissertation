@@ -19,8 +19,7 @@
 from .llm.llm_client import LLMClient
 from .llm.base_module import BaseLLMModule, ModuleState
 from .llm.modules.population_init import LLMPopulationInitModule
-from .llm.modules.operator_selection import LLMOperatorSelectionModule
-from .llm.modules.cr_control import LLMCRControlModule
+from .llm.modules.search_controller import LLMSearchControllerModule
 from .solvers.llm_enhanced_dmde_solver import (
     LLMEnhancedDMDEConfig,
     LLMEnhancedDMDESolver,
@@ -38,8 +37,7 @@ __all__ = [
     "ModuleState",
     # LLM 可插拔模块
     "LLMPopulationInitModule",
-    "LLMOperatorSelectionModule",
-    "LLMCRControlModule",
+    "LLMSearchControllerModule",
     # 求解器
     "LLMEnhancedDMDEConfig",
     "LLMEnhancedDMDESolver",

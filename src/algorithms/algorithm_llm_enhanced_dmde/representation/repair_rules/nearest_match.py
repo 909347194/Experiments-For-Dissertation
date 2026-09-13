@@ -67,8 +67,8 @@ def nearest_match_stochastic(
     if len(available) == 0:
         return None
 
-    # 按距离排序，取 top-k
-    distances = diff[~mask]
+    # 按距离排序，取 top-k（使用与 available 相同的过滤条件）
+    distances = diff[~mask & np.isfinite(cost_matrix)]
     sorted_indices = np.argsort(distances)
     k = min(top_k, len(sorted_indices))
     chosen_idx = rng.choice(sorted_indices[:k])
@@ -138,7 +138,7 @@ def nearest_match_adaptive(
     if len(available) == 0:
         return None
 
-    distances = diff[~mask]
+    distances = diff[valid]
     sorted_indices = np.argsort(distances)
 
     top_k = temperature_to_top_k(temperature)

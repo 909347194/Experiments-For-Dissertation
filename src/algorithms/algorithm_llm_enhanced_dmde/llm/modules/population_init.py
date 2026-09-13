@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 import numpy as np
@@ -31,7 +30,6 @@ suggest an initialization strategy to improve the initial population quality.
 Respond with a JSON object only (no markdown):
 {{
     "init_strategy": "<greedy|diverse|hybrid|random>",
-    "temperature": <float in [0.0, 1.0], or null to keep default>,
     "reasoning": "<brief explanation>"
 }}
 
@@ -110,16 +108,8 @@ class LLMPopulationInitModule(BaseLLMModule):
         if strategy not in valid:
             strategy = "random"
 
-        temp = data.get("temperature")
-        if temp is not None:
-            try:
-                temp = max(0.0, min(1.0, float(temp)))
-            except (ValueError, TypeError):
-                temp = None
-
         return {
             "init_strategy": strategy,
-            "temperature": temp,
             "reasoning": data.get("reasoning", ""),
         }
 
@@ -133,7 +123,6 @@ class LLMPopulationInitModule(BaseLLMModule):
             "random"  — no change
         """
         strategy = decision.get("init_strategy", "random")
-        temperature = decision.get("temperature")
 
         if state.population is None or state.cost_matrix is None:
             return state
@@ -143,7 +132,7 @@ class LLMPopulationInitModule(BaseLLMModule):
             state.extra["llm_init_n_modified"] = 0
             return state
 
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(self._config.get("seed"))
         cm = state.cost_matrix
         pop = state.population
         n_uavs = state.n_uavs
@@ -164,7 +153,6 @@ class LLMPopulationInitModule(BaseLLMModule):
 
         state.extra["llm_init_applied"] = strategy
         state.extra["llm_init_n_modified"] = n_modify
-        state.extra["llm_init_temperature"] = temperature
 
         return state
 
@@ -323,15 +311,4 @@ class LLMPopulationInitModule(BaseLLMModule):
         new_ind.genes = genes
         return new_ind
 
-    @staticmethod
-    def _extract_json(text: str) -> str | None:
-        text = text.strip()
-        if text.startswith("{"):
-            return text
-        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start:end + 1]
-        return None
+

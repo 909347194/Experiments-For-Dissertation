@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from ..base_module import BaseLLMModule, ModuleState
@@ -127,15 +126,4 @@ class LLMOperatorSelectionModule(BaseLLMModule):
         state.extra["llm_strategy"] = decision.get("strategy", "default")
         return state
 
-    @staticmethod
-    def _extract_json(text: str) -> str | None:
-        text = text.strip()
-        if text.startswith("{"):
-            return text
-        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start:end + 1]
-        return None
+

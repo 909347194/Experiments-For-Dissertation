@@ -97,34 +97,3 @@ def detect_stagnation(
 
     return stagnation_count
 
-
-def compute_convergence_rate(cost_history: list[float]) -> float:
-    """计算整体收敛速率。
-
-    使用对数线性拟合估计收敛速率常数。
-    适用于评估算法的收敛效率。
-
-    Args:
-        cost_history: 适应度历史列表。
-
-    Returns:
-        收敛速率（正值 = 收敛，越大越快）。
-    """
-    if len(cost_history) < 3:
-        return 0.0
-
-    # 过滤掉 inf 和 nan
-    valid = [f for f in cost_history if np.isfinite(f)]
-    if len(valid) < 3:
-        return 0.0
-
-    # 使用首尾估计
-    initial = valid[0]
-    final = valid[-1]
-
-    if initial <= 0 or final <= 0 or initial <= final:
-        # 无法取对数或未收敛
-        return 0.0
-
-    n = len(valid)
-    return float(np.log(initial / final) / n)
