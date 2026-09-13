@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
-"""search_controller.py — 统一 LLM 搜索控制器模块
+"""search_controller.py — LLM 搜索控制器模块
 
 职责：
-    在一次 LLM 调用中，同时决定差分变异策略（DE/rand/1 或 DE/best/2）
-    和交叉率 CR。替代原有的分离式 operator_selection + cr_control 模块。
+    在一次 LLM 调用中，决定交叉率 CR。LLM 不直接覆盖变异策略，
+    CR 天然影响公式 3-10 中 rand/1 vs best/2 的比例（高 CR → 更多 rand/1），
+    因此 LLM 的策略思考隐含在 CR 选择里。
 
-    对应设计规格：
-        "LLM jointly determines the differential mutation strategy and
-         crossover rate (CR) in a single invocation."
-
-注入点：before_mutation（变异前，决定本轮使用的策略和 CR）
+注入点：before_mutation（变异前，决定本轮使用的 CR）
 """
 
 from __future__ import annotations
@@ -22,9 +19,6 @@ from ..base_module import BaseLLMModule, ModuleState
 
 logger = logging.getLogger(__name__)
 
-# 仅允许的两种策略
-AVAILABLE_STRATEGIES = {"rand/1", "best/2"}
-
 # 预定义 CR 候选值
 CR_CHOICES = [0.1, 0.3, 0.5, 0.7, 0.9]
 
@@ -32,38 +26,50 @@ _SYSTEM_PROMPT = """\
 You are an expert in Differential Evolution (DE) for combinatorial optimization \
 (UAV-target assignment with discrete mapping).
 
-Your task: In a SINGLE invocation, jointly determine:
-1. The differential mutation strategy: DE/rand/1 or DE/best/2
-2. The crossover rate (CR) from {cr_choices}
+Your task: Select the crossover rate (CR) from {cr_choices}.
 
 The scaling factor F will be automatically computed from your chosen CR \
 using the DMDE parameter relationship (formula 3-11).
 
-## Strategy Descriptions
-- **rand/1** (exploratory): trial = x_r1 + F * (x_r2 - x_r3)
-  Best when population diversity is LOW or stagnation is HIGH.
-  Generates diverse offspring by combining random individuals.
-- **best/2** (exploitative): trial = best + F * (x_r1 + x_r2 - x_r3 - x_r4)
-  Best when population diversity is HIGH but convergence is SLOW.
-  Accelerates convergence toward the current best solution.
+## How CR Affects Search
+In the DMDE hybrid strategy (formula 3-10), each gene independently uses:
+- DE/rand/1 (exploration) when random value <= CR
+- DE/best/2 (exploitation) when random value > CR
 
-## CR Selection Guidelines
-- Low CR (0.1): More exploitation — smaller perturbations, fine-tuning
-- Mid CR (0.3/0.5): Balanced exploration/exploitation
-- High CR (0.7/0.9): More exploration — larger perturbations, broader search
+Therefore:
+- High CR (0.7/0.9): More genes use rand/1 → broader exploration
+  Best when diversity is LOW or stagnation is HIGH.
+- Low CR (0.1/0.3): More genes use best/2 → focused exploitation
+  Best when diversity is HIGH but convergence is SLOW.
+- Mid CR (0.5): Balanced exploration/exploitation.
 
 ## Decision Format
 Respond with a JSON object only (no markdown):
 {{
-    "strategy": "rand/1" or "best/2",
-    "cr": <one of {cr_choices}>,  ← MUST be exactly one of these values
-    "reasoning": "<brief explanation>"
+    "cr": <one of {cr_choices}>,
+    "reasoning": "<brief explanation of your CR choice based on the current state>"
 }}
 """.format(cr_choices=str(CR_CHOICES))
 
 
 class LLMSearchControllerModule(BaseLLMModule):
-    """统一 LLM 搜索控制器：一次调用决定策略 + CR。"""
+    """LLM 搜索控制器：决定 CR。"""
+
+    def __init__(self, llm_client, config=None):
+        super().__init__(llm_client, config)
+        # 支持从配置加载自定义 system prompt
+        self._system_prompt = self._config.get("system_prompt", _SYSTEM_PROMPT)
+        prompt_path = self._config.get("system_prompt_path")
+        if prompt_path:
+            try:
+                from pathlib import Path
+                p = Path(prompt_path)
+                if p.exists():
+                    self._system_prompt = p.read_text(encoding="utf-8")
+                else:
+                    logger.warning("system_prompt_path not found: %s, using default", prompt_path)
+            except Exception as e:
+                logger.warning("Failed to load system_prompt_path: %s, using default", e)
 
     @property
     def name(self) -> str:
@@ -77,6 +83,10 @@ class LLMSearchControllerModule(BaseLLMModule):
         features = {
             "generation": state.generation,
             "max_generations": state.max_generations,
+            "temperature": round(state.temperature, 4),
+            "model_type": state.model_type,
+            "n_uavs": state.n_uavs,
+            "n_targets": state.n_targets,
             "best_fitness": state.best_fitness,
             "mean_fitness": state.mean_fitness,
             "diversity": round(state.diversity, 4),
@@ -84,9 +94,10 @@ class LLMSearchControllerModule(BaseLLMModule):
             "convergence_speed": f"{state.convergence_speed:.6f}",
             "stagnation_count": state.stagnation_count,
             "feasible_ratio": round(state.feasible_ratio, 4),
+            "violation_mean": round(state.violation_mean, 6),
+            "violation_max": round(state.violation_max, 6),
             "current_cr": round(state.cr, 4),
             "current_f": round(state.f_scale, 4),
-            "current_strategy": state.extra.get("llm_strategy", "default (CR-based switching)"),
         }
 
         # 轨迹摘要
@@ -106,12 +117,12 @@ class LLMSearchControllerModule(BaseLLMModule):
         user = (
             f"## Current Search State\n{json.dumps(features, indent=2)}\n\n"
             f"## Recent Trajectory\n{trajectory_text}\n\n"
-            f"## Task\nJointly select the best DE strategy and CR for the next interval. "
+            f"## Task\nSelect the best CR for the next interval. "
             f"Respond with JSON only."
         )
 
         return [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": user},
         ]
 
@@ -119,7 +130,6 @@ class LLMSearchControllerModule(BaseLLMModule):
         json_str = self._extract_json(llm_output)
         if json_str is None:
             return {
-                "strategy": "rand/1",
                 "cr": 0.5,
                 "reasoning": "Failed to parse LLM output, using defaults",
             }
@@ -128,15 +138,9 @@ class LLMSearchControllerModule(BaseLLMModule):
             data = json.loads(json_str)
         except json.JSONDecodeError:
             return {
-                "strategy": "rand/1",
                 "cr": 0.5,
                 "reasoning": "Invalid JSON from LLM, using defaults",
             }
-
-        # 验证策略
-        strategy = data.get("strategy", "rand/1")
-        if strategy not in AVAILABLE_STRATEGIES:
-            strategy = "rand/1"
 
         # 验证 CR（取最近的合法值）
         cr = data.get("cr", 0.5)
@@ -148,7 +152,6 @@ class LLMSearchControllerModule(BaseLLMModule):
         cr = min(CR_CHOICES, key=lambda c: abs(c - cr))
 
         return {
-            "strategy": strategy,
             "cr": cr,
             "reasoning": data.get("reasoning", ""),
         }
@@ -156,11 +159,11 @@ class LLMSearchControllerModule(BaseLLMModule):
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
         """将决策应用到搜索状态。
 
-        直接设置 state.cr（不是偏移量），设置 state.extra["llm_strategy"]。
+        直接设置 state.cr（不是偏移量）。
         F 不在此处计算，由求解器根据 LLM 的 CR 通过公式 3-11 计算。
+        LLM 不直接覆盖 strategy；CR 天然影响公式 3-10 中 rand/1 vs best/2 的比例。
         """
         state.cr = float(decision.get("cr", 0.5))
-        state.extra["llm_strategy"] = decision.get("strategy", "rand/1")
         return state
 
 

@@ -32,7 +32,7 @@ from ..base.base_optimizer import BaseOptimizer, SolverResult
 from ..representation.encoder import PopulationEncoder, Individual
 from ..representation.inverse_mapper import inverse_phi
 from ..operators.crossover import dynamic_crossover_rate
-from ..operators.scale_factor import dynamic_scale_factor
+from ..operators.scale_factor import dynamic_scale_factor_batch
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
 from ..features.population_features import compute_diversity, compute_gene_variance
@@ -207,11 +207,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 print(f"  [LLM PopInit] {strategy} (modified {n_mod} individuals)")
 
         # LLM 决策状态缓存
-        llm_strategy = None   # None = 使用原始 DMDE 默认行为
         llm_cr = None          # None = 未被 LLM 设置，使用公式 3-9
-        has_active_sc = any(
-            m.name == "search_controller" and m.enabled for m in self._modules
-        )
 
         t_start = time.time()
 
@@ -234,16 +230,14 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
                 if decision and "cr" in decision:
                     llm_cr = decision["cr"]
-                if decision and "strategy" in decision:
-                    llm_strategy = decision["strategy"]
 
             # CR 来源：LLM 决定 or 公式 3-9（与纯 DMDE 一致）
-            if llm_cr is not None and has_active_sc:
+            if llm_cr is not None:
                 cr = llm_cr
             else:
                 cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
-            # F 从 CR 按公式 3-11 计算
-            f_scale = dynamic_scale_factor(cr, rng)
+            # F 从 CR 按公式 3-11 批量计算（每个个体独立 F 值）
+            f_values = dynamic_scale_factor_batch(cr, cfg.pop_size, rng)
 
             # 计算温度
             temperature = 1.0 - gen / cfg.max_generations
@@ -255,8 +249,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             # 混合变异产生试验向量
             trial_vectors = mutate_population(
                 cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng,
-                cr=cr, f_scale=f_scale,
-                strategy=llm_strategy,
+                cr=cr, f_scale=f_values,
             )
 
             # 对每个个体执行反映射 + 评估 + 贪婪选择
@@ -295,9 +288,9 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 fitness_values = np.array([ind.fitness for ind in population])
                 self._trajectory.record(TrajectoryEntry(
                     generation=gen,
-                    strategy=llm_strategy,
+                    strategy=None,
                     cr=cr,
-                    f_scale=f_scale,
+                    f_scale=float(np.mean(f_values)),
                     temperature=temperature,
                     fitness_best=best_individual.fitness,
                     fitness_mean=float(np.mean(fitness_values)),
@@ -314,8 +307,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 print(
                     f"  Gen {gen}/{cfg.max_generations}: "
                     f"best={best_individual.fitness:.2f}, "
-                    f"CR={cr:.4f}, F={f_scale:.4f}, "
-                    f"strategy={llm_strategy}"
+                    f"CR={cr:.4f}, F={float(np.mean(f_values)):.4f}"
                 )
 
         elapsed = time.time() - t_start
@@ -419,6 +411,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 llm_module=module_name,
                 llm_decision={k: v for k, v in decision.items() if not k.startswith("_")},
                 llm_reasoning=decision.get("_llm_reasoning", ""),
+                llm_raw_output=decision.get("_llm_raw_output", ""),
                 llm_call_duration=decision.get("_llm_call_duration", 0.0),
                 fitness_best=state.best_fitness,
                 diversity=state.diversity,

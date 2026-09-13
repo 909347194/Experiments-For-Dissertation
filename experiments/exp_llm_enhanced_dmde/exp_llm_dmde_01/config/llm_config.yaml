@@ -4,3 +4,21 @@ model: deepseek-flash
 temperature: 0.7
 max_tokens: 1024
 timeout: 60
+
+# --- 模块级 Prompt 可配置 ---
+# 在 solver config 的 modules 字段中，可为 search_controller 指定自定义 prompt：
+#
+# modules:
+#   search_controller:
+#     enabled: true
+#     interval: 50
+#     # 方式 1: 直接在配置中写 prompt（适合短 prompt）
+#     system_prompt: |
+#       You are an expert in DE optimization...
+#       Your custom prompt here...
+#
+#     # 方式 2: 从文件加载 prompt（适合长 prompt 或多场景复用）
+#     # system_prompt_path: config/prompts/search_controller_balanced.txt
+#
+# 不指定 system_prompt 或 system_prompt_path 时，使用代码内置的默认 prompt。
+# 不同场景（balanced/overloaded/srp）可在不同实验配置中定义不同的 prompt。

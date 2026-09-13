@@ -62,6 +62,7 @@ class TrajectoryEntry:
     llm_module: str = ""
     llm_decision: dict[str, Any] = field(default_factory=dict)
     llm_reasoning: str = ""
+    llm_raw_output: str = ""       # LLM 原始输出文本
     llm_call_duration: float = 0.0  # seconds
     # 时间
     timestamp: float = field(default_factory=time.time)

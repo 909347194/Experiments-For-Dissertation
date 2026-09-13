@@ -67,7 +67,13 @@ def mutate_population(
     # 动态缩放因子（可被外部覆盖）
     pop_size = cost_vectors.shape[0]
     if f_scale is not None:
-        f_values = np.full(pop_size, f_scale)
+        f_scale_arr = np.asarray(f_scale)
+        if f_scale_arr.ndim == 0:
+            # 标量 → 广播为全种群统一值（向后兼容）
+            f_values = np.full(pop_size, float(f_scale_arr))
+        else:
+            # 数组 → 每个个体独立 F 值
+            f_values = f_scale_arr
     else:
         f_values = dynamic_scale_factor_batch(cr, pop_size, rng)
 

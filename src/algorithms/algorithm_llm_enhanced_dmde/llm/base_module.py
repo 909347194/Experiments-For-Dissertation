@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -192,6 +193,9 @@ class BaseLLMModule(ABC):
             # 3. 解析响应
             decision = self.parse_response(llm_output)
 
+            # 3.5 记录原始 LLM 输出
+            decision["_llm_raw_output"] = llm_output
+
             # 4. 应用决策
             state = self.apply_decision(decision, state)
 
@@ -216,17 +220,42 @@ class BaseLLMModule(ABC):
     def _extract_json(text: str) -> str | None:
         """从 LLM 输出中提取 JSON 字符串。
 
-        支持三种格式：纯 JSON、```json``` 代码块、文本中嵌入的 JSON。
+        支持三种格式：纯 JSON、markdown 代码块、文本中嵌入的 JSON。
+        当文本中包含多个 JSON 对象时，优先取最后一个完整对象。
         """
         text = text.strip()
+        # Case 1: 整个文本就是一个 JSON 对象
         if text.startswith("{"):
-            return text
+            try:
+                json.loads(text)
+                return text
+            except json.JSONDecodeError:
+                pass  # 可能是不完整的前缀，继续尝试其他方法
+        # Case 2: 代码块
         match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
         if match:
-            return match.group(1).strip()
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start:end + 1]
+            candidate = match.group(1).strip()
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                pass
+        # Case 3: 从后往前扫描，找最后一个合法的 {...} 块
+        pos = len(text) - 1
+        while pos >= 0:
+            end = text.rfind("}", 0, pos + 1)
+            if end == -1:
+                break
+            start = text.rfind("{", 0, end + 1)
+            if start == -1:
+                break
+            candidate = text[start:end + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                # 不合法，继续往前搜索下一个 } 块
+                pos = start - 1
         return None
 
     def __repr__(self) -> str:
