@@ -58,9 +58,9 @@ SCENARIO_MAP = {
 }
 
 SCENARIO_LABELS = {
-    "nm": "N=M 平衡指派",
-    "ngt": "N>M 多对一",
-    "nlt": "N<M 群巡游",
+    "nm": "N=M Balanced Assignment",
+    "ngt": "N>M Many-to-One",
+    "nlt": "N<M Group Patrol",
 }
 
 SCALES = ["small", "medium", "large"]
@@ -80,14 +80,14 @@ def run_experiment(run_py: Path, n_runs: int, label: str, *,
     """运行单个实验。"""
     print(f"\n{'='*60}")
     print(f"▶ {label}")
-    print(f"  脚本: {run_py}")
-    print(f"  运行次数: {n_runs}")
+    print(f"  Script: {run_py}")
+    print(f"  Runs: {n_runs}")
     if scale:
-        print(f"  规模: {scale}")
+        print(f"  Scale: {scale}")
     if solver_params:
-        print(f"  Solver 参数: {solver_params}")
+        print(f"  Solver params: {solver_params}")
     if ablation:
-        print(f"  消融模式: 启用")
+        print(f"  Ablation: enabled")
     print(f"{'='*60}\n")
 
     env = {**os.environ, "EXP_N_RUNS": str(n_runs)}
@@ -106,9 +106,9 @@ def run_experiment(run_py: Path, n_runs: int, label: str, *,
     elapsed = time.time() - t0
 
     if result.returncode != 0:
-        print(f"\n❌ {label} 失败 (exit={result.returncode})")
+        print(f"\n❌ {label} failed (exit={result.returncode})")
         return False
-    print(f"\n✅ {label} 完成 ({elapsed:.1f}s)")
+    print(f"\n✅ {label} done ({elapsed:.1f}s)")
     return True
 
 
@@ -178,9 +178,19 @@ def wilcoxon_test(a: list[float], b: list[float]) -> tuple[float, bool]:
 
 def _setup_font():
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+
+    # Find available serif fonts with CJK fallback
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    serif_fonts = ["Times New Roman", "DejaVu Serif", "Noto Serif CJK SC",
+                   "SimSun", "AR PL UMing CN"]
+    chosen_serif = [f for f in serif_fonts if f in available]
+    if not chosen_serif:
+        chosen_serif = ["DejaVu Serif"]
+
     plt.rcParams.update({
         "font.family": "serif",
-        "font.serif": ["Times New Roman", "DejaVu Serif"],
+        "font.serif": chosen_serif,
         "font.size": 12, "axes.labelsize": 12, "axes.titlesize": 14,
         "xtick.direction": "in", "ytick.direction": "in",
         "axes.unicode_minus": False, "savefig.dpi": 300, "savefig.bbox": "tight",
@@ -192,7 +202,7 @@ def _save_fig(fig, output: Path):
     fig.savefig(output, dpi=300, bbox_inches="tight")
     import matplotlib.pyplot as plt
     plt.close(fig)
-    print(f"  ✅ 图表: {output}")
+    print(f"  ✅ Figure: {output}")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -200,58 +210,138 @@ def _save_fig(fig, output: Path):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def plot_boxplot(dmde: dict, llm: dict, output: Path, scenario: str):
-    """箱线图对比。"""
+    """Box plot + violin + scatter overlay for fitness distribution."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     _setup_font()
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    bp = ax.boxplot([dmde["fitness_values"], llm["fitness_values"]],
-                    tick_labels=["DMDE", "LLM-DMDE"], patch_artist=True,
-                    widths=0.5, showmeans=True,
+    data_list = [dmde["fitness_values"], llm["fitness_values"]]
+    colors = [COLORS["DMDE"], COLORS["LLM-DMDE"]]
+    labels = ["DMDE", "LLM-DMDE"]
+
+    # Violin plot (background)
+    parts = ax.violinplot(data_list, positions=[1, 2], showmeans=False,
+                          showmedians=False, showextrema=False)
+    for pc, color in zip(parts["bodies"], colors):
+        pc.set_facecolor(color)
+        pc.set_alpha(0.25)
+
+    # Box plot (middle layer, whis=[5, 95] for extended whiskers)
+    bp = ax.boxplot(data_list, positions=[1, 2], tick_labels=labels,
+                    patch_artist=True, widths=0.3, whis=[5, 95],
+                    showmeans=True,
                     meanprops=dict(marker="D", markerfacecolor="red", markersize=6))
-
-    for patch, color in zip(bp["boxes"], [COLORS["DMDE"], COLORS["LLM-DMDE"]]):
+    for patch, color in zip(bp["boxes"], colors):
         patch.set_facecolor(color)
-        patch.set_alpha(0.7)
+        patch.set_alpha(0.5)
+        patch.set_edgecolor("black")
+    for whisker in bp["whiskers"]:
+        whisker.set_color("black")
+    for cap in bp["caps"]:
+        cap.set_color("black")
+    for median in bp["medians"]:
+        median.set_color("black")
+        median.set_linewidth(1.5)
 
-    for i, (d, c) in enumerate(zip([dmde["fitness_values"], llm["fitness_values"]],
-                                     [COLORS["DMDE"], COLORS["LLM-DMDE"]]), 1):
-        x = np.random.normal(i, 0.04, size=len(d))
-        ax.scatter(x, d, alpha=0.6, color=c, edgecolors="black", linewidths=0.5, s=40, zorder=5)
+    # Scatter (foreground) with jitter
+    for i, (d, c) in enumerate(zip(data_list, colors), 1):
+        x = np.random.normal(i, 0.06, size=len(d))
+        ax.scatter(x, d, alpha=0.7, color=c, edgecolors="black",
+                   linewidths=0.5, s=35, zorder=5)
+
+    # Mean +/- std annotation
+    for i, (d, c) in enumerate(zip(data_list, colors), 1):
+        mu, sigma = np.mean(d), np.std(d)
+        ax.annotate(f"{mu:.2f}\n$\\pm${sigma:.2f}",
+                    xy=(i, mu), xytext=(i + 0.35, mu),
+                    fontsize=9, color=c, fontweight="bold",
+                    ha="left", va="center",
+                    arrowprops=dict(arrowstyle="->", color=c, lw=0.8))
+
+    # Zoom y-axis to data range with margin
+    all_vals = dmde["fitness_values"] + llm["fitness_values"]
+    vmin, vmax = min(all_vals), max(all_vals)
+    margin = (vmax - vmin) * 0.15 if vmax > vmin else abs(vmax) * 0.05
+    ax.set_ylim(vmin - margin, vmax + margin)
 
     ax.set_ylabel("Best Fitness")
-    ax.set_title(f"Fitness Distribution — {scenario.upper()}")
+    ax.set_title(f"Fitness Distribution \u2014 {scenario.upper()}")
     ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     _save_fig(fig, output)
 
 
 def plot_convergence(dmde: dict, llm: dict, output: Path, scenario: str):
-    """收敛曲线对比。"""
+    """Convergence curves: mean fitness per generation with std band + best-so-far reference."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
     _setup_font()
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    for stats, color in [(dmde, COLORS["DMDE"]), (llm, COLORS["LLM-DMDE"])]:
+    line_styles = [("-", 2.0), ("--", 2.0)]  # solid for DMDE, dashed for LLM-DMDE
+    max_gen = 200  # truncate display
+
+    for (stats, color, (ls, lw)) in zip(
+            [dmde, llm], [COLORS["DMDE"], COLORS["LLM-DMDE"]], line_styles):
         histories = stats["cost_histories"]
         if not histories:
             continue
-        best_idx = min(range(len(histories)),
-                       key=lambda i: histories[i][-1] if histories[i] else float("inf"))
-        for h in histories:
-            if h:
-                ax.plot(range(len(h)), h, color=color, alpha=0.15, linewidth=0.8)
-        ax.plot(range(len(histories[best_idx])), histories[best_idx],
-                color=color, linewidth=2.5, label=stats["label"])
+
+        # Align all histories to the same length, truncate to max_gen
+        min_len = min(len(h) for h in histories if h)
+        n_gen = min(min_len, max_gen)
+
+        # Compute per-generation mean and std
+        stacked = np.array([h[:n_gen] for h in histories if len(h) >= n_gen])
+        mean_curve = np.mean(stacked, axis=0)
+        std_curve = np.std(stacked, axis=0)
+        gens = np.arange(n_gen)
+
+        # Mean fitness with std band
+        ax.plot(gens, mean_curve, color=color, linestyle=ls, linewidth=lw,
+                label=f"{stats['label']} (mean)")
+        ax.fill_between(gens, mean_curve - std_curve, mean_curve + std_curve,
+                        color=color, alpha=0.15)
+
+        # Best-so-far reference (thin dotted)
+        best_curve = np.minimum.accumulate(mean_curve)
+        ax.plot(gens, best_curve, color=color, linestyle=":", linewidth=1.0,
+                alpha=0.6)
 
     ax.set_xlabel("Generation")
-    ax.set_ylabel("Best Fitness")
-    ax.set_title(f"Convergence — {scenario.upper()}")
-    ax.legend()
+    ax.set_ylabel("Fitness")
+    ax.set_title(f"Convergence \u2014 {scenario.upper()}")
+    ax.set_xlim(0, max_gen)
+    ax.legend(loc="upper right")
     ax.grid(alpha=0.3)
+
+    # Inset axes: zoom into first 50 generations
+    axins = inset_axes(ax, width="40%", height="35%", loc="center right")
+    inset_gen = 50
+    for (stats, color, (ls, lw)) in zip(
+            [dmde, llm], [COLORS["DMDE"], COLORS["LLM-DMDE"]], line_styles):
+        histories = stats["cost_histories"]
+        if not histories:
+            continue
+        min_len = min(len(h) for h in histories if h)
+        n_gen = min(min_len, inset_gen)
+        stacked = np.array([h[:n_gen] for h in histories if len(h) >= n_gen])
+        mean_curve = np.mean(stacked, axis=0)
+        std_curve = np.std(stacked, axis=0)
+        gens = np.arange(n_gen)
+        axins.plot(gens, mean_curve, color=color, linestyle=ls, linewidth=lw)
+        axins.fill_between(gens, mean_curve - std_curve, mean_curve + std_curve,
+                           color=color, alpha=0.15)
+    axins.set_xlim(0, inset_gen)
+    axins.set_xlabel("Gen", fontsize=9)
+    axins.set_ylabel("Fitness", fontsize=9)
+    axins.tick_params(labelsize=8)
+    axins.grid(alpha=0.3)
+    mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.5", linestyle="--")
+
     plt.tight_layout()
     _save_fig(fig, output)
 
@@ -388,18 +478,18 @@ def gen_table(dmde: dict, llm: dict, scenario: str) -> str:
     mean_imp = (dmde["mean_fitness"] - llm["mean_fitness"]) / abs(dmde["mean_fitness"]) * 100
 
     lines = [
-        f"# 对比实验结果：{scenario.upper()}\n",
-        "> 30次独立运行。† Wilcoxon 秩和检验显著 (p<0.05)\n",
-        "| 指标 | DMDE | LLM-DMDE | 改进 |",
-        "|------|------|----------|------|",
+        f"# Comparison Results: {scenario.upper()}\n",
+        "> 30 independent runs. \u2020 Wilcoxon signed-rank test significant (p<0.05)\n",
+        "| Metric | DMDE | LLM-DMDE | Improvement |",
+        "|--------|------|----------|-------------|",
         f"| Best fitness | {dmde['best_fitness']:.2f} | {llm['best_fitness']:.2f} | {best_imp:+.2f}% |",
-        f"| Mean±std | {dmde['mean_fitness']:.2f}±{dmde['std_fitness']:.2f} | {llm['mean_fitness']:.2f}±{llm['std_fitness']:.2f}{dagger} | {mean_imp:+.2f}% |",
+        f"| Mean\u00b1std | {dmde['mean_fitness']:.2f}\u00b1{dmde['std_fitness']:.2f} | {llm['mean_fitness']:.2f}\u00b1{llm['std_fitness']:.2f}{dagger} | {mean_imp:+.2f}% |",
         f"| Median | {dmde['median_fitness']:.2f} | {llm['median_fitness']:.2f} | |",
-        f"| 可行解率 | {dmde['feasible_rate']*100:.0f}% ({dmde['feasible_count']}/{dmde['n_runs']}) | {llm['feasible_rate']*100:.0f}% ({llm['feasible_count']}/{llm['n_runs']}) | |",
-        f"| 平均耗时 | {dmde['mean_time']:.1f}s | {llm['mean_time']:.1f}s | |",
+        f"| Feasible rate | {dmde['feasible_rate']*100:.0f}% ({dmde['feasible_count']}/{dmde['n_runs']}) | {llm['feasible_rate']*100:.0f}% ({llm['feasible_count']}/{llm['n_runs']}) | |",
+        f"| Mean time | {dmde['mean_time']:.1f}s | {llm['mean_time']:.1f}s | |",
     ]
     if llm.get("llm_config"):
-        lines.append(f"| LLM 模型 | — | {llm['llm_config'].get('model', '—')} | |")
+        lines.append(f"| LLM model | — | {llm['llm_config'].get('model', '—')} | |")
     lines.append("")
     return "\n".join(lines)
 
@@ -411,8 +501,8 @@ def gen_markdown_report(all_results: dict[str, dict[str, dict[str, dict]]]) -> s
         all_results: {scenario: {scale: {"DMDE": stats, "LLM-DMDE": stats}}}
     """
     lines = [
-        "# DMDE vs LLM-DMDE 对比实验报告\n",
-        f"> 生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n",
+        "# DMDE vs LLM-DMDE Comparison Report\n",
+        f"> Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n",
     ]
 
     for scenario, scale_data in all_results.items():
@@ -431,14 +521,14 @@ def gen_markdown_report(all_results: dict[str, dict[str, dict[str, dict]]]) -> s
             best_imp = (dmde["best_fitness"] - llm["best_fitness"]) / abs(dmde["best_fitness"]) * 100
             mean_imp = (dmde["mean_fitness"] - llm["mean_fitness"]) / abs(dmde["mean_fitness"]) * 100
 
-            lines.append(f"### 规模: {scale}\n")
-            lines.append("| 指标 | DMDE | LLM-DMDE | 改进 |")
-            lines.append("|------|------|----------|------|")
+            lines.append(f"### Scale: {scale}\n")
+            lines.append("| Metric | DMDE | LLM-DMDE | Improvement |")
+            lines.append("|--------|------|----------|-------------|")
             lines.append(f"| Best fitness | {dmde['best_fitness']:.2f} | {llm['best_fitness']:.2f} | {best_imp:+.2f}% |")
             lines.append(f"| Mean±std | {dmde['mean_fitness']:.2f}±{dmde['std_fitness']:.2f} | {llm['mean_fitness']:.2f}±{llm['std_fitness']:.2f}{dagger} | {mean_imp:+.2f}% |")
-            lines.append(f"| 可行解率 | {dmde['feasible_rate']*100:.0f}% | {llm['feasible_rate']*100:.0f}% | |")
-            lines.append(f"| 平均耗时 | {dmde['mean_time']:.1f}s | {llm['mean_time']:.1f}s | |")
-            lines.append(f"| 显著性 p | — | — | {p:.4f}{'†' if sig else ''} |")
+            lines.append(f"| Feasible rate | {dmde['feasible_rate']*100:.0f}% | {llm['feasible_rate']*100:.0f}% | |")
+            lines.append(f"| Mean time | {dmde['mean_time']:.1f}s | {llm['mean_time']:.1f}s | |")
+            lines.append(f"| p-value | — | — | {p:.4f}{'\u2020' if sig else ''} |")
             lines.append("")
 
     return "\n".join(lines)
@@ -459,15 +549,15 @@ def gen_latex_summary_table(all_results: dict[str, dict[str, dict[str, dict]]],
                             output: Path):
     """生成汇总 LaTeX 表格（所有场景×所有规模）。"""
     lines = [
-        "% 自动生成的 LaTeX 表格 — 可直接 \\input{} 到主文档",
-        "% 需要 \\usepackage{booktabs}",
+        "% Auto-generated LaTeX table — directly \\input{} into main document",
+        "% Requires \\usepackage{booktabs}",
         "\\begin{table}[htbp]",
         "  \\centering",
-        "  \\caption{DMDE 与 LLM-DMDE 对比实验结果}",
+        "  \\caption{Comparison of DMDE and LLM-DMDE}",
         "  \\label{tab:dmde_comparison}",
         "  \\begin{tabular}{llrrrrrrr}",
         "    \\toprule",
-        "    场景 & 规模 & \\multicolumn{2}{c}{Best Fitness} & \\multicolumn{2}{c}{Mean$\\pm$Std} & 可行率(\\%) & 耗时(s) & 改进(\\%) \\\\",
+        "    Scenario & Scale & \\multicolumn{2}{c}{Best Fitness} & \\multicolumn{2}{c}{Mean$\\pm$Std} & Feasible(\\%) & Time(s) & Improve(\\%) \\\\",
         "    \\cmidrule(lr){3-4} \\cmidrule(lr){5-6}",
         "    & & DMDE & LLM-DMDE & DMDE & LLM-DMDE & & & \\\\",
         "    \\midrule",
@@ -515,7 +605,7 @@ def gen_latex_summary_table(all_results: dict[str, dict[str, dict[str, dict]]],
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines), encoding="utf-8")
-    print(f"  ✅ LaTeX 汇总表: {output}")
+    print(f"  ✅ LaTeX summary table: {output}")
 
 
 def gen_latex_scenario_table(scenario: str, scale_data: dict[str, dict[str, dict]],
@@ -523,15 +613,15 @@ def gen_latex_scenario_table(scenario: str, scale_data: dict[str, dict[str, dict
     """生成单场景 LaTeX 表格。"""
     label = SCENARIO_LABELS.get(scenario, scenario)
     lines = [
-        "% 自动生成的 LaTeX 表格 — " + label,
-        "% 需要 \\usepackage{booktabs}",
+        "% Auto-generated LaTeX table — " + label,
+        "% Requires \\usepackage{booktabs}",
         "\\begin{table}[htbp]",
         "  \\centering",
-        f"  \\caption{{{label}场景下 DMDE 与 LLM-DMDE 对比结果}}",
+        f"  \\caption{{Comparison of DMDE and LLM-DMDE under {label}}}",
         f"  \\label{{tab:dmde_{scenario}}}",
         "  \\begin{tabular}{lrrrrrrrr}",
         "    \\toprule",
-        "    规模 & \\multicolumn{2}{c}{Best Fitness} & \\multicolumn{2}{c}{Mean$\\pm$Std} & 可行率(\\%) & 耗时(s) & 改进(\\%) \\\\",
+        "    Scale & \\multicolumn{2}{c}{Best Fitness} & \\multicolumn{2}{c}{Mean$\\pm$Std} & Feasible(\\%) & Time(s) & Improve(\\%) \\\\",
         "    \\cmidrule(lr){2-3} \\cmidrule(lr){4-5}",
         "    & DMDE & LLM-DMDE & DMDE & LLM-DMDE & & & \\\\",
         "    \\midrule",
@@ -570,7 +660,7 @@ def gen_latex_scenario_table(scenario: str, scale_data: dict[str, dict[str, dict
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(lines), encoding="utf-8")
-    print(f"  ✅ LaTeX 场景表 ({scenario}): {output}")
+    print(f"  ✅ LaTeX scenario table ({scenario}): {output}")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -578,26 +668,26 @@ def gen_latex_scenario_table(scenario: str, scale_data: dict[str, dict[str, dict
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def main():
-    parser = argparse.ArgumentParser(description="DMDE vs LLM-DMDE 对比实验")
+    parser = argparse.ArgumentParser(description="DMDE vs LLM-DMDE Comparison Experiment")
     parser.add_argument("--scenario", default="nm", choices=list(SCENARIO_MAP.keys()),
-                        help="场景: nm/ngt/nlt (默认: nm)")
+                        help="Scenario: nm/ngt/nlt (default: nm)")
     parser.add_argument("--scenarios", nargs="+", default=None,
-                        help="多个场景或 'all' (覆盖 --scenario)")
-    parser.add_argument("--runs", type=int, default=30, help="运行次数 (默认: 30)")
+                        help="Multiple scenarios or 'all' (overrides --scenario)")
+    parser.add_argument("--runs", type=int, default=30, help="Number of runs (default: 30)")
     parser.add_argument("--sizes", nargs="+", default=None, choices=SCALES,
-                        help="多规模: small medium large (默认: 仅 medium)")
+                        help="Scales: small medium large (default: medium only)")
     parser.add_argument("--format", choices=["md", "latex", "both"], default="md",
-                        help="输出格式: md/latex/both (默认: md)")
-    parser.add_argument("--only", choices=["baseline", "llm"], help="只运行指定实验")
-    parser.add_argument("--no-compare", action="store_true", help="跳过对比生成")
+                        help="Output format: md/latex/both (default: md)")
+    parser.add_argument("--only", choices=["baseline", "llm"], help="Run only specified experiment")
+    parser.add_argument("--no-compare", action="store_true", help="Skip comparison generation")
     parser.add_argument("--baseline-data", type=str, default=None,
-                        help="直接指定基线结果 JSON（跳过运行）")
+                        help="Directly specify baseline result JSON (skip running)")
     parser.add_argument("--llm-data", type=str, default=None,
-                        help="直接指定 LLM 结果 JSON（跳过运行）")
+                        help="Directly specify LLM result JSON (skip running)")
     parser.add_argument("--solver-params", type=str, default=None,
-                        help='自定义 solver 参数 JSON，如 \'{"pop_size":150}\'')
+                        help='Custom solver params JSON, e.g. \'{"pop_size":150}\'')
     parser.add_argument("--ablation", action="store_true",
-                        help="消融实验模式（禁用 LLM 模块）")
+                        help="Ablation experiment mode (disable LLM modules)")
     args = parser.parse_args()
 
     # 解析场景列表
@@ -616,15 +706,15 @@ def main():
     all_results: dict[str, dict[str, dict[str, dict]]] = {}
 
     print(f"{'='*60}")
-    print(f"DMDE vs LLM-DMDE 对比实验")
-    print(f"  场景: {', '.join(scenarios)}")
-    print(f"  规模: {', '.join(sizes)}")
-    print(f"  运行次数: {args.runs}")
-    print(f"  输出格式: {args.format}")
+    print(f"DMDE vs LLM-DMDE Comparison Experiment")
+    print(f"  Scenarios: {', '.join(scenarios)}")
+    print(f"  Scales: {', '.join(sizes)}")
+    print(f"  Runs: {args.runs}")
+    print(f"  Format: {args.format}")
     if args.solver_params:
-        print(f"  Solver 参数: {args.solver_params}")
+        print(f"  Solver params: {args.solver_params}")
     if args.ablation:
-        print(f"  消融模式: 启用")
+        print(f"  Ablation: enabled")
     print(f"{'='*60}")
 
     results_dir = SCRIPT_DIR / "results"
@@ -643,7 +733,7 @@ def main():
 
         for scale in sizes:
             print(f"\n{'#'*60}")
-            print(f"# 场景: {scenario.upper()} | 规模: {scale}")
+            print(f"# Scenario: {scenario.upper()} | Scale: {scale}")
             print(f"{'#'*60}")
 
             all_results[scenario][scale] = {}
@@ -654,7 +744,7 @@ def main():
             if args.only != "llm" and not args.baseline_data:
                 baseline_ok = run_experiment(
                     dmde_path / "run.py", args.runs,
-                    f"DMDE 基线 ({scenario}, {scale})",
+                    f"DMDE Baseline ({scenario}, {scale})",
                     scale=scale, solver_params=args.solver_params,
                 )
             elif args.baseline_data:
@@ -682,15 +772,15 @@ def main():
                 llm_json = find_result_json(llm_path)
 
             if not dmde_json or not dmde_json.exists():
-                print(f"\n⚠️  DMDE 结果不存在: {dmde_json}，跳过 {scenario}/{scale}")
+                print(f"\n⚠️  DMDE result not found: {dmde_json}, skipping {scenario}/{scale}")
                 continue
             if not llm_json or not llm_json.exists():
-                print(f"\n⚠️  LLM-DMDE 结果不存在: {llm_json}，跳过 {scenario}/{scale}")
+                print(f"\n⚠️  LLM-DMDE result not found: {llm_json}, skipping {scenario}/{scale}")
                 continue
 
             # ── 生成对比 ──────────────────────────────────
             if args.no_compare:
-                print("\n跳过对比生成。")
+                print("\nSkipping comparison generation.")
                 continue
 
             dmde_data = load_data(dmde_json)
@@ -706,7 +796,7 @@ def main():
             suffix = f"_{scenario}_{scale}" if len(sizes) > 1 else f"_{scenario}"
             table_path = results_dir / f"comparison{suffix}.md"
             table_path.write_text(table, encoding="utf-8")
-            print(f"  ✅ 对比表: {table_path}")
+            print(f"  ✅ Comparison table: {table_path}")
 
             # 图表
             fig_suffix = f"_{scenario}_{scale}" if len(sizes) > 1 else f"_{scenario}"
@@ -740,7 +830,7 @@ def main():
     # ── 多规模缩放曲线图 ──────────────────────────────────────
     if len(sizes) > 1 and not args.no_compare:
         print(f"\n{'='*60}")
-        print("生成多规模缩放曲线图")
+        print("Generating multi-scale scaling curves")
         print(f"{'='*60}")
 
         plot_scaling_curve(all_results,
@@ -756,7 +846,7 @@ def main():
         md_report = gen_markdown_report(all_results)
         md_path = results_dir / "summary_report.md"
         md_path.write_text(md_report, encoding="utf-8")
-        print(f"\n  ✅ Markdown 汇总报告: {md_path}")
+        print(f"\n  ✅ Markdown summary report: {md_path}")
 
         # LaTeX 表格
         if args.format in ("latex", "both"):
@@ -772,7 +862,7 @@ def main():
     # ── 最终汇总 ──────────────────────────────────────────────
     if all_results:
         print(f"\n{'='*60}")
-        print("对比实验汇总")
+        print("Comparison Experiment Summary")
         print(f"{'='*60}")
         for scenario, scale_data in all_results.items():
             label = SCENARIO_LABELS.get(scenario, scenario)
@@ -785,8 +875,8 @@ def main():
                     print(f"  {label} ({scale}): "
                           f"DMDE={dmde['best_fitness']:.2f}, "
                           f"LLM-DMDE={llm['best_fitness']:.2f}, "
-                          f"改进={imp:+.2f}%")
-        print(f"\n  输出目录: {results_dir}")
+                          f"Improvement={imp:+.2f}%")
+        print(f"\n  Output: {results_dir}")
         print(f"{'='*60}")
 
 
