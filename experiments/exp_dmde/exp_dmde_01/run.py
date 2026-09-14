@@ -217,7 +217,7 @@ def main():
 
     # 7.5 注册到索引
     try:
-        sys.path.insert(0, str(PROJECT_ROOT / "experiments"))
+        sys.path.insert(0, str(PROJECT_ROOT / "experiments" / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01"))
         from registry import register
         register(
             experiment_id="dmde_01",
