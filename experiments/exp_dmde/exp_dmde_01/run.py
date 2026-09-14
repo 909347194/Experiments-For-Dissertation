@@ -215,6 +215,20 @@ def main():
     )
     print(f"\n数据已保存: {data_file}")
 
+    # 7.5 注册到索引
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / "experiments"))
+        from registry import register
+        register(
+            experiment_id="dmde_01",
+            label="DMDE 基线 N=M=10",
+            result_path="exp_dmde/exp_dmde_01/results/exp_dmde_01_data.json",
+            tags=["baseline", "dmde", "balanced", "10u10t"],
+            meta={"n_runs": N_RUNS, "solver_params": SOLVER_PARAMS},
+        )
+    except Exception:
+        pass
+
     # 8. 可视化
     if VISUALIZE:
         print(f"\n[8] 生成可视化图表...")

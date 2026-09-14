@@ -2,17 +2,25 @@
 """compare_experiments.py — DMDE 基线 vs LLM-DMDE 实验对比
 
 读取两个实验的结果 JSON，生成：
-1. results/comparison.md              — 对比表格
-2. results/figures/comparison_boxplot.png  — fitness 箱线图对比
-3. results/figures/comparison_convergence.png — 收敛曲线对比
+1. comparison_results/comparison.md              — 对比表格
+2. comparison_results/figures/comparison_boxplot.png  — fitness 箱线图对比
+3. comparison_results/figures/comparison_convergence.png — 收敛曲线对比
 
 用法：
     cd experiments
+
+    # 自动从索引读取（推荐）
     python compare_experiments.py
 
-    # 或指定自定义路径
+    # 指定标签筛选
+    python compare_experiments.py --tags 10u10t
+
+    # 手动指定路径
     python compare_experiments.py --baseline exp_dmde/exp_dmde_01/results/exp_dmde_01_data.json \
                                    --llm exp_llm_enhanced_dmde/exp_llm_dmde_01/results/exp_llm_dmde_01_data.json
+
+    # 列出索引中的所有实验
+    python compare_experiments.py --list
 """
 
 from __future__ import annotations
@@ -24,13 +32,11 @@ from pathlib import Path
 
 import numpy as np
 
-# 路径解析：兼容从项目根目录或 experiments/ 目录运行
+# 路径解析
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if (_SCRIPT_DIR / "exp_dmde").is_dir():
-    # 从 experiments/ 目录运行
     _BASE = _SCRIPT_DIR
 elif (_SCRIPT_DIR / "experiments" / "exp_dmde").is_dir():
-    # 从项目根目录运行
     _BASE = _SCRIPT_DIR / "experiments"
 else:
     _BASE = _SCRIPT_DIR
@@ -39,6 +45,23 @@ DEFAULT_BASELINE = _BASE / "exp_dmde" / "exp_dmde_01" / "results" / "exp_dmde_01
 DEFAULT_LLM = _BASE / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "results" / "exp_llm_dmde_01_data.json"
 OUTPUT_DIR = _BASE / "comparison_results"
 FIGURES_DIR = OUTPUT_DIR / "figures"
+
+
+def _resolve_from_registry(tags: list[str] | None = None) -> tuple[Path | None, Path | None]:
+    """从索引自动发现 baseline 和 llm 结果。"""
+    try:
+        from registry import get_results
+    except ImportError:
+        sys.path.insert(0, str(_BASE))
+        from registry import get_results
+
+    baselines = get_results(tags=(tags or []) + ["baseline"])
+    llms = get_results(tags=(tags or []) + ["llm"])
+
+    baseline_path = _BASE / baselines[0]["result_path"] if baselines else None
+    llm_path = _BASE / llms[0]["result_path"] if llms else None
+    return baseline_path, llm_path
+
 
 
 def load_data(path: Path) -> dict:
@@ -253,21 +276,51 @@ def plot_comparison_convergence(baseline: dict, llm: dict, output_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="对比 DMDE 基线和 LLM-DMDE 实验结果")
-    parser.add_argument("--baseline", type=str, default=str(DEFAULT_BASELINE),
-                        help="DMDE 基线结果 JSON 路径")
-    parser.add_argument("--llm", type=str, default=str(DEFAULT_LLM),
-                        help="LLM-DMDE 结果 JSON 路径")
+    parser.add_argument("--baseline", type=str, default=None,
+                        help="DMDE 基线结果 JSON 路径（不指定则从索引自动发现）")
+    parser.add_argument("--llm", type=str, default=None,
+                        help="LLM-DMDE 结果 JSON 路径（不指定则从索引自动发现）")
+    parser.add_argument("--tags", type=str, nargs="*", default=None,
+                        help="按标签筛选实验，如 --tags 10u10t")
+    parser.add_argument("--list", action="store_true",
+                        help="列出索引中的所有实验后退出")
     args = parser.parse_args()
 
-    baseline_path = Path(args.baseline)
-    llm_path = Path(args.llm)
+    # 列出所有实验
+    if args.list:
+        try:
+            from registry import list_experiments
+        except ImportError:
+            sys.path.insert(0, str(_BASE))
+            from registry import list_experiments
+        experiments = list_experiments()
+        if not experiments:
+            print("索引为空。请先运行实验生成结果。")
+        else:
+            print(f"\n索引中共 {len(experiments)} 个实验：")
+            for exp in experiments:
+                tags_str = ", ".join(exp.get("tags", []))
+                print(f"  [{exp['id']}] {exp['label']}")
+                print(f"    路径: {exp['result_path']}")
+                print(f"    标签: {tags_str}")
+                print(f"    注册: {exp.get('registered_at', 'N/A')}")
+        return
 
-    # Check files exist
-    if not baseline_path.exists():
+    # 发现结果路径
+    if args.baseline and args.llm:
+        baseline_path = Path(args.baseline)
+        llm_path = Path(args.llm)
+    else:
+        print("从索引自动发现实验结果...")
+        auto_baseline, auto_llm = _resolve_from_registry(args.tags)
+        baseline_path = Path(args.baseline) if args.baseline else auto_baseline
+        llm_path = Path(args.llm) if args.llm else auto_llm
+
+    if baseline_path is None or not baseline_path.exists():
         print(f"❌ DMDE 基线结果不存在: {baseline_path}")
         print("请先运行: cd exp_dmde/exp_dmde_01 && python run.py")
         sys.exit(1)
-    if not llm_path.exists():
+    if llm_path is None or not llm_path.exists():
         print(f"❌ LLM-DMDE 结果不存在: {llm_path}")
         print("请先运行: cd exp_llm_enhanced_dmde/exp_llm_dmde_01 && python run.py")
         sys.exit(1)

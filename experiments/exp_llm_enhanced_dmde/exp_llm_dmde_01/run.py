@@ -345,6 +345,25 @@ def main():
         total_decisions = sum(len(v) for v in all_llm_decisions.values())
         print(f"  LLM 决策记录: {total_decisions} 条（{len(all_llm_decisions)} 次运行）")
 
+    # 7.5 注册到索引
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / "experiments"))
+        from registry import register
+        register(
+            experiment_id="llm_dmde_01",
+            label="LLM-DMDE N=M=10 (search_controller)",
+            result_path="exp_llm_enhanced_dmde/exp_llm_dmde_01/results/exp_llm_dmde_01_data.json",
+            tags=["llm", "dmde", "balanced", "10u10t", "search_controller"],
+            meta={
+                "n_runs": N_RUNS,
+                "solver_params": SOLVER_PARAMS,
+                "llm_model": llm_config.get("model", "default"),
+                "llm_interval": LLM_INTERVAL,
+            },
+        )
+    except Exception:
+        pass
+
     # 8. 可视化
     if VISUALIZE:
         print(f"\n[8] 生成可视化图表...")
