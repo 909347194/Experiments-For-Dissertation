@@ -24,10 +24,20 @@ from pathlib import Path
 
 import numpy as np
 
-# 默认路径（相对于 experiments/ 目录）
-DEFAULT_BASELINE = Path("exp_dmde/exp_dmde_01/results/exp_dmde_01_data.json")
-DEFAULT_LLM = Path("exp_llm_enhanced_dmde/exp_llm_dmde_01/results/exp_llm_dmde_01_data.json")
-OUTPUT_DIR = Path("results")
+# 路径解析：兼容从项目根目录或 experiments/ 目录运行
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if (_SCRIPT_DIR / "exp_dmde").is_dir():
+    # 从 experiments/ 目录运行
+    _BASE = _SCRIPT_DIR
+elif (_SCRIPT_DIR / "experiments" / "exp_dmde").is_dir():
+    # 从项目根目录运行
+    _BASE = _SCRIPT_DIR / "experiments"
+else:
+    _BASE = _SCRIPT_DIR
+
+DEFAULT_BASELINE = _BASE / "exp_dmde" / "exp_dmde_01" / "results" / "exp_dmde_01_data.json"
+DEFAULT_LLM = _BASE / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "results" / "exp_llm_dmde_01_data.json"
+OUTPUT_DIR = _BASE / "results"
 FIGURES_DIR = OUTPUT_DIR / "figures"
 
 
