@@ -26,6 +26,7 @@
     EXP_N_RUNS=3 python run.py
 """
 
+import numpy as np
 from __future__ import annotations
 
 import json
@@ -98,6 +99,24 @@ N_RUNS = int(os.environ.get("EXP_N_RUNS", "5"))
 VISUALIZE = True
 FIGURES_DIR = RESULTS_DIR / "figures"
 
+# ── 多规模支持 ────────────────────────────────────────────────
+SCALE = os.environ.get("EXP_SCALE", "medium").lower()
+# N>M 规模：small=5U/2T, medium=10U/4T, large=20U/8T
+SCALES_UAV = {"small": 5, "medium": 10, "large": 20}
+SCALES_TGT = {"small": 2, "medium": 4, "large": 8}
+N_UAVS = SCALES_UAV.get(SCALE, 10)
+N_TGTS = SCALES_TGT.get(SCALE, 4)
+
+# 支持自定义 solver 参数
+_solver_overrides = os.environ.get("EXP_SOLVER_PARAMS", "")
+if _solver_overrides:
+    import json as _json
+    try:
+        _overrides = _json.loads(_solver_overrides)
+        SOLVER_PARAMS.update(_overrides)
+    except _json.JSONDecodeError:
+        pass
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 约束选配
@@ -144,56 +163,70 @@ def describe_constraints(cfg: dict[str, bool]) -> str:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 场景定义：N>M 多对一（12 UAV → 4 Target）
+# 场景定义：N>M 多对一（支持多规模）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# DEM 地理范围
+_LON_MIN, _LON_MAX = 91.00, 91.30
+_LAT_MIN, _LAT_MAX = 29.50, 29.75
+_ALT_MIN, _ALT_MAX = 3640, 3700
+
+
+def _generate_positions(n: int, seed: int = 42, *,
+                        lon_range: tuple[float, float] = (_LON_MIN + 0.02, _LON_MAX - 0.02),
+                        lat_range: tuple[float, float] = (_LAT_MIN + 0.02, _LAT_MAX - 0.02),
+                        alt_range: tuple[float, float] = (_ALT_MIN, _ALT_MAX),
+                        ) -> list[tuple[float, float, float]]:
+    """在 DEM 范围内生成 n 个均匀分布的位置。"""
+    rng = np.random.RandomState(seed)
+    lons = rng.uniform(*lon_range, n)
+    lats = rng.uniform(*lat_range, n)
+    alts = rng.uniform(*alt_range, n)
+    return [(lons[i], lats[i], float(alts[i])) for i in range(n)]
+
+
 def make_scenario(cc: dict[str, bool]):
-    """N>M 多对一场景，根据约束配置动态调整 UAV/Target 属性。"""
+    """N>M 多对一场景，支持 small/medium/large 规模。
 
-    # 基础 UAV 配置
-    uav_base = [
-        dict(id=0,  start_pos=(91.04, 29.55, 3650), speed_range=(0.20, 0.50), max_range=32000),
-        dict(id=1,  start_pos=(91.08, 29.53, 3640), speed_range=(0.25, 0.55), max_range=30000),
-        dict(id=2,  start_pos=(91.12, 29.55, 3660), speed_range=(0.30, 0.60), max_range=35000),
-        dict(id=3,  start_pos=(91.06, 29.58, 3670), speed_range=(0.20, 0.50), max_range=28000),
-        dict(id=4,  start_pos=(91.16, 29.54, 3650), speed_range=(0.25, 0.55), max_range=31000),
-        dict(id=5,  start_pos=(91.20, 29.56, 3660), speed_range=(0.30, 0.60), max_range=34000),
-        dict(id=6,  start_pos=(91.04, 29.60, 3680), speed_range=(0.20, 0.50), max_range=29000),
-        dict(id=7,  start_pos=(91.10, 29.57, 3660), speed_range=(0.25, 0.55), max_range=30000),
-        dict(id=8,  start_pos=(91.18, 29.52, 3650), speed_range=(0.30, 0.60), max_range=36000),
-        dict(id=9,  start_pos=(91.08, 29.60, 3690), speed_range=(0.20, 0.50), max_range=27000),
-    ]
+    规模映射（由 EXP_SCALE 环境变量控制）：
+        small:  5U / 2T
+        medium: 10U / 4T（默认）
+        large:  20U / 8T
+    """
+    n_uav, n_tgt = N_UAVS, N_TGTS
 
-    # 启用 max_time 约束时，添加最大飞行时间
-    # 余量系数 2.0：保证 UAV 有能力在时间窗内完成任务
-    if cc["time"]:
-        for u in uav_base:
-            avg_speed = (u["speed_range"][0] + u["speed_range"][1]) / 2
-            u["max_time"] = u["max_range"] / avg_speed * 2.0
+    uav_positions = _generate_positions(n_uav, seed=300)
+    uavs = []
+    for i in range(n_uav):
+        speed_lo = 0.20 + (i % 3) * 0.05
+        speed_hi = speed_lo + 0.30
+        max_r = 27000 + (i % 6) * 1500
+        uav_dict = dict(
+            id=i, start_pos=uav_positions[i],
+            speed_range=(round(speed_lo, 2), round(speed_hi, 2)),
+            max_range=max_r,
+        )
+        if cc["time"]:
+            avg_speed = (speed_lo + speed_hi) / 2
+            uav_dict["max_time"] = max_r / avg_speed * 2.0
+        uavs.append(UAV(**uav_dict))
 
-    uavs = [UAV(**u) for u in uav_base]
-
-    # 基础 Target 配置
-    tgt_base = [
-        dict(id=0, position=(91.12, 29.66, 3700), weight=1.0),
-        dict(id=1, position=(91.16, 29.70, 3750), weight=0.8),
-        dict(id=2, position=(91.08, 29.68, 3720), weight=0.9),
-        dict(id=3, position=(91.20, 29.65, 3700), weight=0.7),
-    ]
-
-    # 启用时间窗约束
-    if cc["time"]:
-        tgt_base[0]["time_window"] = (35000, 100000)
-        tgt_base[1]["time_window"] = (30000, 95000)
-        tgt_base[2]["time_window"] = (38000, 110000)
-        tgt_base[3]["time_window"] = (32000, 98000)
-
-    # 启用时序约束：Target 0 必须在 Target 3 之前执行
-    if cc["seq"]:
-        tgt_base[0]["sequence_group"] = 1
-        tgt_base[3]["sequence_group"] = 1  # 同组，id 小的先执行
-
-    targets = [Target(**t) for t in tgt_base]
+    tgt_positions = _generate_positions(n_tgt, seed=400,
+                                        alt_range=(_ALT_MIN + 40, _ALT_MAX + 100))
+    targets = []
+    for i in range(n_tgt):
+        tgt_dict = dict(
+            id=i, position=tgt_positions[i],
+            weight=round(0.7 + (i % 4) * 0.1, 2),
+        )
+        if cc["time"]:
+            tgt_dict["time_window"] = (30000 + i * 2000, 95000 + i * 5000)
+        if cc["seq"] and i == n_tgt - 1:
+            tgt_dict["sequence_group"] = 1
+        targets.append(Target(**tgt_dict))
+    # 时序约束：第0个目标与最后一个同组
+    if cc["seq"] and n_tgt >= 2:
+        targets[0].sequence_group = 1
 
     alpha, beta = 2.5, 1.5
     return uavs, targets, alpha, beta
@@ -232,7 +265,7 @@ def main():
     name = "N>M 多对一"
 
     print(f"\n{'='*60}")
-    print(f"场景: {name} ({n}U/{m}T)")
+    print(f"场景: {name} ({n}U/{m}T) [规模: {SCALE}]")
     print(f"  UAV max_range: {min(u.max_range for u in uavs):.0f} ~ {max(u.max_range for u in uavs):.0f}")
     if cc["time"]:
         print(f"  UAV max_time:  {min(u.max_time for u in uavs if u.max_time):.0f} ~ {max(u.max_time for u in uavs if u.max_time):.0f}")

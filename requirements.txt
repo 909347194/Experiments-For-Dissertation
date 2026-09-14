@@ -1,0 +1,15 @@
+# Experiments-For-Dissertation 依赖清单
+# 由 pyproject.toml + uv.lock 生成
+# Python >=3.12,<3.13
+#
+# 注意: openai, pyyaml, python-dotenv 未在 uv.lock 中解析，
+#       以下版本为 PyPI 当前最新稳定版，可按需调整。
+
+numpy==2.5.3
+rasterio==1.5.1
+shapely==2.1.2
+matplotlib==3.11.1
+openai==3.13.0
+pyyaml==6.0.3
+python-dotenv==1.2.3
+scipy==1.15.3

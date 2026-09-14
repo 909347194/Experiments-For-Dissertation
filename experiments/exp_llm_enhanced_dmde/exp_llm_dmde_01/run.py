@@ -19,6 +19,7 @@ N=M 场景约束（单 UAV → 单 Target 一一对应）：
     - 同时到达约束 (sync):            ✗ N/M（单目标仅 1 UAV，无协同）
 """
 
+import numpy as np
 from __future__ import annotations
 
 import os
@@ -96,6 +97,21 @@ LLM_INTERVAL = 100          # search_controller 触发间隔（代数）
 VISUALIZE = True
 FIGURES_DIR = RESULTS_DIR / "figures"
 
+# ── 多规模支持 ────────────────────────────────────────────────
+SCALE = os.environ.get("EXP_SCALE", "medium").lower()
+SCALES = {"small": 5, "medium": 10, "large": 20}
+N_ENTITIES = SCALES.get(SCALE, 10)
+
+# 支持自定义 solver 参数（大规模需要更大种群）
+_solver_overrides = os.environ.get("EXP_SOLVER_PARAMS", "")
+if _solver_overrides:
+    import json as _json
+    try:
+        _overrides = _json.loads(_solver_overrides)
+        SOLVER_PARAMS.update(_overrides)
+    except _json.JSONDecodeError:
+        pass
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ★ LLM 配置加载（新增）
@@ -123,44 +139,64 @@ def load_llm_config() -> dict:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 场景定义：N=M 平衡指派（10 UAV ↔ 10 Target）
+# 场景定义：N=M 平衡指派（支持多规模）
 # ★ 与原始 exp_dmde_01 完全一致，保证公平对比
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# DEM 地理范围
+_LON_MIN, _LON_MAX = 91.00, 91.30
+_LAT_MIN, _LAT_MAX = 29.50, 29.75
+_ALT_MIN, _ALT_MAX = 3640, 3700
+
+
+def _generate_positions(n: int, seed: int = 42, *,
+                        lon_range: tuple[float, float] = (_LON_MIN + 0.02, _LON_MAX - 0.02),
+                        lat_range: tuple[float, float] = (_LAT_MIN + 0.02, _LAT_MAX - 0.02),
+                        alt_range: tuple[float, float] = (_ALT_MIN, _ALT_MAX),
+                        ) -> list[tuple[float, float, float]]:
+    """在 DEM 范围内生成 n 个均匀分布的位置。"""
+    rng = np.random.RandomState(seed)
+    lons = rng.uniform(*lon_range, n)
+    lats = rng.uniform(*lat_range, n)
+    alts = rng.uniform(*alt_range, n)
+    return [(lons[i], lats[i], float(alts[i])) for i in range(n)]
+
+
 def make_scenario():
-    """N=M 平衡指派场景（10U/10T）。
+    """N=M 平衡指派场景，支持 small/medium/large 规模。
+
+    规模映射（由 EXP_SCALE 环境变量控制）：
+        small:  5U / 5T
+        medium: 10U / 10T（默认）
+        large:  20U / 20T
 
     约束：仅启用航程 + 时间窗（N=M 场景时序/sync 不触发，直接关闭减少开销）。
     """
-    uavs = [
-        UAV(id=0,  start_pos=(91.05, 29.55, 3650), speed_range=(0.20, 0.50), max_range=32000),
-        UAV(id=1,  start_pos=(91.10, 29.53, 3640), speed_range=(0.25, 0.55), max_range=30000),
-        UAV(id=2,  start_pos=(91.15, 29.56, 3660), speed_range=(0.30, 0.60), max_range=29000),
-        UAV(id=3,  start_pos=(91.03, 29.60, 3680), speed_range=(0.20, 0.50), max_range=28000),
-        UAV(id=4,  start_pos=(91.08, 29.58, 3670), speed_range=(0.25, 0.55), max_range=31000),
-        UAV(id=5,  start_pos=(91.02, 29.52, 3640), speed_range=(0.20, 0.50), max_range=30000),
-        UAV(id=6,  start_pos=(91.18, 29.54, 3670), speed_range=(0.25, 0.55), max_range=29000),
-        UAV(id=7,  start_pos=(91.07, 29.62, 3690), speed_range=(0.20, 0.50), max_range=31000),
-        UAV(id=8,  start_pos=(91.13, 29.59, 3650), speed_range=(0.30, 0.60), max_range=28000),
-        UAV(id=9,  start_pos=(91.20, 29.57, 3660), speed_range=(0.25, 0.55), max_range=32000),
-    ]
-    targets = [
-        Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
-               time_window=(20000, 150000)),
-        Target(id=1, position=(91.10, 29.70, 3750), weight=0.8),
-        Target(id=2, position=(91.16, 29.65, 3680), weight=0.9),
-        Target(id=3, position=(91.20, 29.72, 3800), weight=0.7,
-               time_window=(20000, 150000)),
-        Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
-               time_window=(20000, 150000)),
-        Target(id=5, position=(91.05, 29.72, 3710), weight=0.85),
-        Target(id=6, position=(91.15, 29.68, 3740), weight=0.75,
-               time_window=(20000, 150000)),
-        Target(id=7, position=(91.22, 29.65, 3760), weight=0.65),
-        Target(id=8, position=(91.10, 29.63, 3690), weight=0.95,
-               time_window=(20000, 150000)),
-        Target(id=9, position=(91.18, 29.70, 3780), weight=0.7),
-    ]
+    n = N_ENTITIES
+
+    uav_positions = _generate_positions(n, seed=100)
+    uavs = []
+    for i in range(n):
+        speed_lo = 0.20 + (i % 3) * 0.05
+        speed_hi = speed_lo + 0.30
+        max_r = 28000 + (i % 5) * 1000
+        uavs.append(UAV(
+            id=i, start_pos=uav_positions[i],
+            speed_range=(round(speed_lo, 2), round(speed_hi, 2)),
+            max_range=max_r,
+        ))
+
+    tgt_positions = _generate_positions(n, seed=200,
+                                        alt_range=(_ALT_MIN + 40, _ALT_MAX + 100))
+    targets = []
+    for i in range(n):
+        tw = (20000, 150000) if i % 3 == 0 else None
+        targets.append(Target(
+            id=i, position=tgt_positions[i],
+            weight=round(0.6 + (i % 5) * 0.1, 2),
+            time_window=tw,
+        ))
+
     return uavs, targets, 2.5, 1.5
 
 
@@ -210,7 +246,7 @@ def main():
     name = "N=M 平衡指派"
 
     print(f"\n{'='*60}")
-    print(f"场景: {name} ({n}U/{m}T)")
+    print(f"场景: {name} ({n}U/{m}T) [规模: {SCALE}]")
     print(f"约束: 航程✓ 时间窗✓ 时序✗ 同步✗（N=M 精简配置）")
     print(f"{'='*60}")
 

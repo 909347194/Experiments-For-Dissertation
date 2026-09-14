@@ -1,19 +1,29 @@
 # -*- coding: utf-8 -*-
-"""run_comparison.py — DMDE 基线 vs LLM-DMDE 对比实验
+"""run_comparison.py — DMDE 基线 vs LLM-DMDE 对比实验（增强版）
 
 同时运行两个实验，生成对比报告，结果保存在本目录的 results/ 中。
 
 用法：
-    # N=M 场景（默认）
+    # N=M 场景（默认），30 次运行
     python run_comparison.py
 
     # 指定场景
     python run_comparison.py --scenario nm    # N=M
     python run_comparison.py --scenario ngt   # N>M
     python run_comparison.py --scenario nlt   # N<M
+    python run_comparison.py --scenarios all  # 全部场景
 
-    # 指定运行次数
-    python run_comparison.py --runs 30
+    # 多规模
+    python run_comparison.py --sizes small medium large
+
+    # 生成 LaTeX 表格
+    python run_comparison.py --scenarios all --sizes small medium large --format latex
+
+    # 消融实验
+    python run_comparison.py --ablation
+
+    # 自定义 solver 参数（大规模需要更大种群）
+    python run_comparison.py --sizes large --solver-params '{"pop_size":150,"max_generations":2000}'
 
     # 只跑一个
     python run_comparison.py --only baseline
@@ -27,10 +37,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -45,6 +57,14 @@ SCENARIO_MAP = {
     "nlt": ("exp_dmde/exp_dmde_03", "exp_llm_enhanced_dmde/exp_llm_dmde_03"),
 }
 
+SCENARIO_LABELS = {
+    "nm": "N=M 平衡指派",
+    "ngt": "N>M 多对一",
+    "nlt": "N<M 群巡游",
+}
+
+SCALES = ["small", "medium", "large"]
+
 # 配色
 COLORS = {"DMDE": "#4ECDC4", "LLM-DMDE": "#FF6B6B"}
 
@@ -53,16 +73,33 @@ COLORS = {"DMDE": "#4ECDC4", "LLM-DMDE": "#FF6B6B"}
 # 运行器
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def run_experiment(run_py: Path, n_runs: int, label: str) -> bool:
+def run_experiment(run_py: Path, n_runs: int, label: str, *,
+                   scale: str | None = None,
+                   solver_params: str | None = None,
+                   ablation: bool = False) -> bool:
     """运行单个实验。"""
     print(f"\n{'='*60}")
     print(f"▶ {label}")
     print(f"  脚本: {run_py}")
     print(f"  运行次数: {n_runs}")
+    if scale:
+        print(f"  规模: {scale}")
+    if solver_params:
+        print(f"  Solver 参数: {solver_params}")
+    if ablation:
+        print(f"  消融模式: 启用")
     print(f"{'='*60}\n")
 
-    import os
     env = {**os.environ, "EXP_N_RUNS": str(n_runs)}
+    if scale:
+        env["EXP_SCALE"] = scale
+    if solver_params:
+        env["EXP_SOLVER_PARAMS"] = solver_params
+    if ablation:
+        env["EXP_MODULES"] = json.dumps({
+            "population_init": {"enabled": False},
+            "search_controller": {"enabled": False},
+        })
 
     t0 = time.time()
     result = subprocess.run([sys.executable, str(run_py)], env=env, cwd=str(PROJECT_ROOT))
@@ -78,6 +115,8 @@ def run_experiment(run_py: Path, n_runs: int, label: str) -> bool:
 def find_result_json(experiment_dir: Path) -> Path | None:
     """自动查找实验结果 JSON。"""
     results_dir = experiment_dir / "results"
+    if not results_dir.exists():
+        return None
     jsons = sorted(results_dir.glob("*_data.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     return jsons[0] if jsons else None
 
@@ -134,33 +173,8 @@ def wilcoxon_test(a: list[float], b: list[float]) -> tuple[float, bool]:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 生成报告
+# 图表绘制（统一配置）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def gen_table(dmde: dict, llm: dict, scenario: str) -> str:
-    """生成 Markdown 对比表。"""
-    p, sig = wilcoxon_test(dmde["fitness_values"], llm["fitness_values"])
-    dagger = "†" if sig else ""
-
-    best_imp = (dmde["best_fitness"] - llm["best_fitness"]) / abs(dmde["best_fitness"]) * 100
-    mean_imp = (dmde["mean_fitness"] - llm["mean_fitness"]) / abs(dmde["mean_fitness"]) * 100
-
-    lines = [
-        f"# 对比实验结果：{scenario.upper()}\n",
-        "> 30次独立运行。† Wilcoxon 秩和检验显著 (p<0.05)\n",
-        "| 指标 | DMDE | LLM-DMDE | 改进 |",
-        "|------|------|----------|------|",
-        f"| Best fitness | {dmde['best_fitness']:.2f} | {llm['best_fitness']:.2f} | {best_imp:+.2f}% |",
-        f"| Mean±std | {dmde['mean_fitness']:.2f}±{dmde['std_fitness']:.2f} | {llm['mean_fitness']:.2f}±{llm['std_fitness']:.2f}{dagger} | {mean_imp:+.2f}% |",
-        f"| Median | {dmde['median_fitness']:.2f} | {llm['median_fitness']:.2f} | |",
-        f"| 可行解率 | {dmde['feasible_rate']*100:.0f}% ({dmde['feasible_count']}/{dmde['n_runs']}) | {llm['feasible_rate']*100:.0f}% ({llm['feasible_count']}/{llm['n_runs']}) | |",
-        f"| 平均耗时 | {dmde['mean_time']:.1f}s | {llm['mean_time']:.1f}s | |",
-    ]
-    if llm.get("llm_config"):
-        lines.append(f"| LLM 模型 | — | {llm['llm_config'].get('model', '—')} | |")
-    lines.append("")
-    return "\n".join(lines)
-
 
 def _setup_font():
     import matplotlib.pyplot as plt
@@ -172,6 +186,18 @@ def _setup_font():
         "axes.unicode_minus": False, "savefig.dpi": 300, "savefig.bbox": "tight",
     })
 
+
+def _save_fig(fig, output: Path):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=300, bbox_inches="tight")
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+    print(f"  ✅ 图表: {output}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 图表：基础对比
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def plot_boxplot(dmde: dict, llm: dict, output: Path, scenario: str):
     """箱线图对比。"""
@@ -198,10 +224,7 @@ def plot_boxplot(dmde: dict, llm: dict, output: Path, scenario: str):
     ax.set_title(f"Fitness Distribution — {scenario.upper()}")
     ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✅ 箱线图: {output}")
+    _save_fig(fig, output)
 
 
 def plot_convergence(dmde: dict, llm: dict, output: Path, scenario: str):
@@ -230,10 +253,324 @@ def plot_convergence(dmde: dict, llm: dict, output: Path, scenario: str):
     ax.legend()
     ax.grid(alpha=0.3)
     plt.tight_layout()
+    _save_fig(fig, output)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 图表：新增对比图表
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def plot_improvement_bar(dmde: dict, llm: dict, output: Path, scenario: str):
+    """改进幅度柱状图（best/mean fitness 改进百分比）。"""
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    _setup_font()
+
+    best_imp = (dmde["best_fitness"] - llm["best_fitness"]) / abs(dmde["best_fitness"]) * 100
+    mean_imp = (dmde["mean_fitness"] - llm["mean_fitness"]) / abs(dmde["mean_fitness"]) * 100
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    bars = ax.bar(["Best Fitness", "Mean Fitness"], [best_imp, mean_imp],
+                  color=[COLORS["LLM-DMDE"]] * 2, edgecolor="black", linewidth=0.8, width=0.5)
+
+    for bar, val in zip(bars, [best_imp, mean_imp]):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                f"{val:+.2f}%", ha="center", va="bottom", fontsize=11, fontweight="bold")
+
+    ax.set_ylabel("Improvement (%)")
+    ax.set_title(f"LLM-DMDE Improvement — {scenario.upper()}")
+    ax.axhline(y=0, color="gray", linewidth=0.8, linestyle="--")
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    _save_fig(fig, output)
+
+
+def plot_feasibility_bar(dmde: dict, llm: dict, output: Path, scenario: str):
+    """可行解率对比图。"""
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    _setup_font()
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    rates = [dmde["feasible_rate"] * 100, llm["feasible_rate"] * 100]
+    bars = ax.bar(["DMDE", "LLM-DMDE"], rates,
+                  color=[COLORS["DMDE"], COLORS["LLM-DMDE"]],
+                  edgecolor="black", linewidth=0.8, width=0.5)
+
+    for bar, val in zip(bars, rates):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                f"{val:.1f}%", ha="center", va="bottom", fontsize=11, fontweight="bold")
+
+    ax.set_ylabel("Feasible Rate (%)")
+    ax.set_title(f"Feasibility — {scenario.upper()}")
+    ax.set_ylim(0, 110)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    _save_fig(fig, output)
+
+
+def plot_time_bar(dmde: dict, llm: dict, output: Path, scenario: str):
+    """耗时对比图。"""
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    _setup_font()
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    times = [dmde["mean_time"], llm["mean_time"]]
+    bars = ax.bar(["DMDE", "LLM-DMDE"], times,
+                  color=[COLORS["DMDE"], COLORS["LLM-DMDE"]],
+                  edgecolor="black", linewidth=0.8, width=0.5)
+
+    for bar, val in zip(bars, times):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                f"{val:.1f}s", ha="center", va="bottom", fontsize=11, fontweight="bold")
+
+    ax.set_ylabel("Mean Time (s)")
+    ax.set_title(f"Computation Time — {scenario.upper()}")
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    _save_fig(fig, output)
+
+
+def plot_scaling_curve(all_results: dict[str, dict[str, dict[str, dict]]],
+                       output: Path, metric: str = "best_fitness"):
+    """多规模缩放曲线图。
+
+    Args:
+        all_results: {scenario: {scale: {"DMDE": stats, "LLM-DMDE": stats}}}
+        metric: "best_fitness" 或 "mean_time"
+    """
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    _setup_font()
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharey=False)
+    y_label = "Best Fitness" if metric == "best_fitness" else "Mean Time (s)"
+
+    for idx, (scenario, scale_data) in enumerate(all_results.items()):
+        ax = axes[idx]
+        sizes = sorted(scale_data.keys())
+        for algo in ["DMDE", "LLM-DMDE"]:
+            values = []
+            for s in sizes:
+                stats = scale_data[s].get(algo)
+                if stats:
+                    values.append(stats[metric])
+                else:
+                    values.append(None)
+            valid_sizes = [s for s, v in zip(sizes, values) if v is not None]
+            valid_values = [v for v in values if v is not None]
+            if valid_values:
+                color = COLORS[algo]
+                ax.plot(valid_sizes, valid_values, "o-", color=color,
+                        label=algo, linewidth=2, markersize=8)
+
+        ax.set_xlabel("Scale")
+        ax.set_ylabel(y_label)
+        ax.set_title(f"{SCENARIO_LABELS.get(scenario, scenario)}")
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+    plt.tight_layout()
+    _save_fig(fig, output)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Markdown 报告
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def gen_table(dmde: dict, llm: dict, scenario: str) -> str:
+    """生成 Markdown 对比表。"""
+    p, sig = wilcoxon_test(dmde["fitness_values"], llm["fitness_values"])
+    dagger = "†" if sig else ""
+
+    best_imp = (dmde["best_fitness"] - llm["best_fitness"]) / abs(dmde["best_fitness"]) * 100
+    mean_imp = (dmde["mean_fitness"] - llm["mean_fitness"]) / abs(dmde["mean_fitness"]) * 100
+
+    lines = [
+        f"# 对比实验结果：{scenario.upper()}\n",
+        "> 30次独立运行。† Wilcoxon 秩和检验显著 (p<0.05)\n",
+        "| 指标 | DMDE | LLM-DMDE | 改进 |",
+        "|------|------|----------|------|",
+        f"| Best fitness | {dmde['best_fitness']:.2f} | {llm['best_fitness']:.2f} | {best_imp:+.2f}% |",
+        f"| Mean±std | {dmde['mean_fitness']:.2f}±{dmde['std_fitness']:.2f} | {llm['mean_fitness']:.2f}±{llm['std_fitness']:.2f}{dagger} | {mean_imp:+.2f}% |",
+        f"| Median | {dmde['median_fitness']:.2f} | {llm['median_fitness']:.2f} | |",
+        f"| 可行解率 | {dmde['feasible_rate']*100:.0f}% ({dmde['feasible_count']}/{dmde['n_runs']}) | {llm['feasible_rate']*100:.0f}% ({llm['feasible_count']}/{llm['n_runs']}) | |",
+        f"| 平均耗时 | {dmde['mean_time']:.1f}s | {llm['mean_time']:.1f}s | |",
+    ]
+    if llm.get("llm_config"):
+        lines.append(f"| LLM 模型 | — | {llm['llm_config'].get('model', '—')} | |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def gen_markdown_report(all_results: dict[str, dict[str, dict[str, dict]]]) -> str:
+    """生成汇总 Markdown 报告。
+
+    Args:
+        all_results: {scenario: {scale: {"DMDE": stats, "LLM-DMDE": stats}}}
+    """
+    lines = [
+        "# DMDE vs LLM-DMDE 对比实验报告\n",
+        f"> 生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n",
+    ]
+
+    for scenario, scale_data in all_results.items():
+        label = SCENARIO_LABELS.get(scenario, scenario)
+        lines.append(f"## {label} ({scenario.upper()})\n")
+
+        for scale in sorted(scale_data.keys()):
+            data = scale_data[scale]
+            dmde = data.get("DMDE")
+            llm = data.get("LLM-DMDE")
+            if not dmde or not llm:
+                continue
+
+            p, sig = wilcoxon_test(dmde["fitness_values"], llm["fitness_values"])
+            dagger = "†" if sig else ""
+            best_imp = (dmde["best_fitness"] - llm["best_fitness"]) / abs(dmde["best_fitness"]) * 100
+            mean_imp = (dmde["mean_fitness"] - llm["mean_fitness"]) / abs(dmde["mean_fitness"]) * 100
+
+            lines.append(f"### 规模: {scale}\n")
+            lines.append("| 指标 | DMDE | LLM-DMDE | 改进 |")
+            lines.append("|------|------|----------|------|")
+            lines.append(f"| Best fitness | {dmde['best_fitness']:.2f} | {llm['best_fitness']:.2f} | {best_imp:+.2f}% |")
+            lines.append(f"| Mean±std | {dmde['mean_fitness']:.2f}±{dmde['std_fitness']:.2f} | {llm['mean_fitness']:.2f}±{llm['std_fitness']:.2f}{dagger} | {mean_imp:+.2f}% |")
+            lines.append(f"| 可行解率 | {dmde['feasible_rate']*100:.0f}% | {llm['feasible_rate']*100:.0f}% | |")
+            lines.append(f"| 平均耗时 | {dmde['mean_time']:.1f}s | {llm['mean_time']:.1f}s | |")
+            lines.append(f"| 显著性 p | — | — | {p:.4f}{'†' if sig else ''} |")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# LaTeX 表格生成
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _latex_escape(text: str) -> str:
+    """转义 LaTeX 特殊字符。"""
+    for ch in ("&", "%", "#", "_"):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
+def gen_latex_summary_table(all_results: dict[str, dict[str, dict[str, dict]]],
+                            output: Path):
+    """生成汇总 LaTeX 表格（所有场景×所有规模）。"""
+    lines = [
+        "% 自动生成的 LaTeX 表格 — 可直接 \\input{} 到主文档",
+        "% 需要 \\usepackage{booktabs}",
+        "\\begin{table}[htbp]",
+        "  \\centering",
+        "  \\caption{DMDE 与 LLM-DMDE 对比实验结果}",
+        "  \\label{tab:dmde_comparison}",
+        "  \\begin{tabular}{llrrrrrrr}",
+        "    \\toprule",
+        "    场景 & 规模 & \\multicolumn{2}{c}{Best Fitness} & \\multicolumn{2}{c}{Mean$\\pm$Std} & 可行率(\\%) & 耗时(s) & 改进(\\%) \\\\",
+        "    \\cmidrule(lr){3-4} \\cmidrule(lr){5-6}",
+        "    & & DMDE & LLM-DMDE & DMDE & LLM-DMDE & & & \\\\",
+        "    \\midrule",
+    ]
+
+    for scenario, scale_data in all_results.items():
+        label = SCENARIO_LABELS.get(scenario, scenario)
+        first_row = True
+        for scale in sorted(scale_data.keys()):
+            data = scale_data[scale]
+            dmde = data.get("DMDE")
+            llm = data.get("LLM-DMDE")
+            if not dmde or not llm:
+                continue
+
+            best_imp = (dmde["best_fitness"] - llm["best_fitness"]) / abs(dmde["best_fitness"]) * 100
+            _, sig = wilcoxon_test(dmde["fitness_values"], llm["fitness_values"])
+            best_str = f"{llm['best_fitness']:.2f}" + ("$^\\dagger$" if sig else "")
+            mean_str = f"{llm['mean_fitness']:.2f}\\pm{llm['std_fitness']:.2f}" + ("$^\\dagger$" if sig else "")
+
+            scenario_col = _latex_escape(label) if first_row else ""
+            first_row = False
+
+            feasible_pct = llm["feasible_rate"] * 100
+            # DMDE feasible as string
+            dmde_feas = f"{dmde['feasible_rate']*100:.0f}"
+            llm_feas = f"{llm['feasible_rate']*100:.0f}"
+
+            lines.append(
+                f"    {scenario_col} & {scale} "
+                f"& {dmde['best_fitness']:.2f} & {best_str} "
+                f"& {dmde['mean_fitness']:.2f}\\pm{dmde['std_fitness']:.2f} & {mean_str} "
+                f"& {dmde_feas}/{llm_feas} "
+                f"& {dmde['mean_time']:.1f}/{llm['mean_time']:.1f} "
+                f"& {best_imp:+.2f} \\\\"
+            )
+        lines.append("    \\midrule")
+
+    lines.extend([
+        "    \\bottomrule",
+        "  \\end{tabular}",
+        "\\end{table}",
+        "",
+    ])
+
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✅ 收敛曲线: {output}")
+    output.write_text("\n".join(lines), encoding="utf-8")
+    print(f"  ✅ LaTeX 汇总表: {output}")
+
+
+def gen_latex_scenario_table(scenario: str, scale_data: dict[str, dict[str, dict]],
+                             output: Path):
+    """生成单场景 LaTeX 表格。"""
+    label = SCENARIO_LABELS.get(scenario, scenario)
+    lines = [
+        "% 自动生成的 LaTeX 表格 — " + label,
+        "% 需要 \\usepackage{booktabs}",
+        "\\begin{table}[htbp]",
+        "  \\centering",
+        f"  \\caption{{{label}场景下 DMDE 与 LLM-DMDE 对比结果}}",
+        f"  \\label{{tab:dmde_{scenario}}}",
+        "  \\begin{tabular}{lrrrrrrrr}",
+        "    \\toprule",
+        "    规模 & \\multicolumn{2}{c}{Best Fitness} & \\multicolumn{2}{c}{Mean$\\pm$Std} & 可行率(\\%) & 耗时(s) & 改进(\\%) \\\\",
+        "    \\cmidrule(lr){2-3} \\cmidrule(lr){4-5}",
+        "    & DMDE & LLM-DMDE & DMDE & LLM-DMDE & & & \\\\",
+        "    \\midrule",
+    ]
+
+    for scale in sorted(scale_data.keys()):
+        data = scale_data[scale]
+        dmde = data.get("DMDE")
+        llm = data.get("LLM-DMDE")
+        if not dmde or not llm:
+            continue
+
+        best_imp = (dmde["best_fitness"] - llm["best_fitness"]) / abs(dmde["best_fitness"]) * 100
+        _, sig = wilcoxon_test(dmde["fitness_values"], llm["fitness_values"])
+        best_str = f"{llm['best_fitness']:.2f}" + ("$^\\dagger$" if sig else "")
+        mean_str = f"{llm['mean_fitness']:.2f}\\pm{llm['std_fitness']:.2f}" + ("$^\\dagger$" if sig else "")
+
+        dmde_feas = f"{dmde['feasible_rate']*100:.0f}"
+        llm_feas = f"{llm['feasible_rate']*100:.0f}"
+
+        lines.append(
+            f"    {scale} "
+            f"& {dmde['best_fitness']:.2f} & {best_str} "
+            f"& {dmde['mean_fitness']:.2f}\\pm{dmde['std_fitness']:.2f} & {mean_str} "
+            f"& {dmde_feas}/{llm_feas} "
+            f"& {dmde['mean_time']:.1f}/{llm['mean_time']:.1f} "
+            f"& {best_imp:+.2f} \\\\"
+        )
+
+    lines.extend([
+        "    \\bottomrule",
+        "  \\end{tabular}",
+        "\\end{table}",
+        "",
+    ])
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(lines), encoding="utf-8")
+    print(f"  ✅ LaTeX 场景表 ({scenario}): {output}")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -243,110 +580,214 @@ def plot_convergence(dmde: dict, llm: dict, output: Path, scenario: str):
 def main():
     parser = argparse.ArgumentParser(description="DMDE vs LLM-DMDE 对比实验")
     parser.add_argument("--scenario", default="nm", choices=list(SCENARIO_MAP.keys()),
-                        help="场景: nm/n_gt/n_lt (默认: nm)")
-    parser.add_argument("--runs", type=int, default=2, help="运行次数 (默认: 2)")
+                        help="场景: nm/ngt/nlt (默认: nm)")
+    parser.add_argument("--scenarios", nargs="+", default=None,
+                        help="多个场景或 'all' (覆盖 --scenario)")
+    parser.add_argument("--runs", type=int, default=30, help="运行次数 (默认: 30)")
+    parser.add_argument("--sizes", nargs="+", default=None, choices=SCALES,
+                        help="多规模: small medium large (默认: 仅 medium)")
+    parser.add_argument("--format", choices=["md", "latex", "both"], default="md",
+                        help="输出格式: md/latex/both (默认: md)")
     parser.add_argument("--only", choices=["baseline", "llm"], help="只运行指定实验")
     parser.add_argument("--no-compare", action="store_true", help="跳过对比生成")
     parser.add_argument("--baseline-data", type=str, default=None,
                         help="直接指定基线结果 JSON（跳过运行）")
     parser.add_argument("--llm-data", type=str, default=None,
                         help="直接指定 LLM 结果 JSON（跳过运行）")
+    parser.add_argument("--solver-params", type=str, default=None,
+                        help='自定义 solver 参数 JSON，如 \'{"pop_size":150}\'')
+    parser.add_argument("--ablation", action="store_true",
+                        help="消融实验模式（禁用 LLM 模块）")
     args = parser.parse_args()
 
-    dmde_dir, llm_dir = SCENARIO_MAP[args.scenario]
-    dmde_path = EXPERIMENTS_DIR / dmde_dir
-    llm_path = EXPERIMENTS_DIR / llm_dir
+    # 解析场景列表
+    if args.scenarios:
+        if "all" in args.scenarios:
+            scenarios = list(SCENARIO_MAP.keys())
+        else:
+            scenarios = args.scenarios
+    else:
+        scenarios = [args.scenario]
+
+    # 解析规模列表（默认仅 medium）
+    sizes = args.sizes if args.sizes else ["medium"]
+
+    # 结果存储：{scenario: {scale: {"DMDE": stats, "LLM-DMDE": stats}}}
+    all_results: dict[str, dict[str, dict[str, dict]]] = {}
 
     print(f"{'='*60}")
-    print(f"对比实验：{args.scenario.upper()}")
-    print(f"  DMDE:     {dmde_dir}")
-    print(f"  LLM-DMDE: {llm_dir}")
+    print(f"DMDE vs LLM-DMDE 对比实验")
+    print(f"  场景: {', '.join(scenarios)}")
+    print(f"  规模: {', '.join(sizes)}")
     print(f"  运行次数: {args.runs}")
+    print(f"  输出格式: {args.format}")
+    if args.solver_params:
+        print(f"  Solver 参数: {args.solver_params}")
+    if args.ablation:
+        print(f"  消融模式: 启用")
     print(f"{'='*60}")
-
-    # ── 运行实验 ──────────────────────────────────────────────
-    baseline_ok, llm_ok = False, False
-
-    if args.only != "llm" and not args.baseline_data:
-        baseline_ok = run_experiment(dmde_path / "run.py", args.runs, f"DMDE 基线 ({args.scenario})")
-    elif args.baseline_data:
-        baseline_ok = True
-
-    if args.only != "baseline" and not args.llm_data:
-        llm_ok = run_experiment(llm_path / "run.py", args.runs, f"LLM-DMDE ({args.scenario})")
-    elif args.llm_data:
-        llm_ok = True
-
-    # ── 查找结果 ──────────────────────────────────────────────
-    if args.baseline_data:
-        dmde_json = Path(args.baseline_data)
-    else:
-        dmde_json = find_result_json(dmde_path)
-
-    if args.llm_data:
-        llm_json = Path(args.llm_data)
-    else:
-        llm_json = find_result_json(llm_path)
-
-    if not dmde_json or not dmde_json.exists():
-        print(f"\n❌ DMDE 结果不存在: {dmde_json}")
-        sys.exit(1)
-    if not llm_json or not llm_json.exists():
-        print(f"\n❌ LLM-DMDE 结果不存在: {llm_json}")
-        sys.exit(1)
-
-    # ── 生成对比 ──────────────────────────────────────────────
-    if args.no_compare:
-        print("\n跳过对比生成。")
-        return
-
-    print(f"\n{'='*60}")
-    print(f"生成对比报告")
-    print(f"{'='*60}")
-
-    dmde_data = load_data(dmde_json)
-    llm_data = load_data(llm_json)
-    dmde_stats = extract_stats(dmde_data, "DMDE")
-    llm_stats = extract_stats(llm_data, "LLM-DMDE")
 
     results_dir = SCRIPT_DIR / "results"
     figures_dir = results_dir / "figures"
+    latex_dir = results_dir / "latex"
     results_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    # 对比表
-    table = gen_table(dmde_stats, llm_stats, args.scenario)
-    table_path = results_dir / f"comparison_{args.scenario}.md"
-    table_path.write_text(table, encoding="utf-8")
-    print(f"  ✅ 对比表: {table_path}")
+    # ── 遍历场景×规模 ──────────────────────────────────────
+    for scenario in scenarios:
+        dmde_dir, llm_dir = SCENARIO_MAP[scenario]
+        dmde_path = EXPERIMENTS_DIR / dmde_dir
+        llm_path = EXPERIMENTS_DIR / llm_dir
 
-    # 图表
-    plot_boxplot(dmde_stats, llm_stats,
-                 figures_dir / f"boxplot_{args.scenario}.png", args.scenario)
-    plot_convergence(dmde_stats, llm_stats,
-                     figures_dir / f"convergence_{args.scenario}.png", args.scenario)
+        all_results[scenario] = {}
 
-    # 保存元数据
-    meta = {
-        "scenario": args.scenario,
-        "n_runs": args.runs,
-        "baseline_json": str(dmde_json),
-        "llm_json": str(llm_json),
-        "dmde_best": dmde_stats["best_fitness"],
-        "llm_best": llm_stats["best_fitness"],
-        "improvement_pct": (dmde_stats["best_fitness"] - llm_stats["best_fitness"])
-                           / abs(dmde_stats["best_fitness"]) * 100,
-    }
-    meta_path = results_dir / f"meta_{args.scenario}.json"
-    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        for scale in sizes:
+            print(f"\n{'#'*60}")
+            print(f"# 场景: {scenario.upper()} | 规模: {scale}")
+            print(f"{'#'*60}")
 
-    print(f"\n{'='*60}")
-    print(f"对比完成")
-    print(f"  DMDE best:     {dmde_stats['best_fitness']:.2f}")
-    print(f"  LLM-DMDE best: {llm_stats['best_fitness']:.2f}")
-    print(f"  改进:          {meta['improvement_pct']:+.2f}%")
-    print(f"  输出目录:      {results_dir}")
-    print(f"{'='*60}")
+            all_results[scenario][scale] = {}
+
+            # ── 运行实验 ──────────────────────────────────
+            baseline_ok, llm_ok = False, False
+
+            if args.only != "llm" and not args.baseline_data:
+                baseline_ok = run_experiment(
+                    dmde_path / "run.py", args.runs,
+                    f"DMDE 基线 ({scenario}, {scale})",
+                    scale=scale, solver_params=args.solver_params,
+                )
+            elif args.baseline_data:
+                baseline_ok = True
+
+            if args.only != "baseline" and not args.llm_data:
+                llm_ok = run_experiment(
+                    llm_path / "run.py", args.runs,
+                    f"LLM-DMDE ({scenario}, {scale})",
+                    scale=scale, solver_params=args.solver_params,
+                    ablation=args.ablation,
+                )
+            elif args.llm_data:
+                llm_ok = True
+
+            # ── 查找结果 ──────────────────────────────────
+            if args.baseline_data:
+                dmde_json = Path(args.baseline_data)
+            else:
+                dmde_json = find_result_json(dmde_path)
+
+            if args.llm_data:
+                llm_json = Path(args.llm_data)
+            else:
+                llm_json = find_result_json(llm_path)
+
+            if not dmde_json or not dmde_json.exists():
+                print(f"\n⚠️  DMDE 结果不存在: {dmde_json}，跳过 {scenario}/{scale}")
+                continue
+            if not llm_json or not llm_json.exists():
+                print(f"\n⚠️  LLM-DMDE 结果不存在: {llm_json}，跳过 {scenario}/{scale}")
+                continue
+
+            # ── 生成对比 ──────────────────────────────────
+            if args.no_compare:
+                print("\n跳过对比生成。")
+                continue
+
+            dmde_data = load_data(dmde_json)
+            llm_data = load_data(llm_json)
+            dmde_stats = extract_stats(dmde_data, "DMDE")
+            llm_stats = extract_stats(llm_data, "LLM-DMDE")
+
+            all_results[scenario][scale]["DMDE"] = dmde_stats
+            all_results[scenario][scale]["LLM-DMDE"] = llm_stats
+
+            # 对比表
+            table = gen_table(dmde_stats, llm_stats, scenario)
+            suffix = f"_{scenario}_{scale}" if len(sizes) > 1 else f"_{scenario}"
+            table_path = results_dir / f"comparison{suffix}.md"
+            table_path.write_text(table, encoding="utf-8")
+            print(f"  ✅ 对比表: {table_path}")
+
+            # 图表
+            fig_suffix = f"_{scenario}_{scale}" if len(sizes) > 1 else f"_{scenario}"
+            plot_boxplot(dmde_stats, llm_stats,
+                         figures_dir / f"boxplot{fig_suffix}.png", scenario)
+            plot_convergence(dmde_stats, llm_stats,
+                             figures_dir / f"convergence{fig_suffix}.png", scenario)
+            plot_improvement_bar(dmde_stats, llm_stats,
+                                 figures_dir / f"improvement{fig_suffix}.png", scenario)
+            plot_feasibility_bar(dmde_stats, llm_stats,
+                                 figures_dir / f"feasibility{fig_suffix}.png", scenario)
+            plot_time_bar(dmde_stats, llm_stats,
+                          figures_dir / f"time{fig_suffix}.png", scenario)
+
+            # 保存元数据
+            best_imp = (dmde_stats["best_fitness"] - llm_stats["best_fitness"]) \
+                        / abs(dmde_stats["best_fitness"]) * 100
+            meta = {
+                "scenario": scenario,
+                "scale": scale,
+                "n_runs": args.runs,
+                "baseline_json": str(dmde_json),
+                "llm_json": str(llm_json),
+                "dmde_best": dmde_stats["best_fitness"],
+                "llm_best": llm_stats["best_fitness"],
+                "improvement_pct": best_imp,
+            }
+            meta_path = results_dir / f"meta{fig_suffix}.json"
+            meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # ── 多规模缩放曲线图 ──────────────────────────────────────
+    if len(sizes) > 1 and not args.no_compare:
+        print(f"\n{'='*60}")
+        print("生成多规模缩放曲线图")
+        print(f"{'='*60}")
+
+        plot_scaling_curve(all_results,
+                           figures_dir / "scaling_fitness.png",
+                           metric="best_fitness")
+        plot_scaling_curve(all_results,
+                           figures_dir / "scaling_time.png",
+                           metric="mean_time")
+
+    # ── 生成汇总报告 ──────────────────────────────────────────
+    if not args.no_compare and all_results:
+        # Markdown 汇总报告
+        md_report = gen_markdown_report(all_results)
+        md_path = results_dir / "summary_report.md"
+        md_path.write_text(md_report, encoding="utf-8")
+        print(f"\n  ✅ Markdown 汇总报告: {md_path}")
+
+        # LaTeX 表格
+        if args.format in ("latex", "both"):
+            latex_dir.mkdir(parents=True, exist_ok=True)
+
+            gen_latex_summary_table(all_results,
+                                    latex_dir / "summary_table.tex")
+
+            for scenario, scale_data in all_results.items():
+                gen_latex_scenario_table(scenario, scale_data,
+                                         latex_dir / f"table_{scenario}.tex")
+
+    # ── 最终汇总 ──────────────────────────────────────────────
+    if all_results:
+        print(f"\n{'='*60}")
+        print("对比实验汇总")
+        print(f"{'='*60}")
+        for scenario, scale_data in all_results.items():
+            label = SCENARIO_LABELS.get(scenario, scenario)
+            for scale, data in scale_data.items():
+                dmde = data.get("DMDE")
+                llm = data.get("LLM-DMDE")
+                if dmde and llm:
+                    imp = (dmde["best_fitness"] - llm["best_fitness"]) \
+                          / abs(dmde["best_fitness"]) * 100
+                    print(f"  {label} ({scale}): "
+                          f"DMDE={dmde['best_fitness']:.2f}, "
+                          f"LLM-DMDE={llm['best_fitness']:.2f}, "
+                          f"改进={imp:+.2f}%")
+        print(f"\n  输出目录: {results_dir}")
+        print(f"{'='*60}")
 
 
 if __name__ == "__main__":
