@@ -382,8 +382,36 @@ def main():
     if VISUALIZE:
         print(f"\n[8] 生成可视化图表...")
         viz = ExperimentVisualizer(output_dir=FIGURES_DIR)
-        saved = viz.plot_all([scenario], {name: uavs}, {name: targets}, dem_terrain=dem)
+        saved = viz.plot_all([scenario], {name: uavs}, {name: targets},
+                             dem_terrain=dem, llm_decisions=all_llm_decisions)
         print(f"  共生成 {len(saved)} 张图表 → {FIGURES_DIR}")
+
+    # 9. LLM 统计摘要
+    if all_llm_decisions:
+        print(f"\n[LLM 统计摘要]")
+        all_strategies = []
+        all_crs = []
+        all_durations = []
+        n_failed = 0
+        for decisions in all_llm_decisions.values():
+            for d in decisions:
+                dec = d.get("decision", {})
+                all_strategies.append(dec.get("strategy", "default"))
+                all_crs.append(dec.get("cr", 0.5))
+                all_durations.append(d.get("duration", 0))
+                if "_error" in d:
+                    n_failed += 1
+
+        from collections import Counter
+        strategy_counts = Counter(all_strategies)
+        print(f"  总调用: {len(all_strategies)} 次")
+        if n_failed:
+            print(f"  失败: {n_failed} 次")
+        print(f"  策略分布: {dict(strategy_counts)}")
+        if all_crs:
+            print(f"  CR 均值: {np.mean(all_crs):.3f}, 范围: [{min(all_crs):.1f}, {max(all_crs):.1f}]")
+        if all_durations:
+            print(f"  调用耗时: 均值={np.mean(all_durations):.1f}s, 总计={sum(all_durations):.0f}s")
 
     print("\n✅ 实验完成。")
 

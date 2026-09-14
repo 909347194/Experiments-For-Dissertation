@@ -173,6 +173,7 @@ def main():
 
     # 5. 多次运行
     results = []
+    run_start_time = time.time()
     for run_idx in range(N_RUNS):
         cfg = DMDEConfig(
             pop_size=SOLVER_PARAMS["pop_size"],
@@ -194,10 +195,23 @@ def main():
         print(f"  Run {run_idx}: fitness={result.best_fitness:.1f}, "
               f"feasible={eval_res.is_feasible}, "
               f"time={result.elapsed_seconds:.2f}s")
+        if not eval_res.is_feasible:
+            print(f"    违反: {eval_res.total_violation:.2f}")
+            for k, v in eval_res.violation_breakdown().items():
+                if v > 0:
+                    print(f"      {k}: {v}")
+        print(f"    分配: {result.best_assignment}")
 
     # 6. 统计
+    total_time = time.time() - run_start_time
     metrics = compute_metrics(results)
-    print(f"\n{format_metrics(metrics, name)}")
+    print(f"\n{'='*60}")
+    print(f"[实验结果汇总]")
+    print(f"{'='*60}")
+    print(format_metrics(metrics, name))
+    feasible_count = sum(1 for r in results if r.extra.get('is_feasible', False))
+    print(f"  可行解率: {feasible_count}/{N_RUNS} ({100*feasible_count/N_RUNS:.0f}%)")
+    print(f"  总耗时: {total_time:.1f}s ({total_time/60:.1f}min)")
 
     scenario = {
         "name": name, "model_type": "balanced",

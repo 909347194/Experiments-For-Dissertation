@@ -29,6 +29,7 @@ from .plot_cost_matrix import CostMatrixPlotter
 from .plot_comparison import ComparisonPlotter
 from .plot_assignment import AssignmentPlotter
 from .plot_dem3d import Dem3DPlotter
+from .plot_llm_decisions import LLMDecisionPlotter
 
 
 class ExperimentVisualizer:
@@ -53,6 +54,7 @@ class ExperimentVisualizer:
         self._comparison = ComparisonPlotter(self.output_dir, dpi, figsize)
         self._assignment = AssignmentPlotter(self.output_dir, dpi, figsize)
         self._dem3d = Dem3DPlotter(self.output_dir, dpi, figsize)
+        self._llm_decisions = LLMDecisionPlotter(self.output_dir, dpi, (12, 8))
 
     # ── 委托到子模块 ─────────────────────────────────────────
 
@@ -82,10 +84,12 @@ class ExperimentVisualizer:
         uavs_dict: dict[str, list[Any]] | None = None,
         targets_dict: dict[str, list[Any]] | None = None,
         dem_terrain: Any | None = None,
+        llm_decisions: dict[int, list[dict]] | None = None,
     ) -> list[Path]:
         """生成所有可视化图表。"""
         saved = []
 
+        # ── 标准图表 ─────────────────────────────────────────
         for sc in scenarios:
             p = self.plot_convergence(sc['results'], scenario_name=sc['name'])
             saved.append(p); print(f"  ✓ 收敛曲线: {p.name}")
@@ -124,6 +128,13 @@ class ExperimentVisualizer:
                         best.best_assignment, scenario_name=name,
                         cost_matrix=sc.get('cost_matrix'))
                     saved.append(p); print(f"  ✓ DEM 3D: {p.name}")
+
+        # ── LLM 专用图表 ────────────────────────────────────
+        if llm_decisions:
+            for sc in scenarios:
+                llm_saved = self._llm_decisions.plot_all(
+                    llm_decisions, scenario_name=sc['name'])
+                saved.extend(llm_saved)
 
         return saved
 
