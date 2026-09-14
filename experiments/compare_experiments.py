@@ -37,7 +37,7 @@ else:
 
 DEFAULT_BASELINE = _BASE / "exp_dmde" / "exp_dmde_01" / "results" / "exp_dmde_01_data.json"
 DEFAULT_LLM = _BASE / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "results" / "exp_llm_dmde_01_data.json"
-OUTPUT_DIR = _BASE / "results"
+OUTPUT_DIR = _BASE / "comparison_results"
 FIGURES_DIR = OUTPUT_DIR / "figures"
 
 
@@ -136,7 +136,7 @@ def plot_comparison_boxplot(baseline: dict, llm: dict, output_path: Path):
     data_to_plot = [baseline["fitness_values"], llm["fitness_values"]]
     labels = ["DMDE 基线", "LLM-DMDE"]
 
-    bp = ax.boxplot(data_to_plot, labels=labels, patch_artist=True,
+    bp = ax.boxplot(data_to_plot, tick_labels=labels, patch_artist=True,
                     widths=0.5, showmeans=True, meanprops=dict(marker="D", markerfacecolor="red"))
 
     colors = ["#4ECDC4", "#FF6B6B"]
