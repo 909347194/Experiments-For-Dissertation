@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""_common.py — 可视化共享配置与工具。"""
+"""_common.py — 可视化共享配置与工具。
+
+集中定义中文字体、配色方案（COLORS）与绘图基类 _PlotBase，
+供同目录下的 plot_*.py 子模块复用。
+"""
 
 from __future__ import annotations
 
@@ -72,6 +76,9 @@ COLORS = {
     'mean': '#3B1F2B',
     'grid': '#E8E8E8',
     'background': '#FAFAFA',
+    # LLM 决策图表专用（plot_llm_decisions.py 引用）
+    'llm_dmde': '#FF6B6B',
+    'default': '#95A5A6',
 }
 
 

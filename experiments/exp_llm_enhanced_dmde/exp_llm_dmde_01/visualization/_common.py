@@ -72,6 +72,9 @@ COLORS = {
     'mean': '#3B1F2B',
     'grid': '#E8E8E8',
     'background': '#FAFAFA',
+    # LLM 决策图表专用（plot_llm_decisions.py 引用）
+    'llm_dmde': '#FF6B6B',
+    'default': '#95A5A6',
 }
 
 

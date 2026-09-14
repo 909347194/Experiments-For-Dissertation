@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""plot_convergence.py — 收敛曲线绘制。"""
+"""plot_convergence.py — 收敛曲线绘制。
+
+收敛曲线标题前缀由 ``algo_name`` 决定（默认 "DMDE"，LLM 增强实验传
+"LLM-DMDE"），避免标题写死。
+"""
 
 from __future__ import annotations
 from pathlib import Path
@@ -14,6 +18,16 @@ from ._common import COLORS, _sanitize_filename, _PlotBase
 class ConvergencePlotter(_PlotBase):
     """收敛曲线绘制器。"""
 
+    def __init__(
+        self,
+        output_dir: Path,
+        dpi: int = 300,
+        figsize: tuple[int, int] = (10, 6),
+        algo_name: str = "DMDE",
+    ):
+        super().__init__(output_dir, dpi, figsize)
+        self.algo_name = algo_name
+
     def plot(
         self,
         results: list[SolverResult],
@@ -21,6 +35,7 @@ class ConvergencePlotter(_PlotBase):
         show_mean: bool = True,
         show_std: bool = True,
         log_scale: bool = False,
+        algo_name: str | None = None,
     ) -> Path:
         fig, ax = plt.subplots(figsize=self.figsize)
 
@@ -49,7 +64,7 @@ class ConvergencePlotter(_PlotBase):
 
         ax.set_xlabel('迭代代数', fontsize=12)
         ax.set_ylabel('适应度值', fontsize=12)
-        title = 'DMDE 算法收敛曲线'
+        title = f'{algo_name or self.algo_name} 算法收敛曲线'
         if scenario_name:
             title += f' - {scenario_name}'
         ax.set_title(title, fontsize=14, fontweight='bold')

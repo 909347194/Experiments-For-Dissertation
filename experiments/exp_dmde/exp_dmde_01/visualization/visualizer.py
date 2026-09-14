@@ -8,7 +8,7 @@
 使用方式：
     from visualization.visualizer import ExperimentVisualizer
 
-    viz = ExperimentVisualizer(output_dir="results/figures")
+    viz = ExperimentVisualizer(output_dir="results/figures", algo_name="DMDE")
     viz.plot_convergence(results, scenario_name="N=M")
     viz.plot_all(scenarios, uavs_dict, targets_dict, dem_terrain=dem)
 """
@@ -42,13 +42,15 @@ class ExperimentVisualizer:
         output_dir: str | Path = "results/figures",
         dpi: int = 300,
         figsize: tuple[int, int] = (10, 6),
+        algo_name: str = "DMDE",
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.dpi = dpi
         self.figsize = figsize
+        self.algo_name = algo_name
 
-        self._convergence = ConvergencePlotter(self.output_dir, dpi, figsize)
+        self._convergence = ConvergencePlotter(self.output_dir, dpi, figsize, algo_name=algo_name)
         self._cost_matrix = CostMatrixPlotter(self.output_dir, dpi, figsize)
         self._comparison = ComparisonPlotter(self.output_dir, dpi, figsize)
         self._assignment = AssignmentPlotter(self.output_dir, dpi, figsize)
@@ -128,5 +130,8 @@ class ExperimentVisualizer:
         return saved
 
 
-def create_visualizer(output_dir: str | Path = "results/figures") -> ExperimentVisualizer:
-    return ExperimentVisualizer(output_dir=output_dir)
+def create_visualizer(
+    output_dir: str | Path = "results/figures",
+    algo_name: str = "DMDE",
+) -> ExperimentVisualizer:
+    return ExperimentVisualizer(output_dir=output_dir, algo_name=algo_name)

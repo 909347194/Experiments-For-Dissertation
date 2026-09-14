@@ -106,9 +106,10 @@ class LLMDecisionPlotter:
         # 调用耗时箱线图
         ax3 = fig.add_subplot(gs[1, 0])
         if all_durations:
-            ax3.boxplot(all_durations, vert=True)
+            ax3.boxplot(all_durations)
             ax3.set_ylabel("Duration (seconds)")
             ax3.set_title(f"LLM Call Duration (n={len(all_durations)})")
+            ax3.set_xticks([1])
             ax3.set_xticklabels(["LLM Calls"])
 
         # 每轮调用次数

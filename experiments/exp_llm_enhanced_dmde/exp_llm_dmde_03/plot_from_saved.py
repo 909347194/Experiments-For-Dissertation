@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
-"""plot_from_saved.py — 读取已保存的 LLM 增强实验数据重新绘图
+"""plot_from_saved.py — 读取已保存的 exp_llm_dmde_03 数据重新绘图
 
 背景：
-    ``run.py`` 每次运行需要完成 LLM 增强 DMDE 求解。
-    它会把绘图所需的全部数据（含 LLM 决策日志）保存为
-    ``results/exp_llm_dmde_01_data.json``（见 data_store.py）。
-    本脚本只负责：加载该 JSON → 重建可视化所需对象 → 调用 visualizer 出图。
-
-    因此调整绘图样式时，只需修改 ``visualization/visualizer.py`` 后重新运行
-    本脚本（秒级），不必再重跑实验。
+    ``run.py`` 每次运行需完成 LLM 增强 DMDE 求解，并把绘图所需的全部数据
+    （含 LLM 决策日志）保存为 ``results/exp_llm_dmde_03_data.json``。
+    本脚本只负责：加载该 JSON → 重建可视化对象 → 调用 visualizer 出图，
+    因此调整绘图样式时无需重跑实验。
 
 用法：
-    # 默认：加载 results/exp_llm_dmde_01_data.json
+    # 默认：加载 results/exp_llm_dmde_03_data.json
     python plot_from_saved.py
 
     # 指定数据 / 输出目录
@@ -29,16 +26,17 @@ import time
 from pathlib import Path
 
 # ── 路径设置（与 run.py 保持一致）───────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[3]  # Experiments-For-Dissertation
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SRC_ROOT = PROJECT_ROOT / "src"
 EXP_DIR = Path(__file__).resolve().parent
 DATA_DIR = EXP_DIR / "data"
 RESULTS_DIR = EXP_DIR / "results"
-DEFAULT_DATA_FILE = RESULTS_DIR / "exp_llm_dmde_01_data.json"
+DEFAULT_DATA_FILE = RESULTS_DIR / "exp_llm_dmde_03_data.json"
 DEFAULT_OUT_DIR = RESULTS_DIR / "figures"
 
 sys.path.insert(0, str(SRC_ROOT))
-sys.path.insert(0, str(EXP_DIR))
+# 复用 exp_llm_dmde_01 的 visualization / data_store
+sys.path.insert(0, str(PROJECT_ROOT / "experiments" / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01"))
 
 # Windows 下控制台/重定向管道默认使用 GBK
 for _stream in (sys.stdout, sys.stderr):
@@ -47,6 +45,13 @@ for _stream in (sys.stdout, sys.stderr):
         _reconfigure(errors="replace")
 
 DEM_FILE = DATA_DIR / "chengguan_district_dem.tif"
+if not DEM_FILE.exists():
+    # 回退：复用对应 DMDE 基线实验（exp_dmde_03）的 DEM 栅格；
+    # 若本目录存在 data/*.tif 则优先使用它。
+    _fallback_dem = (PROJECT_ROOT / "experiments" / "exp_dmde" / "exp_dmde_03"
+                     / "data" / "chengguan_district_dem.tif")
+    if _fallback_dem.exists():
+        DEM_FILE = _fallback_dem
 
 
 def _load_dem():
@@ -84,12 +89,12 @@ def main() -> None:
     targets_dict = payload["targets_dict"]
     meta = payload.get("meta", {})
     llm_decisions = payload.get("llm_decisions")
-    n_runs = meta.get("n_runs", "?")
     print(f"    场景: {[s['name'] for s in scenarios]}")
-    print(f"    元信息: solver_params={meta.get('solver_params', {})}, n_runs={n_runs}")
+    print(f"    元信息: solver_params={meta.get('solver_params', {})}, "
+          f"n_runs={meta.get('n_runs', '?')}, constraint={meta.get('constraint_desc', '—')}")
     if llm_decisions:
-        print(f"    LLM 决策记录: {len(llm_decisions)} 条")
-    print(f"    ({time.time() - t_start:.2f}s)")
+        total = sum(len(v) for v in llm_decisions.values())
+        print(f"    LLM 决策记录: {total} 条（{len(llm_decisions)} 次运行）")
 
     # 2. 加载 DEM（默认，用于三维图）
     dem = None
@@ -106,10 +111,6 @@ def main() -> None:
     viz = ExperimentVisualizer(output_dir=args.out, algo_name="LLM-DMDE")
     saved_files = viz.plot_all(scenarios, uavs_dict, targets_dict, dem_terrain=dem,
                                llm_decisions=llm_decisions)
-
-    if llm_decisions:
-        total = sum(len(v) for v in llm_decisions.values())
-        print(f"    LLM 决策记录: {total} 条（{len(llm_decisions)} 次运行）→ 已生成决策专用图表")
 
     print(f"\n[OK] 共生成 {len(saved_files)} 张图表")
     print(f"   图表输出目录: {args.out}")
