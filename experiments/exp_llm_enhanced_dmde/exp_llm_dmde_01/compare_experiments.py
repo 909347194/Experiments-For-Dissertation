@@ -31,14 +31,11 @@ import numpy as np
 
 # ── 路径 ──────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
-if (_SCRIPT_DIR / "exp_dmde").is_dir():
-    _BASE = _SCRIPT_DIR
-elif (_SCRIPT_DIR / "experiments" / "exp_dmde").is_dir():
-    _BASE = _SCRIPT_DIR / "experiments"
-else:
-    _BASE = _SCRIPT_DIR
+# 脚本位于 experiments/exp_llm_enhanced_dmde/exp_llm_dmde_01/
+# _BASE 指向 experiments/ 目录
+_BASE = _SCRIPT_DIR.parent.parent
 
-OUTPUT_DIR = _BASE / "comparison_results"
+OUTPUT_DIR = _SCRIPT_DIR / "comparison_results"
 FIGURES_DIR = OUTPUT_DIR / "figures"
 
 # 配色方案（最多支持8个算法）
@@ -126,7 +123,7 @@ def resolve_from_registry(
     try:
         from registry import get_results, list_experiments
     except ImportError:
-        sys.path.insert(0, str(_BASE))
+        sys.path.insert(0, str(_SCRIPT_DIR))
         from registry import get_results, list_experiments
 
     if experiment_ids:
@@ -357,7 +354,7 @@ def main():
         try:
             from registry import list_experiments
         except ImportError:
-            sys.path.insert(0, str(_BASE))
+            sys.path.insert(0, str(_SCRIPT_DIR))
             from registry import list_experiments
         experiments = list_experiments()
         if not experiments:

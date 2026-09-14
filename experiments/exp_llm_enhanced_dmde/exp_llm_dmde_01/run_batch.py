@@ -26,7 +26,8 @@ import time
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
+EXPERIMENTS_DIR = SCRIPT_DIR.parent.parent  # experiments/
+PROJECT_ROOT = EXPERIMENTS_DIR.parent
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 实验注册表
@@ -36,17 +37,17 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 SCENARIO_EXPERIMENTS = {
     "01": {
         "name": "N=M=10 平衡指派",
-        "baseline": SCRIPT_DIR / "exp_dmde" / "exp_dmde_01" / "run.py",
-        "llm": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
-        "baseline_data": SCRIPT_DIR / "exp_dmde" / "exp_dmde_01" / "results" / "exp_dmde_01_data.json",
-        "llm_data": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "results" / "exp_llm_dmde_01_data.json",
+        "baseline": EXPERIMENTS_DIR / "exp_dmde" / "exp_dmde_01" / "run.py",
+        "llm": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
+        "baseline_data": EXPERIMENTS_DIR / "exp_dmde" / "exp_dmde_01" / "results" / "exp_dmde_01_data.json",
+        "llm_data": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "results" / "exp_llm_dmde_01_data.json",
     },
     "04": {
         "name": "N=M=10 平衡指派（副本）",
-        "baseline": SCRIPT_DIR / "exp_dmde" / "exp_dmde_04" / "run.py",
-        "llm": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_04" / "run.py",
-        "baseline_data": SCRIPT_DIR / "exp_dmde" / "exp_dmde_04" / "results" / "exp_dmde_04_data.json",
-        "llm_data": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_04" / "results" / "exp_llm_dmde_04_data.json",
+        "baseline": EXPERIMENTS_DIR / "exp_dmde" / "exp_dmde_04" / "run.py",
+        "llm": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_04" / "run.py",
+        "baseline_data": EXPERIMENTS_DIR / "exp_dmde" / "exp_dmde_04" / "results" / "exp_dmde_04_data.json",
+        "llm_data": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_04" / "results" / "exp_llm_dmde_04_data.json",
     },
 }
 
@@ -54,25 +55,25 @@ SCENARIO_EXPERIMENTS = {
 ABLATION_EXPERIMENTS = {
     "vanilla": {
         "name": "LLM-DMDE (vanilla, 无 LLM 模块)",
-        "script": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
+        "script": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
         "env_overrides": {"EXP_MODULES": "{}"},
         "tags": ["llm", "ablation", "vanilla"],
     },
     "sc": {
         "name": "LLM-DMDE (仅 search_controller)",
-        "script": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
+        "script": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
         "env_overrides": {"EXP_MODULES": '{"search_controller": {"enabled": true, "interval": 100}}'},
         "tags": ["llm", "ablation", "search_controller"],
     },
     "pi": {
         "name": "LLM-DMDE (仅 population_init)",
-        "script": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
+        "script": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
         "env_overrides": {"EXP_MODULES": '{"population_init": {"enabled": true}}'},
         "tags": ["llm", "ablation", "population_init"],
     },
     "full": {
         "name": "LLM-DMDE (全部模块)",
-        "script": SCRIPT_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
+        "script": EXPERIMENTS_DIR / "exp_llm_enhanced_dmde" / "exp_llm_dmde_01" / "run.py",
         "env_overrides": {"EXP_MODULES": '{"population_init": {"enabled": true}, "search_controller": {"enabled": true, "interval": 100}}'},
         "tags": ["llm", "ablation", "full"],
     },

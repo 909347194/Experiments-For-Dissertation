@@ -30,7 +30,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-INDEX_FILE = Path(__file__).resolve().parent / "index.json"
+# 索引文件放在 experiments/exp_llm_enhanced_dmde/exp_llm_dmde_01/index.json
+_INDEX_DIR = Path(__file__).resolve().parent  # exp_llm_dmde_01/
+_EXPERIMENTS_DIR = _INDEX_DIR.parent.parent    # experiments/
+INDEX_FILE = _INDEX_DIR / "index.json"
 
 
 def _load_index() -> dict:
@@ -108,7 +111,8 @@ def get_result_path(experiment_id: str) -> Path | None:
     entry = data["experiments"].get(experiment_id)
     if not entry:
         return None
-    p = INDEX_FILE.parent / entry["result_path"]
+    # result_path 相对于 experiments/ 目录
+    p = _EXPERIMENTS_DIR / entry["result_path"]
     return p if p.exists() else None
 
 
