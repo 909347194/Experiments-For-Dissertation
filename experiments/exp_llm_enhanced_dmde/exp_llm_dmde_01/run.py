@@ -146,19 +146,19 @@ def make_scenario():
     ]
     targets = [
         Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
-               time_window=(40000, 120000)),
+               time_window=(20000, 150000)),
         Target(id=1, position=(91.10, 29.70, 3750), weight=0.8),
         Target(id=2, position=(91.16, 29.65, 3680), weight=0.9),
         Target(id=3, position=(91.20, 29.72, 3800), weight=0.7,
-               time_window=(35000, 100000)),
+               time_window=(20000, 150000)),
         Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
-               time_window=(30000, 90000)),
+               time_window=(20000, 150000)),
         Target(id=5, position=(91.05, 29.72, 3710), weight=0.85),
         Target(id=6, position=(91.15, 29.68, 3740), weight=0.75,
-               time_window=(45000, 110000)),
+               time_window=(20000, 150000)),
         Target(id=7, position=(91.22, 29.65, 3760), weight=0.65),
         Target(id=8, position=(91.10, 29.63, 3690), weight=0.95,
-               time_window=(38000, 95000)),
+               time_window=(20000, 150000)),
         Target(id=9, position=(91.18, 29.70, 3780), weight=0.7),
     ]
     return uavs, targets, 2.5, 1.5
