@@ -232,6 +232,20 @@ def main():
 
     results = []
     run_start_time = time.time()
+
+    # 消融实验：从环境变量读取 modules 覆盖配置
+    import json as _json
+    _env_modules = os.environ.get("EXP_MODULES")
+    if _env_modules:
+        try:
+            modules_override = _json.loads(_env_modules)
+            print(f"\n[消融模式] modules 覆盖: {modules_override}")
+        except _json.JSONDecodeError:
+            print(f"  ⚠️ EXP_MODULES JSON 解析失败，使用默认配置")
+            modules_override = None
+    else:
+        modules_override = None
+
     for run_idx in range(N_RUNS):
         print(f"\n  ── Run {run_idx + 1}/{N_RUNS} " + "─" * 40)
 
@@ -245,7 +259,7 @@ def main():
             seed=run_idx,
             verbose=False,
             llm_config_path=str(CONFIG_DIR / "llm_config.yaml"),
-            modules={
+            modules=modules_override if modules_override is not None else {
                 "population_init": {"enabled": False},
                 "search_controller": {
                     "enabled": True,
