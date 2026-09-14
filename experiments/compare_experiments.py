@@ -125,11 +125,47 @@ def gen_comparison_table(baseline: dict, llm: dict) -> str:
     return "\n".join(lines)
 
 
+def _setup_sci_font():
+    """配置 SCI 论文常用字体（Times New Roman + Arial）。"""
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({
+        # 字体
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+        "mathtext.fontset": "cm",
+        # 字号
+        "font.size": 12,
+        "axes.labelsize": 12,
+        "axes.titlesize": 14,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 10,
+        # 坐标轴
+        "axes.linewidth": 0.8,
+        "axes.unicode_minus": False,
+        # 刻度朝内
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 4,
+        "ytick.major.size": 4,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        # 图例
+        "legend.framealpha": 0.9,
+        "legend.edgecolor": "0.8",
+        # 保存
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+    })
+
+
 def plot_comparison_boxplot(baseline: dict, llm: dict, output_path: Path):
     """生成 fitness 箱线图对比。"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    _setup_sci_font()
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
@@ -165,6 +201,7 @@ def plot_comparison_convergence(baseline: dict, llm: dict, output_path: Path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    _setup_sci_font()
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
