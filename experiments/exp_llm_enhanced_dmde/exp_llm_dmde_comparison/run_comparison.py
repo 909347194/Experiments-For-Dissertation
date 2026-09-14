@@ -220,12 +220,15 @@ def plot_boxplot(dmde: dict, llm: dict, output: Path, scenario: str):
     colors = [COLORS["DMDE"], COLORS["LLM-DMDE"]]
     labels = ["DMDE", "LLM-DMDE"]
 
-    # Violin plot (background)
-    parts = ax.violinplot(data_list, positions=[1, 2], showmeans=False,
-                          showmedians=False, showextrema=False)
-    for pc, color in zip(parts["bodies"], colors):
-        pc.set_facecolor(color)
-        pc.set_alpha(0.25)
+    # Violin plot (background) — skip if data is constant (KDE fails)
+    try:
+        parts = ax.violinplot(data_list, positions=[1, 2], showmeans=False,
+                              showmedians=False, showextrema=False)
+        for pc, color in zip(parts["bodies"], colors):
+            pc.set_facecolor(color)
+            pc.set_alpha(0.25)
+    except Exception:
+        pass  # all-constant data → violin impossible, box+scatter still works
 
     # Box plot (middle layer, whis=[5, 95] for extended whiskers)
     bp = ax.boxplot(data_list, positions=[1, 2], tick_labels=labels,
@@ -581,7 +584,6 @@ def gen_latex_summary_table(all_results: dict[str, dict[str, dict[str, dict]]],
             scenario_col = _latex_escape(label) if first_row else ""
             first_row = False
 
-            feasible_pct = llm["feasible_rate"] * 100
             # DMDE feasible as string
             dmde_feas = f"{dmde['feasible_rate']*100:.0f}"
             llm_feas = f"{llm['feasible_rate']*100:.0f}"
