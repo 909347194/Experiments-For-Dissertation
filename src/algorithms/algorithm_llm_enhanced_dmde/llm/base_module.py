@@ -193,7 +193,13 @@ class BaseLLMModule(ABC):
             # 3. 解析响应
             decision = self.parse_response(llm_output)
 
-            # 3.5 记录原始 LLM 输出
+            # 3.5 记录 LLM 输入和原始输出
+            decision["_llm_input"] = {
+                "messages": messages,
+                "model": getattr(self._llm, "model", "unknown"),
+                "temperature": getattr(self._llm, "temperature", None),
+                "max_tokens": getattr(self._llm, "max_tokens", None),
+            }
             decision["_llm_raw_output"] = llm_output
 
             # 4. 应用决策

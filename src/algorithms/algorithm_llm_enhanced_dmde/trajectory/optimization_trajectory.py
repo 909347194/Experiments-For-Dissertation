@@ -63,6 +63,7 @@ class TrajectoryEntry:
     llm_decision: dict[str, Any] = field(default_factory=dict)
     llm_reasoning: str = ""
     llm_raw_output: str = ""       # LLM 原始输出文本
+    llm_input: dict[str, Any] = field(default_factory=dict)  # 完整 LLM 输入 (messages, model, ...)
     llm_call_duration: float = 0.0  # seconds
     # 时间
     timestamp: float = field(default_factory=time.time)
@@ -142,7 +143,7 @@ class OptimizationTrajectory:
         return [e.diversity for e in self._entries]
 
     def get_llm_decisions(self) -> list[dict[str, Any]]:
-        """获取所有 LLM 决策记录。"""
+        """获取所有 LLM 决策记录（含完整输入输出）。"""
         return [
             {
                 "generation": e.generation,
@@ -150,6 +151,8 @@ class OptimizationTrajectory:
                 "decision": e.llm_decision,
                 "reasoning": e.llm_reasoning,
                 "duration": e.llm_call_duration,
+                "llm_input": e.llm_input,
+                "llm_raw_output": e.llm_raw_output,
             }
             for e in self._entries
             if e.llm_module

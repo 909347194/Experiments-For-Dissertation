@@ -423,6 +423,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 llm_decision=clean,
                 llm_reasoning=decision.get("_llm_reasoning", ""),
                 llm_raw_output=decision.get("_llm_raw_output", ""),
+                llm_input=decision.get("_llm_input", {}),
                 llm_call_duration=decision.get("_llm_call_duration", 0.0),
                 fitness_best=state.best_fitness,
                 diversity=state.diversity,
