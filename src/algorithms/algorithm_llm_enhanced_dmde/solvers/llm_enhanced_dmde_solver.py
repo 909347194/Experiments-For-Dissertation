@@ -220,11 +220,16 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             # ---- [Hook: before_mutation] 统一搜索控制器 ----
             sc_module = self._get_module("search_controller")
             if sc_module and sc_module.enabled and gen % sc_module.interval == 0:
+                # 使用 LLM 的实际决策值（如有），否则用公式 3-9
+                actual_cr = llm_cr if llm_cr is not None else dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
+                # 计算实际的 F 值（取种群平均值作为代表值）
+                actual_f_values = dynamic_scale_factor_batch(actual_cr, cfg.pop_size, rng)
+                actual_f_mean = float(np.mean(actual_f_values))
+
                 state = self._build_state(
                     gen, cfg.max_generations, population, best_idx,
                     cost_matrix, n_uavs, n_targets, model_type,
-                    cost_history, dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta),
-                    0.0, 1.0 - gen / cfg.max_generations,
+                    cost_history, actual_cr, actual_f_mean, 1.0 - gen / cfg.max_generations,
                 )
                 state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
 
