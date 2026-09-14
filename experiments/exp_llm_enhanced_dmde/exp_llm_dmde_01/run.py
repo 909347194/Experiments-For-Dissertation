@@ -123,12 +123,12 @@ def load_llm_config() -> dict:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 场景定义：N=M 平衡指派（5 UAV ↔ 5 Target）
+# 场景定义：N=M 平衡指派（10 UAV ↔ 10 Target）
 # ★ 与原始 exp_dmde_01 完全一致，保证公平对比
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def make_scenario():
-    """N=M 平衡指派场景。
+    """N=M 平衡指派场景（10U/10T）。
 
     约束：仅启用航程 + 时间窗（N=M 场景时序/sync 不触发，直接关闭减少开销）。
     """
@@ -138,6 +138,11 @@ def make_scenario():
         UAV(id=2,  start_pos=(91.15, 29.56, 3660), speed_range=(0.30, 0.60), max_range=29000),
         UAV(id=3,  start_pos=(91.03, 29.60, 3680), speed_range=(0.20, 0.50), max_range=28000),
         UAV(id=4,  start_pos=(91.08, 29.58, 3670), speed_range=(0.25, 0.55), max_range=31000),
+        UAV(id=5,  start_pos=(91.02, 29.52, 3640), speed_range=(0.20, 0.50), max_range=30000),
+        UAV(id=6,  start_pos=(91.18, 29.54, 3670), speed_range=(0.25, 0.55), max_range=29000),
+        UAV(id=7,  start_pos=(91.07, 29.62, 3690), speed_range=(0.20, 0.50), max_range=31000),
+        UAV(id=8,  start_pos=(91.13, 29.59, 3650), speed_range=(0.30, 0.60), max_range=28000),
+        UAV(id=9,  start_pos=(91.20, 29.57, 3660), speed_range=(0.25, 0.55), max_range=32000),
     ]
     targets = [
         Target(id=0, position=(91.12, 29.66, 3700), weight=1.0,
@@ -148,6 +153,13 @@ def make_scenario():
                time_window=(35000, 100000)),
         Target(id=4, position=(91.08, 29.68, 3720), weight=0.6,
                time_window=(30000, 90000)),
+        Target(id=5, position=(91.05, 29.72, 3710), weight=0.85),
+        Target(id=6, position=(91.15, 29.68, 3740), weight=0.75,
+               time_window=(45000, 110000)),
+        Target(id=7, position=(91.22, 29.65, 3760), weight=0.65),
+        Target(id=8, position=(91.10, 29.63, 3690), weight=0.95,
+               time_window=(38000, 95000)),
+        Target(id=9, position=(91.18, 29.70, 3780), weight=0.7),
     ]
     return uavs, targets, 2.5, 1.5
 
