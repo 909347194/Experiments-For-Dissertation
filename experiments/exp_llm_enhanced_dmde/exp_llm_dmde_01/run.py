@@ -235,7 +235,11 @@ def main():
             llm_config_path=str(CONFIG_DIR / "llm_config.yaml"),
             modules={
                 "population_init": {"enabled": False},
-                "search_controller": {"enabled": True, "interval": LLM_INTERVAL},
+                "search_controller": {
+                    "enabled": True,
+                    "interval": LLM_INTERVAL,
+                    "system_prompt_path": str(CONFIG_DIR / "prompts" / "search_controller.txt"),
+                },
             },
         )
 
