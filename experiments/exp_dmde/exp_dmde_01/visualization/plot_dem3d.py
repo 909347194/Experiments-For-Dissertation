@@ -214,6 +214,8 @@ class Dem3DPlotter(_PlotBase):
     def _gaussian_filter(data: np.ndarray, sigma: float = 0.8) -> np.ndarray:
         """简易高斯平滑（纯 numpy）。"""
         size = int(sigma * 4) + 1
+        if size % 2 == 0:
+            size += 1  # 强制奇数，保证核对称
         if size < 3:
             size = 3
         x = np.arange(size) - size // 2
