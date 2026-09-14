@@ -19,8 +19,8 @@ N=M 场景约束（单 UAV → 单 Target 一一对应）：
     - 同时到达约束 (sync):            ✗ N/M（单目标仅 1 UAV，无协同）
 """
 
-import numpy as np
 from __future__ import annotations
+import numpy as np
 
 import os
 import sys

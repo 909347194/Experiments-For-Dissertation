@@ -23,8 +23,8 @@ N<M 特有约束：
     EXP_N_RUNS=3 python run.py                       # 3次运行
 """
 
-import numpy as np
 from __future__ import annotations
+import numpy as np
 
 import os
 import sys

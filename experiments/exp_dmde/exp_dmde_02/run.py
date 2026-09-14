@@ -26,8 +26,8 @@
     EXP_N_RUNS=3 python run.py
 """
 
-import numpy as np
 from __future__ import annotations
+import numpy as np
 
 import json
 import os
