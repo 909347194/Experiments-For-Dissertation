@@ -1,0 +1,24 @@
+{
+  "experiments": {
+    "dmde_01": {
+      "label": "DMDE 基线 N=M=10",
+      "result_path": "exp_dmde/exp_dmde_01/results/exp_dmde_01_data.json",
+      "tags": [
+        "baseline",
+        "dmde",
+        "balanced",
+        "10u10t"
+      ],
+      "registered_at": "2026-09-14 19:45:40",
+      "meta": {
+        "n_runs": 1,
+        "solver_params": {
+          "pop_size": 80,
+          "max_generations": 1000,
+          "zeta": 3,
+          "delta": 0.3
+        }
+      }
+    }
+  }
+}

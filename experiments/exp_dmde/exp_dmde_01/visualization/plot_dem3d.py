@@ -37,7 +37,7 @@ class Dem3DPlotter(_PlotBase):
         cost_matrix: np.ndarray | None = None,
         view_elev: float = 32,
         view_azim: float = -55,
-        vertical_exaggeration: float = 4.0,
+        vertical_exaggeration: float = 1.5,
     ) -> Path:
         """在 DEM 地形上三维可视化分配方案。
 
@@ -186,6 +186,10 @@ class Dem3DPlotter(_PlotBase):
         ax.set_zlabel('Z / km', fontsize=11, labelpad=10)
 
         # 无标题（论文图通常在 caption 中写标题）
+
+        # 收紧 Z 轴范围，消除底部空隙
+        z_range = np.nanmax(z_plot) - np.nanmin(z_plot)
+        ax.set_zlim(np.nanmin(z_plot), np.nanmax(z_plot) + z_range * 0.05)
 
         # 简洁图例
         legend_elements = [
