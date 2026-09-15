@@ -133,8 +133,9 @@ class CandidateFilter:
         selected_assignments = [self._assignment_vector(selected[0])]
 
         while len(selected) < k and remaining:
-            best_idx = None
-            best_diversity = -1.0
+            chosen_idx = None       # 最终选中的索引
+            fallback_idx = None     # 不满足阈值时的最佳多样性候选
+            fallback_diversity = -1.0
 
             for i, cand in enumerate(remaining):
                 cand_vec = self._assignment_vector(cand)
@@ -144,18 +145,22 @@ class CandidateFilter:
                     for sv in selected_assignments
                 )
                 if min_dist >= threshold:
-                    # 满足多样性要求，选它（因为 remaining 已按 fitness 排序）
-                    best_idx = i
+                    # 满足多样性要求，直接选它（remaining 已按 fitness 排序）
+                    chosen_idx = i
                     break
-                # 记录多样性最好的候选（用于后续放宽阈值时选择）
-                if min_dist > best_diversity:
-                    best_diversity = min_dist
-                    best_idx = i
+                # 记录多样性最好的候选（用于无阈值满足时的 fallback）
+                if min_dist > fallback_diversity:
+                    fallback_diversity = min_dist
+                    fallback_idx = i
 
-            if best_idx is None:
+            # 无满足阈值的候选时，选择多样性最好的作为 fallback
+            if chosen_idx is None:
+                chosen_idx = fallback_idx
+
+            if chosen_idx is None:
                 break
 
-            chosen = remaining.pop(best_idx)
+            chosen = remaining.pop(chosen_idx)
             selected.append(chosen)
             selected_assignments.append(self._assignment_vector(chosen))
 

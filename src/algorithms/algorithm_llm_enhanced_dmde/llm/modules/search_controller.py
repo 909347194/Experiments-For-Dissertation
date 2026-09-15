@@ -55,7 +55,7 @@ Respond with a JSON object only (no markdown):
 class LLMSearchControllerModule(BaseLLMModule):
     """LLM 搜索控制器：决定 CR。"""
 
-    def __init__(self, llm_client, config=None):
+    def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
         # 支持从配置加载自定义 system prompt
         self._system_prompt = self._config.get("system_prompt", _SYSTEM_PROMPT)
@@ -67,9 +67,15 @@ class LLMSearchControllerModule(BaseLLMModule):
                 if p.exists():
                     self._system_prompt = p.read_text(encoding="utf-8")
                 else:
-                    logger.warning("system_prompt_path not found: %s, using default", prompt_path)
+                    logger.warning(
+                        "[search_controller] system_prompt_path not found: %s, using default",
+                        prompt_path,
+                    )
             except Exception as e:
-                logger.warning("Failed to load system_prompt_path: %s, using default", e)
+                logger.warning(
+                    "[search_controller] Failed to load system_prompt_path: %s, using default",
+                    e,
+                )
 
     @property
     def name(self) -> str:

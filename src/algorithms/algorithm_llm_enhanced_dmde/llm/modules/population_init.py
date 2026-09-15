@@ -132,37 +132,56 @@ class LLMPopulationInitModule(BaseLLMModule):
         top_k = state.extra.get("preference_top_k",
                                 self._config.get("preference_top_k", 3))
 
-        # 构建代价矩阵的 JSON 友好表示
-        cm_data = None
-        c_tt_data = None
-        if cm is not None:
-            # C_UT: UAV → Target 代价矩阵（上半部分）
-            rows, cols = cm.shape
-            ut_rows = min(n_uavs, rows)
-            ut_cols = min(n_targets, cols)
-            cm_data = [
-                [round(float(cm[i, j]), 2) for j in range(ut_cols)]
-                for i in range(ut_rows)
-            ]
-            # C_TT: Target → Target 巡游代价（SRP 时，矩阵下半部分）
-            if model_type == "srp" and rows > n_uavs:
-                tt_size = min(n_targets, rows - n_uavs)
-                c_tt_data = [
-                    [round(float(cm[n_uavs + i, j]), 2) for j in range(tt_size)]
-                    for i in range(tt_size)
-                ]
+        # ── Global Summary ──────────────────────────────────────────
+        global_summary = self._build_global_summary(
+            cm, n_uavs, n_targets, model_type,
+        )
 
-        # Preference summary: 每行/列 top-k 最小代价
-        preference_summary = self._build_preference_summary(cm, n_uavs, n_targets, top_k)
+        # ── Local Preference Structure ──────────────────────────────
+        # TopKTargets(U_i), TopKUAVs(T_j), contested/difficult targets
+        local_prefs = self._build_local_preference_structure(
+            cm, n_uavs, n_targets, model_type, top_k,
+        )
 
-        # 约束描述
+        # ── 约束描述 ────────────────────────────────────────────────
         constraints_desc = self._describe_constraints(model_type, n_uavs, n_targets)
 
-        # 需要生成的候选数量（优先 state.extra，回退 _config）
+        # ── 需要生成的候选数量 ──────────────────────────────────────
         pop_size = state.extra.get("pop_size", 50)
         llm_init_ratio = state.extra.get("llm_init_ratio",
                                          self._config.get("llm_init_ratio", 0.2))
         k = max(1, math.ceil(llm_init_ratio * pop_size))
+
+        # ── 代价矩阵原始数据（小规模时附带） ────────────────────────
+        _MAX_MATRIX_ELEMENTS = self._config.get("max_matrix_elements", 500)
+        cm_data = None
+        c_tt_data = None
+        if cm is not None:
+            rows, cols = cm.shape
+            ut_rows = min(n_uavs, rows)
+            ut_cols = min(n_targets, cols)
+            total_elements = ut_rows * ut_cols
+            if model_type == "srp" and rows > n_uavs:
+                tt_size = min(n_targets, rows - n_uavs)
+                total_elements += tt_size * tt_size
+
+            if total_elements <= _MAX_MATRIX_ELEMENTS:
+                cm_data = [
+                    [round(float(cm[i, j]), 2) for j in range(ut_cols)]
+                    for i in range(ut_rows)
+                ]
+                if model_type == "srp" and rows > n_uavs:
+                    tt_size = min(n_targets, rows - n_uavs)
+                    c_tt_data = [
+                        [round(float(cm[n_uavs + i, j]), 2) for j in range(tt_size)]
+                        for i in range(tt_size)
+                    ]
+            else:
+                logger.info(
+                    "[population_init] 矩阵元素总数 %d 超过阈值 %d，"
+                    "跳过原始矩阵，仅发送 global_summary + local_preferences",
+                    total_elements, _MAX_MATRIX_ELEMENTS,
+                )
 
         s_problem = {
             "problem_structure": {
@@ -172,9 +191,13 @@ class LLMPopulationInitModule(BaseLLMModule):
                 "pop_size": pop_size,
                 "requested_candidates": k,
             },
-            "cost_structure": {
+            "global_summary": global_summary,
+            "local_preference_structure": local_prefs,
+            "cost_matrix": {
                 "C_UT": cm_data,
                 "C_TT": c_tt_data,
+                "note": "Only included when N*M is small enough. "
+                        "Otherwise rely on global_summary + local_preferences.",
             },
             "constraints": constraints_desc,
             "objectives": {
@@ -184,7 +207,6 @@ class LLMPopulationInitModule(BaseLLMModule):
                     "+ beta * constraint_violation_penalty"
                 ),
             },
-            "preference_summary": preference_summary,
         }
 
         user = (
@@ -263,26 +285,136 @@ class LLMPopulationInitModule(BaseLLMModule):
     # ── 内部辅助方法 ──────────────────────────────────────────
 
     @staticmethod
-    def _build_preference_summary(
+    def _build_global_summary(
         cm: np.ndarray | None,
         n_uavs: int,
         n_targets: int,
-        top_k: int,
+        model_type: str,
     ) -> dict[str, Any]:
-        """构建偏好摘要：每行/列的 top-k 最小代价统计。
+        """构建 Global Summary：问题规模 + 代价统计 + 可行性统计。
 
-        帮助 LLM 快速定位划算的分配，避免遍历整个矩阵。
+        比简单的 shape/min/max/mean 更丰富，帮助 LLM 理解问题特征。
         """
         if cm is None:
             return {}
 
-        summary: dict[str, Any] = {}
+        rows, cols = cm.shape
+        ut_rows = min(n_uavs, rows)
+        ut_cols = min(n_targets, cols)
 
-        # UAV → Target: 每个 UAV 的 top-k 最小代价目标
+        # ── C_UT 统计 ────────────────────────────────────────────
+        ut_vals = []
+        for i in range(ut_rows):
+            for j in range(ut_cols):
+                v = float(cm[i, j])
+                if np.isfinite(v):
+                    ut_vals.append(v)
+
+        ut_stats = {}
+        if ut_vals:
+            arr = np.array(ut_vals)
+            ut_stats = {
+                "min": round(float(arr.min()), 2),
+                "max": round(float(arr.max()), 2),
+                "mean": round(float(arr.mean()), 2),
+                "std": round(float(arr.std()), 2),
+            }
+
+        # ── C_TT 统计（SRP） ─────────────────────────────────────
+        tt_stats = {}
+        if model_type == "srp" and rows > n_uavs:
+            tt_size = min(n_targets, rows - n_uavs)
+            tt_vals = []
+            for i in range(tt_size):
+                for j in range(tt_size):
+                    if i == j:
+                        continue
+                    v = float(cm[n_uavs + i, j])
+                    if np.isfinite(v):
+                        tt_vals.append(v)
+            if tt_vals:
+                arr = np.array(tt_vals)
+                tt_stats = {
+                    "min": round(float(arr.min()), 2),
+                    "max": round(float(arr.max()), 2),
+                    "mean": round(float(arr.mean()), 2),
+                    "std": round(float(arr.std()), 2),
+                }
+
+        # ── Feasibility Statistics ────────────────────────────────
+        n_infeasible = 0
+        n_finite = 0
+        targets_with_few_feasible = 0
+        uavs_with_few_feasible = 0
+
+        for j in range(ut_cols):
+            feasible_count = sum(1 for i in range(ut_rows) if np.isfinite(cm[i, j]))
+            if feasible_count <= 2:
+                targets_with_few_feasible += 1
+
+        for i in range(ut_rows):
+            feasible_count = sum(1 for j in range(ut_cols) if np.isfinite(cm[i, j]))
+            if feasible_count <= 2:
+                uavs_with_few_feasible += 1
+
+        for i in range(ut_rows):
+            for j in range(ut_cols):
+                n_finite += 1
+                if not np.isfinite(cm[i, j]):
+                    n_infeasible += 1
+
+        infeasible_pct = round(100.0 * n_infeasible / max(n_finite, 1), 1)
+
+        summary = {
+            "problem_scale": {
+                "N": n_uavs,
+                "M": n_targets,
+                "model_type": model_type,
+            },
+            "cost_statistics": {
+                "C_UT": ut_stats,
+            },
+            "feasibility_statistics": {
+                "infeasible_pairs_pct": infeasible_pct,
+                "targets_with_few_feasible_UAVs": targets_with_few_feasible,
+                "UAVs_with_few_feasible_targets": uavs_with_few_feasible,
+            },
+        }
+
+        if tt_stats:
+            summary["cost_statistics"]["C_TT"] = tt_stats
+
+        return summary
+
+    @staticmethod
+    def _build_local_preference_structure(
+        cm: np.ndarray | None,
+        n_uavs: int,
+        n_targets: int,
+        model_type: str,
+        top_k: int,
+    ) -> dict[str, Any]:
+        """构建 Local Preference Structure：TopK + Contested/Difficult 识别。
+
+        包含：
+        - TopKTargets(U_i): 每个 UAV 的 top-k 最小代价目标
+        - TopKUAVs(T_j): 每个目标的 top-k 最小代价 UAV
+        - Contested targets: 多个 UAV 都偏好的高竞争目标
+        - Difficult targets: 可行 UAV 很少的目标
+        - SRP: TopKNextTargets(T_j) 巡游转移偏好
+        """
+        if cm is None:
+            return {}
+
+        rows, cols = cm.shape
+        ut_rows = min(n_uavs, rows)
+        ut_cols = min(n_targets, cols)
+
+        # ── TopKTargets(U_i) ─────────────────────────────────────
         uav_preferences = []
-        for i in range(n_uavs):
+        for i in range(ut_rows):
             row_costs = []
-            for j in range(n_targets):
+            for j in range(ut_cols):
                 val = cm[i, j]
                 if np.isfinite(val):
                     row_costs.append((j, round(float(val), 2)))
@@ -293,13 +425,12 @@ class LLMPopulationInitModule(BaseLLMModule):
                     {"target": t, "cost": c} for t, c in row_costs[:top_k]
                 ],
             })
-        summary["uav_preferences"] = uav_preferences
 
-        # Target → UAV: 每个目标的 top-k 最小代价 UAV
+        # ── TopKUAVs(T_j) ────────────────────────────────────────
         target_preferences = []
-        for j in range(n_targets):
+        for j in range(ut_cols):
             col_costs = []
-            for i in range(n_uavs):
+            for i in range(ut_rows):
                 val = cm[i, j]
                 if np.isfinite(val):
                     col_costs.append((i, round(float(val), 2)))
@@ -310,14 +441,46 @@ class LLMPopulationInitModule(BaseLLMModule):
                     {"uav": u, "cost": c} for u, c in col_costs[:top_k]
                 ],
             })
-        summary["target_preferences"] = target_preferences
 
-        # SRP: Target → Target 巡游代价摘要
-        if cm.shape[0] > n_uavs:
+        # ── Contested Targets ─────────────────────────────────────
+        target_popularity: dict[int, int] = {}
+        for pref in uav_preferences:
+            for entry in pref["top_targets"]:
+                tgt = entry["target"]
+                target_popularity[tgt] = target_popularity.get(tgt, 0) + 1
+
+        contested = sorted(target_popularity.items(), key=lambda x: -x[1])
+        contested_targets = [
+            {"target": t, "preferred_by_count": c}
+            for t, c in contested
+            if c >= 2
+        ][:top_k * 2]
+
+        # ── Difficult Targets ─────────────────────────────────────
+        difficult_targets = []
+        for j in range(ut_cols):
+            feasible_count = sum(
+                1 for i in range(ut_rows) if np.isfinite(cm[i, j])
+            )
+            if feasible_count <= 2:
+                difficult_targets.append({
+                    "target": j,
+                    "feasible_UAV_count": feasible_count,
+                })
+
+        result: dict[str, Any] = {
+            "TopKTargets_per_UAV": uav_preferences,
+            "TopKUAVs_per_target": target_preferences,
+            "contested_targets": contested_targets,
+            "difficult_targets": difficult_targets,
+        }
+
+        # ── SRP: TopKNextTargets(T_j) ────────────────────────────
+        if model_type == "srp" and rows > n_uavs:
             tt_preferences = []
-            for i in range(n_targets):
+            for i in range(ut_cols):
                 tt_costs = []
-                for j in range(n_targets):
+                for j in range(ut_cols):
                     if i == j:
                         continue
                     val = cm[n_uavs + i, j]
@@ -330,9 +493,9 @@ class LLMPopulationInitModule(BaseLLMModule):
                         {"target": t, "cost": c} for t, c in tt_costs[:top_k]
                     ],
                 })
-            summary["tt_preferences"] = tt_preferences
+            result["TopKNextTargets_per_target"] = tt_preferences
 
-        return summary
+        return result
 
     @staticmethod
     def _describe_constraints(
