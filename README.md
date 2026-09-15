@@ -30,13 +30,18 @@ LLM-DMDE 采用**分层干预框架**，LLM 在两个层级参与进化优化过
 
 LLM 根据优化状态（多样性、停滞、可行解比例等）动态选择 CR，间接控制搜索策略，同时保留原始 DMDE 的逐基因随机混合机制。
 
-### 三层干预详解
+### 两层干预详解
 
 #### 第一层：LLM 引导的种群初始化（可选）
 
-- 采用可选的 LLM 引导种群初始化模块，为部分个体提供基于领域知识的种子解
+- LLM 基于结构化问题表示 **S_problem** 生成候选离散分配方案（assignment）
+- S_problem 包含：
+  - **Global Summary** — 问题规模、C_UT/C_TT 统计（min/max/mean/std）、可行性统计（不可行对比例、受限目标数）
+  - **Local Preference Structure** — TopKTargets(U_i)、TopKUAVs(T_j)、高竞争目标、受限目标
+- 候选 assignment 由代码侧按 DMDE 统一编码规则转换为 gene，自动补全 cost
+- 经验证、修复（repair_rules）、评估、quality + diversity 过滤后注入初始种群
+- 注入比例 K = ceil(r × N_pop)，r 为超参数
 - 剩余个体使用原始 DMDE 初始化机制随机生成，确保种群多样性
-- 初始化完成后，标准 DMDE 作为底层数值优化引擎开始运行
 
 #### 第二层：搜索控制（CR 自适应选择）
 
@@ -49,7 +54,7 @@ LLM 根据优化状态（多样性、停滞、可行解比例等）动态选择 
 
 | 职责                   | LLM                          | DMDE                |
 | ---------------------- | ---------------------------- | ------------------- |
-| 种群初始化（种子解）   | ✅ 提供知识驱动的种子解（可选） | ✅ 随机生成剩余个体 |
+| 种群初始化（候选分配） | ✅ 基于 S_problem 生成候选 assignment（可选） | ✅ 转换为 gene + 随机生成剩余个体 |
 | 交叉率 CR 确定         | ✅ 自适应选择                | —                   |
 | 缩放因子 F 计算        | —                            | ✅ 由 CR 按公式 3-11 批量计算 |
 | 混合变异策略执行       | —                            | ✅ 逐基因随机选择 rand/1 或 best/2 |
@@ -64,26 +69,31 @@ LLM 根据优化状态（多样性、停滞、可行解比例等）动态选择 
 
 ```mermaid
 flowchart TD
-    A["LLM 引导种群初始化（可选）"] -->|部分个体：知识驱动种子解| B[DMDE 随机初始化剩余个体]
-    A -->|保持多样性| B
-    B --> C[标准 DMDE 进化运行]
-    C --> D{"每 p 代触发 LLM"}
-    D -->|未到周期| C
-    D -->|到达周期| E[LLM 观察优化状态与搜索轨迹]
-    E --> F["LLM 决策：选择 CR ∈ {0.1, 0.3, 0.5, 0.7, 0.9}"]
-    F --> G["CR 影响公式 3-10 中 rand/1 vs best/2 的基因比例"]
-    G --> H[DMDE 执行：差分进化 / 映射 / 约束 / 评估 / 选择]
-    H --> I[更新优化状态与轨迹]
-    I --> D
+    A["构建 S_problem"] --> B["LLM 生成 K 个候选 assignment"]
+    B --> C["代码转换为 gene + 补全 cost"]
+    C --> D["验证 + 修复 + 评估 + 过滤"]
+    D --> E["注入 K 个 + DMDE 随机补齐 (N_pop - K) 个"]
+    E --> F[标准 DMDE 进化运行]
+    F --> G{"每 p 代触发 LLM"}
+    G -->|未到周期| F
+    G -->|到达周期| H[LLM 观察优化状态与搜索轨迹]
+    H --> I["LLM 决策：选择 CR ∈ {0.1, 0.3, 0.5, 0.7, 0.9}"]
+    I --> J["CR 影响公式 3-10 中 rand/1 vs best/2 的基因比例"]
+    J --> K[DMDE 执行：差分进化 / 映射 / 约束 / 评估 / 选择]
+    K --> L[更新优化状态与轨迹]
+    L --> G
 
     style A fill:#fff3e0,stroke:#f57c00
-    style E fill:#fff3e0,stroke:#f57c00
-    style F fill:#fff3e0,stroke:#f57c00
-    style G fill:#fff3e0,stroke:#f57c00
-    style B fill:#e8f5e9,stroke:#388e3c
-    style C fill:#e8f5e9,stroke:#388e3c
-    style H fill:#e8f5e9,stroke:#388e3c
-    style I fill:#e8f5e9,stroke:#388e3c
+    style B fill:#fff3e0,stroke:#f57c00
+    style C fill:#fff3e0,stroke:#f57c00
+    style D fill:#fff3e0,stroke:#f57c00
+    style H fill:#fff3e0,stroke:#f57c00
+    style I fill:#fff3e0,stroke:#f57c00
+    style J fill:#fff3e0,stroke:#f57c00
+    style E fill:#e8f5e9,stroke:#388e3c
+    style F fill:#e8f5e9,stroke:#388e3c
+    style K fill:#e8f5e9,stroke:#388e3c
+    style L fill:#e8f5e9,stroke:#388e3c
 ```
 
 ---
@@ -125,7 +135,9 @@ graph TB
                 direction TB
                 LLM_base["BaseLLMModule<br/>+ ModuleState"]:::llm
                 LLM_client["LLMClient<br/>reasoning_effort 支持"]:::llm
-                LLM_pop["population_init"]:::llm
+                LLM_pop["population_init<br/>(v2: S_problem → assignment)"]:::llm
+                LLM_conv["assignment_converter<br/>(assignment → gene)"]:::llm
+                LLM_filt["candidate_filter<br/>(quality + diversity)"]:::llm
                 LLM_sc["search_controller<br/>（统一 CR 控制）"]:::llm
             end
 
@@ -174,6 +186,9 @@ graph TB
     LLM_sc --> LLM_client
     LLM_pop --> LLM_base
     LLM_sc --> LLM_base
+    LLM_pop --> LLM_conv
+    LLM_pop --> LLM_filt
+    LLM_conv --> LLM_repr
 
     %% 两个算法模块 → 共享环境/模型层
     D_solver --> ENV
@@ -276,10 +291,12 @@ Experiments-For-Dissertation/
 │   │       │   ├── base_module.py                # BaseLLMModule + ModuleState
 │   │       │   ├── llm_client.py                 # OpenAI 兼容 API 客户端（含 reasoning_effort）
 │   │       │   └── modules/                      # 可插拔 LLM 模块
-│   │       │       ├── __init__.py
-│   │       │       ├── cr_control.py             # [新] CR 控制模块
-│   │       │       ├── operator_selection.py     # [新] 算子选择模块
-│   │       │       ├── population_init.py        # 种群初始化建议
+│   │       │       ├── __init__.py               # 模块注册表
+│   │       │       ├── assignment_converter.py   # assignment → gene 转换 + validate/repair
+│   │       │       ├── candidate_filter.py       # quality + diversity 候选过滤
+│   │       │       ├── cr_control.py             # CR 控制模块（已废弃，合并进 search_controller）
+│   │       │       ├── operator_selection.py     # 算子选择模块（已废弃，合并进 search_controller）
+│   │       │       ├── population_init.py        # LLM 种群初始化（v2: S_problem → 候选 assignment）
 │   │       │       └── search_controller.py      # 统一搜索控制器（CR 自适应选择）
 │   │       ├── features/                         # 搜索状态特征提取
 │   │       │   ├── __init__.py
