@@ -42,38 +42,49 @@ internal encoding, so you only need to produce **discrete assignments**.
 ## Output Format
 Respond with a JSON object only (no markdown):
 {{
-    "assignments": [
-        {{"uav": <int>, "targets": [<int>, ...]}},
+    "solutions": [
+        {{
+            "assignments": [
+                {{"uav": <int>, "targets": [<int>, ...]}},
+                ...
+            ]
+        }},
         ...
     ],
     "reasoning": "<brief explanation of your strategy>"
 }}
 
+Each "solution" is a **complete assignment plan** covering ALL N UAVs.
+Generate exactly the requested number of solutions (k).
+
 ## Assignment Rules by Model Type
 
 ### balanced (N == M, one-to-one)
+- Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once, each target appears exactly once.
 - Each "targets" list has exactly 1 element.
-- Example: {{"uav": 0, "targets": [2]}}, {{"uav": 1, "targets": [0]}}
+- Example solution: {{"assignments": [{{"uav": 0, "targets": [2]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
 
 ### overloaded (N > M, UAVs outnumber targets)
+- Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once.
 - Each target must appear at least once across all assignments.
 - Each "targets" list has exactly 1 element.
-- Example: {{"uav": 0, "targets": [1]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}
+- Example solution: {{"assignments": [{{"uav": 0, "targets": [1]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
 
 ### srp (N < M, UAVs visit multiple targets in sequence)
-- Each UAV appears at least once.
+- Each solution has exactly N assignments (one per UAV).
+- Each UAV appears exactly once.
 - Each target appears exactly once across all assignments.
 - "targets" list length >= 1, and the order represents the **tour sequence**.
-- Example: {{"uav": 0, "targets": [3, 1, 4]}}, {{"uav": 1, "targets": [2, 0]}}
+- Example solution: {{"assignments": [{{"uav": 0, "targets": [3, 1, 4]}}, {{"uav": 1, "targets": [2, 0]}}]}}
 
 ## Guidelines
 - Focus on minimizing total cost while respecting constraints.
 - Use the preference summary to identify low-cost assignments.
 - For SRP, order targets to minimize transition costs (nearest-neighbor heuristic).
-- Generate exactly the requested number of assignments.
-- Ensure all constraints are satisfied (every target covered, etc.).
+- Generate exactly the requested number of complete solutions (k).
+- Each solution must satisfy all constraints (every target covered, etc.).
 """
 
 
@@ -211,9 +222,10 @@ class LLMPopulationInitModule(BaseLLMModule):
 
         user = (
             f"## Problem (S_problem)\n{json.dumps(s_problem, indent=2)}\n\n"
-            f"## Task\nGenerate exactly {k} candidate assignments. "
-            f"Each assignment must satisfy all constraints for the "
-            f"'{model_type}' model type. Respond with JSON only."
+            f"## Task\nGenerate exactly {k} complete assignment solutions. "
+            f"Each solution must cover ALL {n_uavs} UAVs and satisfy all "
+            f"constraints for the '{model_type}' model type. "
+            f"Respond with JSON only."
         )
 
         return [
@@ -224,26 +236,61 @@ class LLMPopulationInitModule(BaseLLMModule):
     def parse_response(self, llm_output: str) -> dict[str, Any]:
         """解析 LLM 输出的 assignment JSON。
 
-        验证格式合法性，返回 {"assignments": [...], "reasoning": "..."}。
+        支持两种格式（向后兼容）：
+        1. 新格式: {"solutions": [{"assignments": [...]}, ...], "reasoning": "..."}
+        2. 旧格式: {"assignments": [...], "reasoning": "..."}
+
+        返回 {"solutions": [[{...}, ...], ...], "reasoning": "..."}。
+        每个 solution 是一个完整解的 assignment 字典列表。
         """
         json_str = self._extract_json(llm_output)
         if json_str is None:
             logger.warning("[population_init] 无法从 LLM 输出中提取 JSON")
-            return {"assignments": [], "reasoning": "Parse failed: no JSON found"}
+            return {"solutions": [], "reasoning": "Parse failed: no JSON found"}
 
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.warning("[population_init] JSON 解析失败: %s", e)
-            return {"assignments": [], "reasoning": f"Parse failed: invalid JSON ({e})"}
+            return {"solutions": [], "reasoning": f"Parse failed: invalid JSON ({e})"}
 
+        # 格式 1: 新格式 {"solutions": [{"assignments": [...]}, ...]}
+        raw_solutions = data.get("solutions", None)
+        if raw_solutions is not None:
+            if not isinstance(raw_solutions, list):
+                return {"solutions": [], "reasoning": "Parse failed: solutions not a list"}
+            validated_solutions = []
+            for sol in raw_solutions:
+                if not isinstance(sol, dict):
+                    continue
+                raw_assignments = sol.get("assignments", [])
+                validated = self._validate_assignments(raw_assignments)
+                if validated:
+                    validated_solutions.append(validated)
+            return {
+                "solutions": validated_solutions,
+                "reasoning": data.get("reasoning", ""),
+            }
+
+        # 格式 2: 旧格式兼容 {"assignments": [...]}
         raw_assignments = data.get("assignments", [])
         if not isinstance(raw_assignments, list):
-            return {"assignments": [], "reasoning": "Parse failed: assignments not a list"}
+            return {"solutions": [], "reasoning": "Parse failed: assignments not a list"}
+        validated = self._validate_assignments(raw_assignments)
+        if validated:
+            return {
+                "solutions": [validated],
+                "reasoning": data.get("reasoning", ""),
+            }
+        return {"solutions": [], "reasoning": data.get("reasoning", "")}
 
-        # 基础格式验证
+    @staticmethod
+    def _validate_assignments(raw_assignments: list) -> list[dict[str, Any]]:
+        """验证并过滤单个 solution 内的 assignments。"""
+        if not isinstance(raw_assignments, list):
+            return []
         validated = []
-        for i, a in enumerate(raw_assignments):
+        for a in raw_assignments:
             if not isinstance(a, dict):
                 continue
             uav = a.get("uav")
@@ -253,32 +300,29 @@ class LLMPopulationInitModule(BaseLLMModule):
             if not all(isinstance(t, int) for t in targets):
                 continue
             validated.append({"uav": uav, "targets": targets})
-
-        return {
-            "assignments": validated,
-            "reasoning": data.get("reasoning", ""),
-        }
+        return validated
 
     def apply_decision(
         self, decision: dict[str, Any], state: ModuleState
     ) -> ModuleState:
-        """将解析后的 assignments 存入 decision 字典。
+        """将解析后的 solutions 存入 state.extra。
 
         由于 hook 在 before_init（此时还没有种群），
-        不直接修改种群，而是将候选 assignments 存入 extra，
+        不直接修改种群，而是将候选完整解存入 extra，
         由 solver 侧的 AssignmentConverter 处理。
         """
-        assignments = decision.get("assignments", [])
-        if not assignments:
-            logger.info("[population_init] LLM 未生成有效 assignments")
-            state.extra["candidate_assignments"] = []
+        solutions = decision.get("solutions", [])
+        if not solutions:
+            logger.info("[population_init] LLM 未生成有效 solutions")
+            state.extra["candidate_solutions"] = []
             return state
 
         # 存入 state.extra，供 solver 使用
-        state.extra["candidate_assignments"] = assignments
+        # 格式: list[list[dict]]，每个元素是一个完整解的 assignments 列表
+        state.extra["candidate_solutions"] = solutions
         logger.info(
-            "[population_init] LLM 生成了 %d 个候选 assignments",
-            len(assignments),
+            "[population_init] LLM 生成了 %d 个候选完整解",
+            len(solutions),
         )
         return state
 

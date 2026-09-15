@@ -374,18 +374,18 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
         # 带重试的 LLM 调用
         max_retries = getattr(cfg, "llm_init_max_retries", 3)
-        candidate_assignments = []
+        candidate_solutions = []
         decision = {}
 
         for attempt in range(max_retries):
             try:
                 decision = pop_init_module.inject(state)
                 self._record_decision(0, "population_init", decision, state)
-                candidate_assignments = state.extra.get("candidate_assignments", [])
-                if candidate_assignments:
+                candidate_solutions = state.extra.get("candidate_solutions", [])
+                if candidate_solutions:
                     break
                 logger.info(
-                    "[PopInit] 第 %d 次尝试未生成有效 assignments，重试...",
+                    "[PopInit] 第 %d 次尝试未生成有效 solutions，重试...",
                     attempt + 1,
                 )
             except Exception as e:
@@ -395,7 +395,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 )
                 decision = {"_error": str(e)}
 
-        if not candidate_assignments:
+        if not candidate_solutions:
             # LLM 调用全部失败 → fallback 到标准 DMDE 初始化
             logger.info("[PopInit] LLM 调用失败，fallback 到标准 DMDE 初始化")
             if cfg.verbose:
@@ -404,7 +404,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
         # ---- 转换 assignments → Individuals ----
         converter = AssignmentConverter(cost_matrix, n_uavs, n_targets)
-        candidates = converter.convert_batch(candidate_assignments)
+        candidates = converter.convert_batch(candidate_solutions)
 
         if not candidates:
             logger.info("[PopInit] 所有 assignments 转换失败，fallback 到标准 DMDE 初始化")
@@ -436,14 +436,14 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
         # 日志
         logger.info(
-            "[PopInit] LLM 生成 %d 候选 → 过滤后 %d 注入 + %d 随机 = %d 总种群",
-            len(candidate_assignments), len(selected), n_random, len(population),
+            "[PopInit] LLM 生成 %d 候选解 → 过滤后 %d 注入 + %d 随机 = %d 总种群",
+            len(candidate_solutions), len(selected), n_random, len(population),
         )
         if cfg.verbose:
             llm_fitness = [ind.fitness for ind in selected]
             best_llm = min(llm_fitness) if llm_fitness else float("inf")
             print(
-                f"  [LLM PopInit] {len(candidate_assignments)} candidates → "
+                f"  [LLM PopInit] {len(candidate_solutions)} solutions → "
                 f"{len(selected)} selected (best={best_llm:.2f}) + "
                 f"{n_random} random = {len(population)} total"
             )

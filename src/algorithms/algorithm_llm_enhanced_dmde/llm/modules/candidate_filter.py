@@ -61,6 +61,8 @@ class CandidateFilter:
         self._n = n_uavs
         self._m = n_targets
         self._threshold = diversity_threshold
+        self._seed = seed
+        self._rng = np.random.default_rng(seed)
 
     def filter(
         self, candidates: list[Individual], k: int

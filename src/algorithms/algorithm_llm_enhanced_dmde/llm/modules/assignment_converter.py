@@ -31,9 +31,13 @@ class AssignmentConverter:
     使用方式::
 
         converter = AssignmentConverter(cost_matrix, n_uavs, n_targets)
-        is_valid, msg = converter.validate(assignment)
+        # 单个完整解转换
+        solution = [{"uav": 0, "targets": [2]}, {"uav": 1, "targets": [0]}]
+        is_valid, msg = converter.validate_batch(solution)
         if is_valid:
-            individual = converter.convert(assignment)
+            individual = converter.convert(solution)
+        # 批量转换多个完整解
+        individuals = converter.convert_batch([solution1, solution2])
     """
 
     def __init__(
@@ -56,29 +60,44 @@ class AssignmentConverter:
         else:
             return "srp"
 
-    def convert(self, assignment: dict[str, Any]) -> Individual | None:
-        """将单个 assignment 转换为 Individual（含完整 gene 序列）。
+    def convert(self, assignments: list[dict[str, Any]]) -> Individual | None:
+        """将一组完整 assignments 转换为 Individual（含完整 gene 序列）。
+
+        对于 balanced/overloaded，assignments 列表包含 N 个字典，
+        每个字典对应一个 UAV 的分配。
+        对于 srp，assignments 列表包含 N 个字典，
+        每个字典对应一个 UAV 的巡游路线。
 
         Args:
-            assignment: LLM 输出的单个 assignment 字典，
-                        格式 {"uav": int, "targets": [int, ...]}。
+            assignments: 一个完整解的 assignment 字典列表。
 
         Returns:
             转换成功返回 Individual，失败返回 None。
         """
-        is_valid, err_msg = self.validate(assignment)
-        if not is_valid:
-            logger.debug("Assignment 验证失败: %s", err_msg)
+        if not assignments:
+            return None
+
+        # 逐个验证格式
+        for a in assignments:
+            is_valid, err_msg = self.validate(a)
+            if not is_valid:
+                logger.debug("Assignment 验证失败: %s", err_msg)
+                return None
+
+        # 验证全局约束
+        batch_ok, batch_err = self.validate_batch(assignments)
+        if not batch_ok:
+            logger.debug("Batch 验证失败: %s", batch_err)
             return None
 
         mt = self.model_type
         try:
             if mt == "balanced":
-                return self._convert_balanced(assignment)
+                return self._convert_balanced(assignments)
             elif mt == "overloaded":
-                return self._convert_overloaded(assignment)
+                return self._convert_overloaded(assignments)
             else:
-                return self._convert_srp(assignment)
+                return self._convert_srp(assignments)
         except Exception as e:
             logger.debug("Assignment 转换失败: %s", e)
             return None
@@ -196,45 +215,50 @@ class AssignmentConverter:
 
     # ── 转换逻辑 ──────────────────────────────────────────────
 
-    def _convert_balanced(self, assignment: dict[str, Any]) -> Individual:
-        """balanced (N=M): 每个 {"uav": i, "targets": [j]} → Gene(i, j, C_UT[i][j])。"""
-        uav = assignment["uav"]
-        target = assignment["targets"][0]
-        cost = float(self._cm[uav, target])
-        gene = Gene(uav_id=uav, target_id=target, cost=cost)
-        return Individual(genes=[gene], model_type="balanced")
+    def _convert_balanced(self, assignments: list[dict[str, Any]]) -> Individual:
+        """balanced (N=M): 每个 {"uav": i, "targets": [j]} → Gene(i, j, C_UT[i][j])。
 
-    def _convert_overloaded(self, assignment: dict[str, Any]) -> Individual:
-        """overloaded (N>M): 同 balanced 格式。"""
-        uav = assignment["uav"]
-        target = assignment["targets"][0]
-        cost = float(self._cm[uav, target])
-        gene = Gene(uav_id=uav, target_id=target, cost=cost)
-        return Individual(genes=[gene], model_type="overloaded")
+        assignments 包含 N 个字典，每个对应一个 UAV 的分配。
+        """
+        genes = []
+        for a in assignments:
+            uav = a["uav"]
+            target = a["targets"][0]
+            cost = float(self._cm[uav, target])
+            genes.append(Gene(uav_id=uav, target_id=target, cost=cost))
+        return Individual(genes=genes, model_type="balanced")
 
-    def _convert_srp(self, assignment: dict[str, Any]) -> Individual:
+    def _convert_overloaded(self, assignments: list[dict[str, Any]]) -> Individual:
+        """overloaded (N>M): 同 balanced 格式，N 个 assignment 各含 1 个 target。"""
+        genes = []
+        for a in assignments:
+            uav = a["uav"]
+            target = a["targets"][0]
+            cost = float(self._cm[uav, target])
+            genes.append(Gene(uav_id=uav, target_id=target, cost=cost))
+        return Individual(genes=genes, model_type="overloaded")
+
+    def _convert_srp(self, assignments: list[dict[str, Any]]) -> Individual:
         """srp (N<M): UAV→Target + Target→Target 巡游基因序列。
 
+        assignments 包含 N 个字典，每个对应一个 UAV 的巡游路线：
         {"uav": i, "targets": [j1, j2, j3]} →
             Gene(uav=i, target=j1, cost=C_UT[i][j1])
             Gene(uav=-1, target=j2, cost=C_TT[j1][j2])
             Gene(uav=-1, target=j3, cost=C_TT[j2][j3])
         """
-        uav = assignment["uav"]
-        targets = assignment["targets"]
-
         genes = []
-        for seq, tgt in enumerate(targets):
-            if seq == 0:
-                # 第一个目标：UAV → Target
-                cost = float(self._cm[uav, tgt])
-                genes.append(Gene(uav_id=uav, target_id=tgt, cost=cost))
-            else:
-                # 后续目标：Target → Target（巡游代价）
-                prev_tgt = targets[seq - 1]
-                cost = float(self._cm[self._n + prev_tgt, tgt])
-                genes.append(Gene(uav_id=-1, target_id=tgt, cost=cost))
-
+        for a in assignments:
+            uav = a["uav"]
+            targets = a["targets"]
+            for seq, tgt in enumerate(targets):
+                if seq == 0:
+                    cost = float(self._cm[uav, tgt])
+                    genes.append(Gene(uav_id=uav, target_id=tgt, cost=cost))
+                else:
+                    prev_tgt = targets[seq - 1]
+                    cost = float(self._cm[self._n + prev_tgt, tgt])
+                    genes.append(Gene(uav_id=-1, target_id=tgt, cost=cost))
         return Individual(genes=genes, model_type="srp")
 
     # ── 单个 assignment 验证 ──────────────────────────────────
@@ -344,24 +368,24 @@ class AssignmentConverter:
     # ── 批量转换 ──────────────────────────────────────────────
 
     def convert_batch(
-        self, assignments: list[dict[str, Any]]
+        self, solutions: list[list[dict[str, Any]]]
     ) -> list[Individual]:
-        """批量转换 assignments 为 Individuals。
+        """批量转换多个完整解为 Individuals。
 
-        注意：此方法不验证全局约束（由 CandidateFilter 或 solver 侧处理）。
-        仅逐个转换，失败的 assignment 会被跳过。
+        每个完整解是一个 assignment 字典列表（一个 LLM 响应中的所有 assignments）。
+        转换时会验证每个完整解的全局约束。
 
         Args:
-            assignments: assignment 字典列表。
+            solutions: 完整解列表，每个元素是一组 assignment 字典。
 
         Returns:
             成功转换的 Individual 列表。
         """
         individuals = []
-        for a in assignments:
-            ind = self.convert(a)
+        for sol_idx, solution in enumerate(solutions):
+            ind = self.convert(solution)
             if ind is not None:
                 individuals.append(ind)
             else:
-                logger.debug("跳过无效 assignment: %s", a)
+                logger.debug("跳过无效完整解 #%d: %s", sol_idx, solution)
         return individuals
