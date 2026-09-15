@@ -205,51 +205,251 @@ graph TB
 ```
 Experiments-For-Dissertation/
 │
+├── .env.example                                  # 环境变量模板
+├── .gitignore
+├── .python-version                               # Python 版本锁定
+├── pyproject.toml                                # 项目元数据与依赖声明
+├── requirements.txt
+├── uv.lock                                       # uv 依赖锁文件
+├── README.md
+│
 ├── src/                                          # 核心源码
+│   ├── __init__.py
 │   ├── algorithms/
+│   │   ├── __init__.py
 │   │   ├── algorithm_dmde/                       # DMDE 基线算法（第三章）
-│   │   │   ├── base/         BaseOptimizer + SolverResult
-│   │   │   ├── operators/    crossover · mutation · scale_factor · extinction
-│   │   │   ├── representation/  encoder · mapper · inverse_mapper · repair_rules/
-│   │   │   └── solvers/      DMDESolver + baseline_solvers/
+│   │   │   ├── __init__.py
+│   │   │   ├── base/                             # BaseOptimizer + SolverResult
+│   │   │   │   ├── __init__.py
+│   │   │   │   └── base_optimizer.py
+│   │   │   ├── operators/                        # crossover · mutation · scale_factor · extinction
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── crossover.py
+│   │   │   │   ├── extinction.py
+│   │   │   │   ├── mutation.py
+│   │   │   │   └── scale_factor.py
+│   │   │   ├── representation/                   # 编码 / 映射 / 逆映射 / 修复规则
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── encoder.py
+│   │   │   │   ├── inverse_mapper.py
+│   │   │   │   ├── mapper.py
+│   │   │   │   └── repair_rules/
+│   │   │   │       ├── __init__.py
+│   │   │   │       ├── invalid_mutator.py
+│   │   │   │       ├── nearest_match.py
+│   │   │   │       └── unique_filter.py
+│   │   │   └── solvers/                          # DMDESolver + 基线求解器
+│   │   │       ├── __init__.py
+│   │   │       ├── dmde_solver.py
+│   │   │       └── baseline_solvers/
+│   │   │           ├── __init__.py
+│   │   │           ├── cmtap_ga.py
+│   │   │           ├── pmx_de.py
+│   │   │           └── sort_de.py
 │   │   │
 │   │   └── algorithm_llm_enhanced_dmde/          # LLM 增强 DMDE（独立实现）
-│   │       ├── base/         BaseOptimizer（独立副本）
-│   │       ├── operators/    DMDE 算子（独立副本）
-│   │       ├── representation/  编码/映射/修复（独立副本）
-│   │       ├── solvers/      LLMEnhancedDMDESolver
-│   │       ├── llm/          LLM 交互层
-│   │       │   ├── base_module.py    BaseLLMModule + ModuleState
-│   │       │   ├── llm_client.py     OpenAI 兼容 API 客户端（含 reasoning_effort）
-│   │       │   └── modules/          可插拔 LLM 模块
-│   │       │       ├── population_init.py     种群初始化建议
-│   │       │       └── search_controller.py   统一搜索控制器（CR 自适应选择）
-│   │       ├── features/     搜索状态特征提取
-│   │       └── trajectory/   OptimizationTrajectory 轨迹记录
+│   │       ├── __init__.py
+│   │       ├── base/                             # BaseOptimizer（独立副本）
+│   │       │   ├── __init__.py
+│   │       │   └── base_optimizer.py
+│   │       ├── operators/                        # DMDE 算子（独立副本）
+│   │       │   ├── __init__.py
+│   │       │   ├── crossover.py
+│   │       │   ├── extinction.py
+│   │       │   ├── mutation.py
+│   │       │   └── scale_factor.py
+│   │       ├── representation/                   # 编码/映射/修复（独立副本）
+│   │       │   ├── __init__.py
+│   │       │   ├── encoder.py
+│   │       │   ├── inverse_mapper.py
+│   │       │   ├── mapper.py
+│   │       │   └── repair_rules/
+│   │       │       ├── __init__.py
+│   │       │       ├── invalid_mutator.py
+│   │       │       ├── nearest_match.py
+│   │       │       └── unique_filter.py
+│   │       ├── solvers/                          # LLMEnhancedDMDESolver
+│   │       │   ├── __init__.py
+│   │       │   └── llm_enhanced_dmde_solver.py
+│   │       ├── llm/                              # LLM 交互层
+│   │       │   ├── __init__.py
+│   │       │   ├── base_module.py                # BaseLLMModule + ModuleState
+│   │       │   ├── llm_client.py                 # OpenAI 兼容 API 客户端（含 reasoning_effort）
+│   │       │   └── modules/                      # 可插拔 LLM 模块
+│   │       │       ├── __init__.py
+│   │       │       ├── cr_control.py             # [新] CR 控制模块
+│   │       │       ├── operator_selection.py     # [新] 算子选择模块
+│   │       │       ├── population_init.py        # 种群初始化建议
+│   │       │       └── search_controller.py      # 统一搜索控制器（CR 自适应选择）
+│   │       ├── features/                         # 搜索状态特征提取
+│   │       │   ├── __init__.py
+│   │       │   ├── constraint_features.py
+│   │       │   ├── convergence_features.py
+│   │       │   └── population_features.py
+│   │       └── trajectory/                       # OptimizationTrajectory 轨迹记录
+│   │           ├── __init__.py
+│   │           └── optimization_trajectory.py
 │   │
-│   ├── environments/environment_dmde/            # 战场环境（DEM · 雷达 · 代价估算）
-│   ├── models/model_dmde/                        # 领域模型（UAV · Target · 约束 · 代价矩阵）
-│   └── utils/utils_dmde/                         # 工具函数（评价指标）
+│   ├── environments/                             # 战场环境
+│   │   └── environment_dmde/                     # DEM · 雷达 · 代价估算 · 场景转换
+│   │       ├── __init__.py
+│   │       ├── context.py
+│   │       ├── cost_estimator.py
+│   │       ├── dem_terrain.py
+│   │       ├── radar_threat.py
+│   │       └── transition.py
+│   │
+│   ├── models/                                   # 领域模型
+│   │   └── model_dmde/                           # UAV · Target · 约束 · 代价矩阵
+│   │       ├── __init__.py
+│   │       ├── constraints/
+│   │       │   ├── __init__.py
+│   │       │   ├── coop_constraints.py
+│   │       │   ├── evaluator.py
+│   │       │   └── single_constraints.py
+│   │       ├── cost/
+│   │       │   ├── __init__.py
+│   │       │   └── cost_matrix.py
+│   │       └── entities/
+│   │           ├── __init__.py
+│   │           ├── target.py
+│   │           └── uav.py
+│   │
+│   └── utils/                                    # 工具函数
+│       └── utils_dmde/
+│           ├── __init__.py
+│           ├── coord_transform.py                # [新] 坐标变换工具
+│           └── metrics.py                        # 评价指标
 │
 ├── experiments/                                  # 实验层
 │   ├── exp_dmde/                                 # DMDE 基线实验
-│   │   ├── exp_dmde_01/    N=M 平衡指派
-│   │   ├── exp_dmde_02/    N>M 多对一
-│   │   └── exp_dmde_03/    N<M 群巡游
+│   │   ├── exp_dmde_01/                          # N=M 平衡指派
+│   │   │   ├── __init__.py
+│   │   │   ├── run.py
+│   │   │   ├── data_store.py
+│   │   │   ├── plot_from_saved.py
+│   │   │   ├── result_table.py
+│   │   │   ├── config/
+│   │   │   ├── data/                             # DEM 数据 · 矢量边界
+│   │   │   │   └── chengguan_district_dem.tif
+│   │   │   ├── results/
+│   │   │   └── visualization/                    # 可视化脚本
+│   │   │       ├── __init__.py
+│   │   │       ├── _common.py
+│   │   │       ├── plot_assignment.py
+│   │   │       ├── plot_comparison.py
+│   │   │       ├── plot_convergence.py
+│   │   │       ├── plot_cost_matrix.py
+│   │   │       ├── plot_dem3d.py
+│   │   │       └── visualizer.py
+│   │   │
+│   │   ├── exp_dmde_02/                          # N>M 多对一
+│   │   │   ├── __init__.py
+│   │   │   ├── run.py
+│   │   │   ├── plot_from_saved.py
+│   │   │   ├── result_table.py
+│   │   │   ├── config/
+│   │   │   ├── data/
+│   │   │   └── results/
+│   │   │
+│   │   └── exp_dmde_03/                          # N<M 群巡游
+│   │       ├── __init__.py
+│   │       ├── run.py
+│   │       ├── plot_from_saved.py
+│   │       ├── result_table.py
+│   │       ├── config/
+│   │       ├── data/
+│   │       ├── results/
+│   │       └── visualization/
+│   │
 │   └── exp_llm_enhanced_dmde/                    # LLM 增强实验
-│       ├── exp_llm_dmde_01/  LLM + N=M（含 config/llm_config.yaml）
-│       ├── exp_llm_dmde_02/  LLM + N>M
-│       └── exp_llm_dmde_03/  LLM + N<M
+│       ├── README.md                             # [新] LLM 实验说明文档
+│       │
+│       ├── exp_llm_dmde_01/                      # LLM + N=M
+│       │   ├── __init__.py
+│       │   ├── run.py
+│       │   ├── run_batch.py                      # [新] 批量实验运行
+│       │   ├── registry.py                       # [新] 实验注册表
+│       │   ├── index.json                        # [新] 实验索引
+│       │   ├── compare_experiments.py            # 实验对比脚本
+│       │   ├── data_store.py
+│       │   ├── plot_from_saved.py
+│       │   ├── result_table.py
+│       │   ├── config/
+│       │   │   ├── llm_config.yaml               # LLM 配置
+│       │   │   └── prompts/                      # [新] Prompt 模板目录
+│       │   │       └── search_controller.txt
+│       │   ├── data/
+│       │   │   └── chengguan_district_dem.tif
+│       │   ├── results/
+│       │   ├── comparison_results/               # [新] 对比实验结果
+│       │   │   ├── comparison.md
+│       │   │   └── figures/
+│       │   │       ├── comparison_boxplot.png
+│       │   │       └── comparison_convergence.png
+│       │   └── visualization/                    # 可视化脚本
+│       │       ├── __init__.py
+│       │       ├── _common.py
+│       │       ├── plot_assignment.py
+│       │       ├── plot_comparison.py
+│       │       ├── plot_convergence.py
+│       │       ├── plot_cost_matrix.py
+│       │       ├── plot_dem3d.py
+│       │       ├── plot_llm_decisions.py         # LLM 决策可视化
+│       │       └── visualizer.py
+│       │
+│       ├── exp_llm_dmde_02/                      # LLM + N>M
+│       │   ├── __init__.py
+│       │   ├── run.py
+│       │   ├── plot_from_saved.py
+│       │   ├── result_table.py
+│       │   ├── config/
+│       │   │   ├── llm_config.yaml
+│       │   │   └── prompts/
+│       │   │       └── search_controller.txt
+│       │   ├── data/
+│       │   └── results/
+│       │
+│       ├── exp_llm_dmde_03/                      # LLM + N<M
+│       │   ├── __init__.py
+│       │   ├── run.py
+│       │   ├── plot_from_saved.py
+│       │   ├── result_table.py
+│       │   ├── config/
+│       │   │   ├── llm_config.yaml
+│       │   │   └── prompts/
+│       │   │       └── search_controller.txt
+│       │   ├── data/
+│       │   └── results/
+│       │
+│       └── exp_llm_dmde_comparison/              # [新] LLM-DMDE 跨场景对比实验
+│           └── run_comparison.py
 │
 ├── tests/                                        # 单元测试
-│   ├── dmde/               DMDE 算法测试
-│   └── llm_enhanced_dmde/  LLM 模块测试（含 llm_client 测试）
+│   ├── dmde/                                     # DMDE 算法测试
+│   │   ├── test_regressions.py                   # [新] 回归测试
+│   │   └── solver/
+│   │       ├── test_encoder.py
+│   │       ├── test_mapping_operator.py
+│   │       └── test_solver.py
+│   │
+│   └── llm_enhanced_dmde/                        # LLM 模块测试
+│       ├── __init__.py
+│       ├── test_feature_extractors.py            # 特征提取器测试
+│       ├── test_llm_client.py                    # LLM 客户端测试
+│       ├── test_prompt_builder.py                # Prompt 构建器测试
+│       ├── test_response_parser.py               # 响应解析器测试
+│       ├── test_solver_integration.py            # 求解器集成测试
+│       └── test_trajectory_collector.py          # 轨迹收集器测试
 │
 └── docs/                                         # 文档
-    ├── AI_guide/             LLM 增强设计指南
+    ├── AI_guide/                                 # LLM 增强设计指南
+    │   └── LLM_for_DMDE_guide1.md
     ├── DIRECTORY_STRUCTURE.md
-    ├── references/           参考论文
-    └── reviews/              代码审查报告
+    └── references/                               # 参考论文
+        ├── Ming2017_*.pdf
+        ├── Zhang_2025_*.pdf
+        └── 赵明_*.pdf
 ```
 
 ---
