@@ -97,6 +97,13 @@ class LLMEnhancedDMDEConfig:
     save_trajectory: bool = True
     trajectory_window: int = 20
 
+    # LLM 种群初始化参数（v2）
+    # ⚠️ 以下参数均为实验调参项
+    llm_init_ratio: float = 0.2           # r，LLM 候选注入比例（K = ceil(r × N_pop)）
+    llm_init_max_retries: int = 3         # LLM 生成失败时的重试次数
+    llm_init_diversity_threshold: float = 0.1  # 多样性过滤阈值（0~1）
+    llm_init_preference_top_k: int = 3    # prompt 中每行/列的 top-k 最小代价统计
+
 
 class LLMEnhancedDMDESolver(BaseOptimizer):
     """模块化 LLM 增强 DMDE 求解器。
@@ -167,47 +174,28 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         self._trajectory = OptimizationTrajectory()
 
         # ---- Step 1: 种群初始化 ----
-        encoder = PopulationEncoder(cost_matrix, n_uavs, n_targets)
-        population = encoder.generate(cfg.pop_size, seed=cfg.seed)
+        # 新流程（v2）:
+        #   1. LLM pop_init module 生成候选 assignments（hook: before_init）
+        #   2. AssignmentConverter 转换为 Individuals
+        #   3. CandidateFilter 过滤（quality + diversity）
+        #   4. DMDE 随机初始化补齐剩余个体
+        #   5. 合并为初始种群
+        #   6. 评估所有个体
+        population = self._initialize_population(
+            cost_matrix, n_uavs, n_targets, model_type,
+            fitness_evaluator, cfg, rng,
+        )
 
-        # 评估初始种群
+        # 评估初始种群（LLM 注入的个体已在 _initialize_population 中评估）
         best_idx = 0
         for i, ind in enumerate(population):
-            ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
+            if ind.fitness == float("inf"):
+                ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
             if ind.fitness < population[best_idx].fitness:
                 best_idx = i
 
         best_individual = population[best_idx].copy()
         cost_history = [best_individual.fitness]
-
-        # ---- LLM 种群初始化模块 (hook: after_init) ----
-        pop_init_module = self._get_module("population_init")
-        if pop_init_module and pop_init_module.enabled:
-            state = self._build_state(
-                0, cfg.max_generations, population, best_idx,
-                cost_matrix, n_uavs, n_targets, model_type,
-                cost_history, 0.5, 0.5, 1.0,
-            )
-            state.extra["pop_size"] = cfg.pop_size
-            decision = pop_init_module.inject(state)
-            self._record_decision(0, "population_init", decision, state)
-
-            # Apply population changes from LLM init module
-            if state.extra.get("llm_init_applied") and state.extra.get("llm_init_n_modified", 0) > 0:
-                population = list(state.population)  # Copy back modified population
-                # Re-evaluate modified individuals (marked with inf fitness)
-                for i, ind in enumerate(population):
-                    if ind.fitness == float("inf"):
-                        ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
-                    if ind.fitness < population[best_idx].fitness:
-                        best_idx = i
-                best_individual = population[best_idx].copy()
-                cost_history = [best_individual.fitness]
-
-            if cfg.verbose and decision:
-                strategy = decision.get("init_strategy", "N/A")
-                n_mod = state.extra.get("llm_init_n_modified", 0)
-                print(f"  [LLM PopInit] {strategy} (modified {n_mod} individuals)")
 
         # LLM 决策状态缓存
         llm_cr = None          # None = 未被 LLM 设置，使用公式 3-9
@@ -340,6 +328,158 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             elapsed_seconds=elapsed,
             solver_name=self.name,
             extra=extra,
+        )
+
+    def _initialize_population(
+        self, cost_matrix, n_uavs, n_targets, model_type,
+        fitness_evaluator, cfg, rng,
+    ) -> list[Individual]:
+        """初始化种群（v2 流程）。
+
+        流程：
+        1. 如果 population_init 模块启用，调用 LLM 生成候选 assignments
+        2. AssignmentConverter 转换为 Individuals
+        3. CandidateFilter 过滤（quality + diversity）
+        4. DMDE 随机初始化补齐剩余个体
+        5. 合并为初始种群
+
+        如果 LLM 模块禁用或调用失败，fallback 到标准 DMDE 初始化。
+        """
+        from ..llm.modules.assignment_converter import AssignmentConverter
+        from ..llm.modules.candidate_filter import CandidateFilter
+
+        encoder = PopulationEncoder(cost_matrix, n_uavs, n_targets)
+        pop_size = cfg.pop_size
+
+        # 检查 population_init 模块是否启用
+        pop_init_module = self._get_module("population_init")
+        if not (pop_init_module and pop_init_module.enabled):
+            # 模块禁用 → 标准 DMDE 初始化（与当前行为完全一致）
+            return encoder.generate(pop_size, seed=cfg.seed)
+
+        # ---- LLM 种群初始化 (hook: before_init) ----
+        llm_init_ratio = getattr(cfg, "llm_init_ratio", 0.2)
+        k = max(1, int(np.ceil(llm_init_ratio * pop_size)))
+
+        # 构建 before_init 状态（此时还没有种群）
+        state = self._build_state_before_init(
+            cost_matrix, n_uavs, n_targets, model_type,
+        )
+        state.extra["pop_size"] = pop_size
+        state.extra["llm_init_ratio"] = llm_init_ratio
+        state.extra["preference_top_k"] = getattr(cfg, "llm_init_preference_top_k", 3)
+
+        # state.extra 已包含 pop_size 和 llm_init_ratio（见上方 _build_state_before_init）
+        # build_prompt 会从 state.extra 读取这些值，无需直接修改模块私有配置
+
+        # 带重试的 LLM 调用
+        max_retries = getattr(cfg, "llm_init_max_retries", 3)
+        candidate_assignments = []
+        decision = {}
+
+        for attempt in range(max_retries):
+            try:
+                decision = pop_init_module.inject(state)
+                self._record_decision(0, "population_init", decision, state)
+                candidate_assignments = state.extra.get("candidate_assignments", [])
+                if candidate_assignments:
+                    break
+                logger.info(
+                    "[PopInit] 第 %d 次尝试未生成有效 assignments，重试...",
+                    attempt + 1,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[PopInit] 第 %d 次 LLM 调用失败: %s",
+                    attempt + 1, e,
+                )
+                decision = {"_error": str(e)}
+
+        if not candidate_assignments:
+            # LLM 调用全部失败 → fallback 到标准 DMDE 初始化
+            logger.info("[PopInit] LLM 调用失败，fallback 到标准 DMDE 初始化")
+            if cfg.verbose:
+                print("  [LLM PopInit] Failed, falling back to standard DMDE init")
+            return encoder.generate(pop_size, seed=cfg.seed)
+
+        # ---- 转换 assignments → Individuals ----
+        converter = AssignmentConverter(cost_matrix, n_uavs, n_targets)
+        candidates = converter.convert_batch(candidate_assignments)
+
+        if not candidates:
+            logger.info("[PopInit] 所有 assignments 转换失败，fallback 到标准 DMDE 初始化")
+            return encoder.generate(pop_size, seed=cfg.seed)
+
+        # 评估候选个体
+        for ind in candidates:
+            ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
+
+        # ---- Quality + Diversity 过滤 ----
+        diversity_threshold = getattr(cfg, "llm_init_diversity_threshold", 0.1)
+        candidate_filter = CandidateFilter(
+            fitness_evaluator=fitness_evaluator,
+            cost_matrix=cost_matrix,
+            n_uavs=n_uavs,
+            n_targets=n_targets,
+            diversity_threshold=diversity_threshold,
+            seed=cfg.seed,
+        )
+        selected = candidate_filter.filter(candidates, k)
+
+        # ---- 合并：LLM 候选 + 随机补齐 ----
+        n_random = pop_size - len(selected)
+        if n_random > 0:
+            random_pop = encoder.generate(n_random, seed=cfg.seed)
+            population = list(selected) + random_pop
+        else:
+            population = list(selected[:pop_size])
+
+        # 日志
+        logger.info(
+            "[PopInit] LLM 生成 %d 候选 → 过滤后 %d 注入 + %d 随机 = %d 总种群",
+            len(candidate_assignments), len(selected), n_random, len(population),
+        )
+        if cfg.verbose:
+            llm_fitness = [ind.fitness for ind in selected]
+            best_llm = min(llm_fitness) if llm_fitness else float("inf")
+            print(
+                f"  [LLM PopInit] {len(candidate_assignments)} candidates → "
+                f"{len(selected)} selected (best={best_llm:.2f}) + "
+                f"{n_random} random = {len(population)} total"
+            )
+
+        return population
+
+    def _build_state_before_init(
+        self, cost_matrix, n_uavs, n_targets, model_type,
+    ) -> ModuleState:
+        """构建 before_init 阶段的 ModuleState。
+
+        此时还没有种群，只提供问题结构和代价矩阵信息。
+        """
+        return ModuleState(
+            generation=0,
+            max_generations=0,
+            population=None,
+            cost_vectors=None,
+            best_idx=0,
+            best_fitness=float("inf"),
+            mean_fitness=float("inf"),
+            diversity=0.0,
+            gene_variance=0.0,
+            convergence_speed=0.0,
+            stagnation_count=0,
+            feasible_ratio=0.0,
+            violation_mean=0.0,
+            violation_max=0.0,
+            cr=0.5,
+            f_scale=0.5,
+            temperature=1.0,
+            cost_matrix=cost_matrix,
+            n_uavs=n_uavs,
+            n_targets=n_targets,
+            model_type=model_type,
+            cost_history=[],
         )
 
     def _init_modules(self, cfg: LLMEnhancedDMDEConfig) -> None:

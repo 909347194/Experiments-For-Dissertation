@@ -5,6 +5,8 @@ from .population_init import LLMPopulationInitModule
 from .operator_selection import LLMOperatorSelectionModule
 from .cr_control import LLMCRControlModule
 from .search_controller import LLMSearchControllerModule
+from .assignment_converter import AssignmentConverter
+from .candidate_filter import CandidateFilter
 
 # 模块名称 → 类的映射，用于配置驱动的模块加载
 # 注意: operator_selection 和 cr_control 已废弃，请统一使用 search_controller
@@ -36,6 +38,8 @@ __all__ = [
     "LLMOperatorSelectionModule",
     "LLMCRControlModule",
     "LLMSearchControllerModule",
+    "AssignmentConverter",
+    "CandidateFilter",
     "MODULE_REGISTRY",
     "create_module",
 ]
