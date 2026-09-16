@@ -46,7 +46,7 @@ experiments/exp_ablation_study/
 │
 ├── S1_balanced_N10_M10/       # 场景 1 工作目录
 │   ├── shared_config.py       # 薄包装层 → scenarios.s1_balanced
-│   ├── data -> ../exp_dmde/exp_dmde_01/data  # 软链接到 DEM 地形数据
+│   ├── data/chengguan_district_dem.tif  # DEM 地形数据
 │   ├── A0_dmde/               # Vanilla DMDE
 │   │   ├── run.py             # 37 行，无 LLM 配置
 │   │   ├── config/
@@ -83,27 +83,27 @@ experiments/exp_ablation_study/
 ### 前置准备
 
 ```bash
-# 1. 确保已配置 LLM API（推荐 SiliconFlow + Qwen3.6-35B-A3B）
-# 检查 .env 文件中是否有：GuiJiLiuDongAIYunFuWu_API_KEY=sk-xxx
+# 1. 确保已配置 LLM API（推荐 SiliconFlow + Qwen3.5-9B，详见 config/llm_config.yaml）
+# 检查 .env 文件中是否有：GuiJiLiuDongAIYunFuWu_API_KEY=sk-xxx（或 SILICONFLOW_API_KEY=sk-xxx）
 
-# 2. 确保 DEM 数据存在（软链接自动创建）
-ls -la S1_balanced_N10_M10/data/dem_*.tif
+# 2. 确保 DEM 数据存在（S1/S2 各一份，文件名均为 chengguan_district_dem.tif）
+ls -la S1_balanced_N10_M10/data/chengguan_district_dem.tif S2_srp_N10_M20/data/chengguan_district_dem.tif
 ```
 
 ### 运行实验
 
 ```bash
 # 【推荐】运行全部 8 组实验（每组 30 runs，约需 2-4 小时）
-python run_ablation.py --runs 30
+uv run python run_ablation.py --runs 30
 
 # 只运行场景 S1（4 组 × 30 runs）
-python run_ablation.py --scenario S1 --runs 30
+uv run python run_ablation.py --scenario S1 --runs 30
 
 # 只运行 A3 配置（Full LLM-DMDE）
-python run_ablation.py --config A3 --runs 30
+uv run python run_ablation.py --config A3 --runs 30
 
 # 单独运行某一组（调试用）
-cd S1_balanced_N10_M10/A3_full && python run.py --runs 5
+cd S1_balanced_N10_M10/A3_full && uv run python run.py --runs 5
 ```
 
 ### 参数说明
@@ -119,7 +119,7 @@ cd S1_balanced_N10_M10/A3_full && python run.py --runs 5
 
 ```bash
 # 生成所有图表和 LaTeX 表格
-python analyze.py
+uv run python analyze.py
 
 # 输出文件：
 # - figures/convergence_comparison_S1.png  # 收敛曲线对比
@@ -203,7 +203,7 @@ python analyze.py
 ```yaml
 providers:
   siliconflow:
-    model: deepseek-ai/DeepSeek-V3.1-Terminus  # 或 Qwen/Qwen3.6-35B-A3B
+    model: Qwen/Qwen3.5-9B  # 或 Qwen/Qwen3.6-35B-A3B（如需更强推理）
 ```
 
 ### Q2: 如何更换场景（如 N=20, M=30）？
@@ -215,7 +215,7 @@ providers:
 ### Q3: 实验中断后如何恢复？
 结果自动保存到 `results/` 目录，重新运行会自动跳过已完成的 runs：
 ```bash
-python run_ablation.py --runs 30  # 自动检测已有结果
+uv run python run_ablation.py --runs 30  # 自动检测已有结果
 ```
 
 ### Q4: 如何自定义随机种子？
@@ -225,10 +225,10 @@ RANDOM_SEEDS = list(range(42, 72))  # 或自定义列表
 ```
 
 ### Q5: LLM API 成本估算？
-以 SiliconFlow + DeepSeek-V3.1-Terminus 为例：
-- 单次 PopInit: ~2000 tokens × $0.00013 = $0.00026
-- 单次 CR Control: ~500 tokens × $0.00013 = $0.000065
-- 240 组实验总成本：约 **$0.5 - $1.0**
+以 SiliconFlow + Qwen3.5-9B 为例（输入/输出 $0.10/$0.15 per M tokens）：
+- 单次 PopInit: ~2000 tokens × $0.0001 = $0.0002
+- 单次 CR Control: ~500 tokens × $0.0001 = $0.00005
+- 240 组实验总成本：约 **$0.4 - $0.8**
 
 ## 参考文献
 
