@@ -150,12 +150,15 @@ class LLMPopulationInitModule(BaseLLMModule):
             },
         }
 
-        user = (
-            f"## Problem (S_problem)\n{json.dumps(s_problem, indent=2)}\n\n"
-            f"## Task\nGenerate exactly {k} complete assignment solutions. "
-            f"Each solution must cover ALL {n_uavs} UAVs and satisfy all "
-            f"constraints for the '{model_type}' model type. "
-            f"Respond with JSON only."
+        # 使用统一的 user prompt 模板
+        from llm.prompts import get_prompt
+        user = get_prompt(
+            "population_init",
+            prompt_type="user",
+            problem_json=json.dumps(s_problem, indent=2),
+            k=k,
+            n_uavs=n_uavs,
+            model_type=model_type,
         )
 
         return [

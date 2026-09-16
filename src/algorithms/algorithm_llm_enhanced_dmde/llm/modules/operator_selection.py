@@ -15,7 +15,7 @@ import logging
 from typing import Any
 
 from ..base_module import BaseLLMModule, ModuleState
-from ..prompts import get_operator_selection_prompt
+from ..prompts import get_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -34,21 +34,12 @@ class LLMOperatorSelectionModule(BaseLLMModule):
         # 从配置加载自定义 system prompt，支持外部文件覆盖和动态参数
         prompt_path = self._config.get("system_prompt_path")
         strategies = self._config.get("strategies", AVAILABLE_STRATEGIES)
-        self._system_prompt: str = get_operator_selection_prompt(
+        self._system_prompt: str = get_prompt(
+            "operator_selection",
+            prompt_type="system",
+            prompt_path=prompt_path,
             strategies=strategies,
-        ) if prompt_path is None else None
-        
-        if prompt_path is not None:
-            from pathlib import Path
-            p = Path(prompt_path)
-            if p.exists():
-                self._system_prompt = p.read_text(encoding="utf-8")
-            else:
-                logger.warning(
-                    "[operator_selection] system_prompt_path not found: %s, using default",
-                    prompt_path,
-                )
-                self._system_prompt = get_operator_selection_prompt(strategies=strategies)
+        )
 
     @property
     def name(self) -> str:
@@ -59,8 +50,6 @@ class LLMOperatorSelectionModule(BaseLLMModule):
         return "after_evolve"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
-        system = self._system_prompt
-
         # 构建用户消息
         features = {
             "generation": state.generation,
@@ -89,15 +78,16 @@ class LLMOperatorSelectionModule(BaseLLMModule):
                 lines.append(line)
             trajectory_text = "\n".join(lines)
 
-        user = (
-            f"## Current Search State\n{json.dumps(features, indent=2)}\n\n"
-            f"## Recent Trajectory\n{trajectory_text}\n\n"
-            f"## Task\nSelect the best DE strategy for the next interval. "
-            f"Respond with JSON only."
+        # 使用统一的 user prompt 模板
+        user = get_prompt(
+            "operator_selection",
+            prompt_type="user",
+            state_json=json.dumps(features, indent=2),
+            trajectory_text=trajectory_text,
         )
 
         return [
-            {"role": "system", "content": system},
+            {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": user},
         ]
 

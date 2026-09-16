@@ -7,18 +7,22 @@
     2. 外部文件覆盖（实验配置目录）
     3. 场景化提示词（N=M/N>M/N<M）
     4. 动态参数插值（f-string 风格）
+    5. User Prompt 模板化（不仅 system prompt）
 
 使用方式：
-    from llm.prompts import get_prompt
+    from llm.prompts import get_prompt, get_user_prompt
     
-    # 获取默认提示词
-    prompt = get_prompt("population_init")
+    # 获取 system prompt
+    sys_prompt = get_prompt("population_init")
     
-    # 获取带参数的提示词
-    prompt = get_prompt("search_controller", cr_choices=[0.1, 0.3, 0.5])
+    # 获取带参数的 system prompt
+    sys_prompt = get_prompt("search_controller", cr_choices=[0.1, 0.3, 0.5])
     
-    # 从外部文件加载
-    prompt = get_prompt("population_init", prompt_path="/path/to/prompt.txt")
+    # 从外部文件加载 system prompt
+    sys_prompt = get_prompt("population_init", prompt_path="/path/to/prompt.txt")
+    
+    # 获取 user prompt 模板（支持动态参数）
+    user_template = get_user_prompt("population_init", n_uavs=10, n_targets=8, k=5)
 """
 
 from __future__ import annotations
@@ -90,6 +94,18 @@ Generate exactly the requested number of solutions (k).
 """
 
 
+POPULATION_INIT_USER_PROMPT = """\
+## Problem (S_problem)
+{problem_json}
+
+## Task
+Generate exactly {k} complete assignment solutions. \
+Each solution must cover ALL {n_uavs} UAVs and satisfy all \
+constraints for the '{model_type}' model type. \
+Respond with JSON only.
+"""
+
+
 # =============================================================================
 # CR Control Prompts
 # =============================================================================
@@ -114,6 +130,15 @@ Respond with a JSON object only (no markdown):
 - Large fitness variance → increase F (bigger steps)
 - Near convergence → decrease F (fine-tuning)
 - Only adjust when the state clearly warrants a change (prefer null)
+"""
+
+
+CR_CONTROL_USER_PROMPT = """\
+## Current Search State
+{state_json}
+
+## Task
+Adjust CR and F offsets for the next generation. Respond with JSON only.
 """
 
 
@@ -156,6 +181,18 @@ Respond with a JSON object only (no markdown):
 """
 
 
+SEARCH_CONTROLLER_USER_PROMPT = """\
+## Current Search State
+{state_json}
+
+## Recent Trajectory
+{trajectory_text}
+
+## Task
+Select the best CR for the next interval. Respond with JSON only.
+"""
+
+
 # =============================================================================
 # Operator Selection Prompts
 # =============================================================================
@@ -190,8 +227,47 @@ Respond with a JSON object only (no markdown):
 """
 
 
+OPERATOR_SELECTION_USER_PROMPT = """\
+## Current Search State
+{state_json}
+
+## Recent Trajectory
+{trajectory_text}
+
+## Task
+Select the best DE strategy for the next interval. Respond with JSON only.
+"""
+
+
 # =============================================================================
-# Unified Interface
+# Scene-specific System Prompts (by model_type)
+# =============================================================================
+
+def get_scene_specific_system_prompt(module_name: str, model_type: str) -> str:
+    """获取针对特定场景（model_type）的系统提示词。
+    
+    Args:
+        module_name: 模块名称 ("population_init", "cr_control", ...)
+        model_type: 场景类型 ("balanced", "overloaded", "srp")
+        
+    Returns:
+        针对该场景优化的系统提示词
+        
+    注意：当前实现仍然返回通用提示词，但保留了扩展接口。
+    未来可以为不同场景定制不同的提示词。
+    """
+    # 当前实现：返回通用提示词（包含所有场景的规则）
+    # 未来可以：为不同场景加载不同的外部文件
+    if module_name == "population_init":
+        return POPULATION_INIT_SYSTEM_PROMPT
+    elif module_name == "cr_control":
+        return CR_CONTROL_SYSTEM_PROMPT
+    else:
+        raise ValueError(f"Unknown module for scene-specific prompt: {module_name!r}")
+
+
+# =============================================================================
+# Unified Interface for System Prompts
 # =============================================================================
 
 PROMPT_REGISTRY = {
@@ -199,9 +275,17 @@ PROMPT_REGISTRY = {
     "cr_control": CR_CONTROL_SYSTEM_PROMPT,
 }
 
+USER_PROMPT_REGISTRY = {
+    "population_init": POPULATION_INIT_USER_PROMPT,
+    "cr_control": CR_CONTROL_USER_PROMPT,
+    "search_controller": SEARCH_CONTROLLER_USER_PROMPT,
+    "operator_selection": OPERATOR_SELECTION_USER_PROMPT,
+}
+
 
 def get_prompt(
     module_name: str,
+    prompt_type: str = "system",
     prompt_path: str | Path | None = None,
     **kwargs: Any,
 ) -> str:
@@ -209,6 +293,7 @@ def get_prompt(
     
     Args:
         module_name: 模块名称 ("population_init", "cr_control", "search_controller", ...)
+        prompt_type: 提示词类型 ("system" 或 "user")
         prompt_path: 可选的外部文件路径，如果提供则从文件加载（覆盖默认）
         **kwargs: 动态参数，用于 f-string 插值
         
@@ -216,7 +301,8 @@ def get_prompt(
         提示词字符串
         
     Examples:
-        >>> get_prompt("population_init")
+        >>> get_prompt("population_init")  # system prompt
+        >>> get_prompt("population_init", prompt_type="user", n_uavs=10, n_targets=8, k=5)
         >>> get_prompt("search_controller", cr_choices=[0.1, 0.3, 0.5])
         >>> get_prompt("population_init", prompt_path="/path/to/prompt.txt")
     """
@@ -229,18 +315,45 @@ def get_prompt(
         else:
             logger.warning(f"[prompts] Prompt file not found: {prompt_path}, using default")
     
-    # 从注册表获取默认提示词
-    if module_name in PROMPT_REGISTRY:
-        return PROMPT_REGISTRY[module_name]
+    # System prompt
+    if prompt_type == "system":
+        if module_name in PROMPT_REGISTRY:
+            return PROMPT_REGISTRY[module_name]
+        
+        # 特殊模块需要动态生成
+        if module_name == "search_controller":
+            return get_search_controller_prompt(**kwargs)
+        
+        if module_name == "operator_selection":
+            return get_operator_selection_prompt(**kwargs)
+        
+        raise ValueError(
+            f"Unknown system prompt module: {module_name!r}. "
+            f"Available: {list(PROMPT_REGISTRY.keys()) + ['search_controller', 'operator_selection']}"
+        )
     
-    # 特殊模块需要动态生成
-    if module_name == "search_controller":
-        return get_search_controller_prompt(**kwargs)
+    # User prompt
+    elif prompt_type == "user":
+        if module_name not in USER_PROMPT_REGISTRY:
+            raise ValueError(
+                f"Unknown user prompt module: {module_name!r}. "
+                f"Available: {list(USER_PROMPT_REGISTRY.keys())}"
+            )
+        
+        template = USER_PROMPT_REGISTRY[module_name]
+        
+        # 动态参数插值
+        try:
+            return template.format(**kwargs)
+        except KeyError as e:
+            logger.warning(
+                f"[prompts] Missing parameter {e} for user prompt '{module_name}', "
+                f"using raw template"
+            )
+            return template
     
-    if module_name == "operator_selection":
-        return get_operator_selection_prompt(**kwargs)
-    
-    raise ValueError(f"Unknown prompt module: {module_name!r}. Available: {list(PROMPT_REGISTRY.keys()) + ['search_controller', 'operator_selection']}")
+    else:
+        raise ValueError(f"Unknown prompt_type: {prompt_type!r}. Use 'system' or 'user'.")
 
 
 def load_prompt_from_file(prompt_path: str | Path, fallback: str | None = None) -> str:
@@ -266,9 +379,15 @@ def load_prompt_from_file(prompt_path: str | Path, fallback: str | None = None) 
 __all__ = [
     "get_prompt",
     "load_prompt_from_file",
+    "get_scene_specific_system_prompt",
     "get_search_controller_prompt",
     "get_operator_selection_prompt",
     "POPULATION_INIT_SYSTEM_PROMPT",
+    "POPULATION_INIT_USER_PROMPT",
     "CR_CONTROL_SYSTEM_PROMPT",
+    "CR_CONTROL_USER_PROMPT",
+    "SEARCH_CONTROLLER_USER_PROMPT",
+    "OPERATOR_SELECTION_USER_PROMPT",
     "PROMPT_REGISTRY",
+    "USER_PROMPT_REGISTRY",
 ]

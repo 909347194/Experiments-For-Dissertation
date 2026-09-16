@@ -55,10 +55,12 @@ class LLMCRControlModule(BaseLLMModule):
             "fitness_improvement": state.extra.get("fitness_improvement", 0.0),
         }
 
-        user = (
-            f"## Current Search State\n{json.dumps(features, indent=2)}\n\n"
-            f"## Task\nAdjust CR and F offsets for the next generation. "
-            f"Respond with JSON only."
+        # 使用统一的 user prompt 模板
+        from llm.prompts import get_prompt
+        user = get_prompt(
+            "cr_control",
+            prompt_type="user",
+            state_json=json.dumps(features, indent=2),
         )
 
         return [
