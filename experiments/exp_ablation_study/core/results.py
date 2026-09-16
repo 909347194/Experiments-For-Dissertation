@@ -49,6 +49,6 @@ def load_modules_config(llm_config_path: str) -> dict:
         modules 配置字典
     """
     import yaml
-    with open(llm_config_path) as f:
+    with open(llm_config_path, encoding='utf-8') as f:
         data = yaml.safe_load(f) or {}
     return data.get("modules", {})
