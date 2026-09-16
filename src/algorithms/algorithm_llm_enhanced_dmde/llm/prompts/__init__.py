@@ -42,18 +42,16 @@ logger = logging.getLogger(__name__)
 
 _JSON_FORMAT_COMMON = """\
 ## Output Format
+Think step by step **before** writing the JSON. \\\nRecord your reasoning in the "thought" field, then output the solutions.
 Respond with a JSON object only (no markdown):
 """
 
 _REASONING_GUIDE = """\
-## Reasoning Strategy
-Before generating assignments, reason step by step:
-1. Identify **difficult targets** (few feasible UAVs) — assign these first.
-2. Identify **contested targets** (preferred by many UAVs) — assign to the UAV with the best cost advantage.
-3. Fill remaining assignments using preference rankings.
-4. For SRP: order each UAV's targets by nearest-neighbor to minimize transition costs.
-
-Then output the JSON.
+## Reasoning (in the "thought" field)
+Before generating assignments, briefly reason:
+1. Which targets are **difficult** (few feasible UAVs)? Assign first.
+2. Which targets are **contested** (preferred by many UAVs)? Assign to best-cost UAV.
+3. Fill remaining using preference rankings. For SRP: use nearest-neighbor for tour order.
 """
 
 _OUTPUT_VALIDATION = """\
@@ -80,6 +78,7 @@ evolutionary algorithm's internal encoding, so you only need to produce \
 
 {_json_format}
 {{
+    "thought": "<brief reasoning: difficult targets, contested targets, assignment strategy>",
     "solutions": [
         {{
             "assignments": [
@@ -126,6 +125,7 @@ evolutionary algorithm's internal encoding, so you only need to produce \
 
 {_json_format}
 {{
+    "thought": "<brief reasoning: target coverage, cost-optimal UAV assignments>",
     "solutions": [
         {{
             "assignments": [
@@ -174,6 +174,7 @@ produce **discrete assignments**.
 
 {_json_format}
 {{
+    "thought": "<brief reasoning: target distribution among UAVs, tour ordering by nearest-neighbor>",
     "solutions": [
         {{
             "assignments": [
@@ -227,6 +228,7 @@ internal encoding, so you only need to produce **discrete assignments**.
 
 {_json_format}
 {{
+    "thought": "<brief reasoning: difficult targets, contested targets, assignment strategy>",
     "solutions": [
         {{
             "assignments": [

@@ -208,6 +208,7 @@ class LLMPopulationInitModule(BaseLLMModule):
                     validated_solutions.append(validated)
             return {
                 "solutions": validated_solutions,
+                "thought": data.get("thought", ""),
                 "reasoning": data.get("reasoning", ""),
             }
 
@@ -219,9 +220,10 @@ class LLMPopulationInitModule(BaseLLMModule):
         if validated:
             return {
                 "solutions": [validated],
+                "thought": data.get("thought", ""),
                 "reasoning": data.get("reasoning", ""),
             }
-        return {"solutions": [], "reasoning": data.get("reasoning", "")}
+        return {"solutions": [], "thought": data.get("thought", ""), "reasoning": data.get("reasoning", "")}
 
     @staticmethod
     def _validate_assignments(raw_assignments: list) -> list[dict[str, Any]]:
