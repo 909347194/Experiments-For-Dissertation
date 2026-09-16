@@ -1,0 +1,84 @@
+% 消融实验结果表格模板
+% 编译: pdflatex ablation_tables.tex
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage[margin=1in]{geometry}
+\usepackage{caption}
+
+\begin{document}
+
+\section*{消融实验结果}
+
+% ─────────────────────────────────────────────────────────────
+% 表 1：解质量对比
+% ─────────────────────────────────────────────────────────────
+\begin{table}[htbp]
+\centering
+\caption{消融实验结果：解质量对比}
+\label{tab:ablation_results}
+\begin{tabular}{llcccc}
+\toprule
+场景 & 配置 & Best & Mean $\pm$ Std & Median \\
+\midrule
+balanced ($N{=}M{=}10$)
+  & Vanilla DMDE   & --- & $\pm$ --- & --- \\
+  & +CR Control    & --- & $\pm$ --- & --- \\
+  & +PopInit       & --- & $\pm$ --- & --- \\
+  & Full LLM-DMDE  & --- & $\pm$ --- & --- \\
+\midrule
+srp ($N{=}10, M{=}20$)
+  & Vanilla DMDE   & --- & $\pm$ --- & --- \\
+  & +CR Control    & --- & $\pm$ --- & --- \\
+  & +PopInit       & --- & $\pm$ --- & --- \\
+  & Full LLM-DMDE  & --- & $\pm$ --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────
+% 表 2：计算时间对比
+% ─────────────────────────────────────────────────────────────
+\begin{table}[htbp]
+\centering
+\caption{计算时间对比}
+\label{tab:time_breakdown}
+\begin{tabular}{llcccc}
+\toprule
+场景 & 配置 & 总耗时(s) & LLM耗时(s) & LLM调用次数 \\
+\midrule
+balanced ($N{=}M{=}10$)
+  & Vanilla DMDE   & --- & --- & --- \\
+  & +CR Control    & --- & --- & --- \\
+  & +PopInit       & --- & --- & --- \\
+  & Full LLM-DMDE  & --- & --- & --- \\
+\midrule
+srp ($N{=}10, M{=}20$)
+  & Vanilla DMDE   & --- & --- & --- \\
+  & +CR Control    & --- & --- & --- \\
+  & +PopInit       & --- & --- & --- \\
+  & Full LLM-DMDE  & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────
+% 表 3：统计显著性
+% ─────────────────────────────────────────────────────────────
+\begin{table}[htbp]
+\centering
+\caption{统计显著性检验（Wilcoxon 秩和检验，A3 vs 基线）}
+\label{tab:wilcoxon}
+\begin{tabular}{lccc}
+\toprule
+场景 & A3 vs A0 & A3 vs A1 & A3 vs A2 \\
+\midrule
+balanced ($N{=}M{=}10$) & --- & --- & --- \\
+srp ($N{=}10, M{=}20$)  & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\footnotesize{*$p < 0.05$，**$p < 0.01$，n.s. 不显著}
+\end{table}
+
+\end{document}
