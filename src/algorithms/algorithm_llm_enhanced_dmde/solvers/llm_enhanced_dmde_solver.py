@@ -559,7 +559,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         )
 
     def _record_decision(self, gen, module_name, decision, state):
-        if self._trajectory and decision:
+        if self._trajectory is not None and decision:
             clean = {k: v for k, v in decision.items() if not k.startswith("_")}
             # LLM 调用失败时保留错误信息，避免决策记录看起来像“空决策”
             if "_error" in decision:

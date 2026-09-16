@@ -1,16 +1,16 @@
-# A3: Full LLM-DMDE（PopInit + CR Control）— SiliconFlow Qwen3.5-9B
+# A3: Full LLM-DMDE（PopInit + CR Control）— SiliconFlow Qwen3.6-35B-A3B
 provider: siliconflow
-model: Qwen/Qwen3.5-9B
+model: Qwen/Qwen3.6-35B-A3B
 temperature: 0.7
-max_tokens: 4096
-timeout: 120
+max_tokens: 8192
+timeout: 180
 enable_thinking: false
-max_tokens_cap: 8192
+max_tokens_cap: 16384
 
 modules:
   population_init:
     enabled: true
-    llm_init_ratio: 0.2
+    llm_init_ratio: 0.1
     preference_top_k: 3
   search_controller:
     enabled: true
