@@ -79,9 +79,28 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     "siliconflow": {
         "api_base": "https://api.siliconflow.cn/v1",
         "env_key": "SILICONFLOW_API_KEY",
+        # 兼容历史 .env / 文档中使用的服务商中文名变量。
+        # 缺失该别名会导致 provider=siliconflow 直接失败并**静默回退 DeepSeek**。
+        "env_key_aliases": ["GuiJiLiuDongAIYunFuWu_API_KEY"],
         "default_model": "Qwen/Qwen3.5-9B",
     },
 }
+
+
+def _api_key_env_names(preset: dict[str, Any]) -> list[str]:
+    """返回该 provider 可接受的 API key 环境变量名（首位为规范名）。"""
+    return [preset["env_key"], *preset.get("env_key_aliases", [])]
+
+
+def _resolve_api_key(preset: dict[str, Any], explicit: str | None = None) -> str:
+    """解析 API key：显式参数优先，其次按 规范名 → 别名 顺序查环境变量。"""
+    if explicit:
+        return explicit
+    for name in _api_key_env_names(preset):
+        value = os.environ.get(name)
+        if value:
+            return value
+    return ""
 
 
 def _load_env() -> None:
@@ -327,13 +346,14 @@ def create_llm_client(
         )
 
     final_api_base = api_base or preset["api_base"]
-    final_api_key = api_key or os.environ.get(preset["env_key"], "")
+    final_api_key = _resolve_api_key(preset, api_key)
     final_model = model or preset["default_model"]
 
     if not final_api_key:
         raise ValueError(
             f"No API key for provider '{provider}'. "
-            f"Set {preset['env_key']} in .env or pass api_key parameter."
+            f"Set {' / '.join(_api_key_env_names(preset))} in .env "
+            f"or pass api_key parameter."
         )
 
     return LLMClient(

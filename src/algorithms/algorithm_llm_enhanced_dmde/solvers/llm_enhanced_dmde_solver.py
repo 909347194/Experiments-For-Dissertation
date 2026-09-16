@@ -501,10 +501,17 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             try:
                 llm_client = create_llm_client_from_config(cfg.llm_config_path)
             except Exception as e:
-                if cfg.verbose:
-                    print(f"  [Warning] Failed to load LLM config: {e}")
+                # 必须无条件下告警：静默回退会让 llm_config.yaml 中的
+                # provider/model/max_tokens/thinking 设置全部失效，
+                # 实验实际跑的是另一个模型和默认预算（1024 tokens）。
+                print(
+                    f"  [ERROR] 加载 LLM 配置失败，已回退 DeepSeek 默认客户端：{e}\n"
+                    f"  [ERROR] {cfg.llm_config_path} 中的 provider/model/"
+                    f"max_tokens/thinking 设置全部失效！"
+                )
                 llm_client = create_llm_client(provider="deepseek")
         else:
+            print("  [ERROR] 未提供 llm_config_path，回退 DeepSeek 默认客户端")
             llm_client = create_llm_client(provider="deepseek")
 
         self._modules = []

@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 _ABSTRACTION_DIR = Path(__file__).resolve().parents[2]  # exp_ablation_study/
-sys.path.insert(0, str(_ABSTRACTION_DIR.parents[2]))    # project root
+sys.path.insert(0, str(_ABSTRACTION_DIR.parents[1]))    # project root
 sys.path.insert(0, str(_ABSTRACTION_DIR))
 
 from core import build_scenario, run_dmde_baseline, save_results

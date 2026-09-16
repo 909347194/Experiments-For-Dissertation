@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 _ABSTRACTION_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_ABSTRACTION_DIR.parents[2]))
+sys.path.insert(0, str(_ABSTRACTION_DIR.parents[1]))
 sys.path.insert(0, str(_ABSTRACTION_DIR))
 
 from core import build_scenario, run_llm_dmde, save_results, load_modules_config

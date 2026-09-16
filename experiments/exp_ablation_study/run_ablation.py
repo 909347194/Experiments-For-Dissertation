@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[2]
+# SCRIPT_DIR = <repo>/experiments/exp_ablation_study → 仓库根目录是 parents[1]
+PROJECT_ROOT = SCRIPT_DIR.parents[1]
 
 SCENARIOS = ["S1_balanced_N10_M10", "S2_srp_N10_M20"]
 CONFIGS = ["A0_dmde", "A1_cr_control", "A2_pop_init", "A3_full"]
