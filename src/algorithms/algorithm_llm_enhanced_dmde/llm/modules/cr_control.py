@@ -28,11 +28,11 @@ based on the current search state.
 
 ## Decision Format
 Respond with a JSON object only (no markdown):
-{{
+{
     "cr_offset": <float in [-0.3, 0.3], or null to keep default>,
     "f_offset": <float in [-0.3, 0.3], or null to keep default>,
     "reasoning": "<brief explanation>"
-}}
+}
 
 ## Guidelines
 - High stagnation + low diversity → increase CR (more exploration)

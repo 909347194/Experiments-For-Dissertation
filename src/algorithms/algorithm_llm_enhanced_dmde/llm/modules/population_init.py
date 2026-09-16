@@ -41,18 +41,18 @@ internal encoding, so you only need to produce **discrete assignments**.
 
 ## Output Format
 Respond with a JSON object only (no markdown):
-{{
+{
     "solutions": [
-        {{
+        {
             "assignments": [
-                {{"uav": <int>, "targets": [<int>, ...]}},
+                {"uav": <int>, "targets": [<int>, ...]},
                 ...
             ]
-        }},
+        },
         ...
     ],
     "reasoning": "<brief explanation of your strategy>"
-}}
+}
 
 Each "solution" is a **complete assignment plan** covering ALL N UAVs.
 Generate exactly the requested number of solutions (k).
@@ -63,21 +63,21 @@ Generate exactly the requested number of solutions (k).
 - Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once, each target appears exactly once.
 - Each "targets" list has exactly 1 element.
-- Example solution: {{"assignments": [{{"uav": 0, "targets": [2]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
+- Example solution: {"assignments": [{"uav": 0, "targets": [2]}, {"uav": 1, "targets": [0]}, {"uav": 2, "targets": [1]}]}
 
 ### overloaded (N > M, UAVs outnumber targets)
 - Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once.
 - Each target must appear at least once across all assignments.
 - Each "targets" list has exactly 1 element.
-- Example solution: {{"assignments": [{{"uav": 0, "targets": [1]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
+- Example solution: {"assignments": [{"uav": 0, "targets": [1]}, {"uav": 1, "targets": [0]}, {"uav": 2, "targets": [1]}]}
 
 ### srp (N < M, UAVs visit multiple targets in sequence)
 - Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once.
 - Each target appears exactly once across all assignments.
 - "targets" list length >= 1, and the order represents the **tour sequence**.
-- Example solution: {{"assignments": [{{"uav": 0, "targets": [3, 1, 4]}}, {{"uav": 1, "targets": [2, 0]}}]}}
+- Example solution: {"assignments": [{"uav": 0, "targets": [3, 1, 4]}, {"uav": 1, "targets": [2, 0]}]}
 
 ## Guidelines
 - Focus on minimizing total cost while respecting constraints.
@@ -387,7 +387,7 @@ class LLMPopulationInitModule(BaseLLMModule):
 
         # ── Feasibility Statistics ────────────────────────────────
         n_infeasible = 0
-        n_finite = 0
+        n_total = 0
         targets_with_few_feasible = 0
         uavs_with_few_feasible = 0
 
@@ -403,11 +403,11 @@ class LLMPopulationInitModule(BaseLLMModule):
 
         for i in range(ut_rows):
             for j in range(ut_cols):
-                n_finite += 1
+                n_total += 1
                 if not np.isfinite(cm[i, j]):
                     n_infeasible += 1
 
-        infeasible_pct = round(100.0 * n_infeasible / max(n_finite, 1), 1)
+        infeasible_pct = round(100.0 * n_infeasible / max(n_total, 1), 1)
 
         summary = {
             "problem_scale": {
