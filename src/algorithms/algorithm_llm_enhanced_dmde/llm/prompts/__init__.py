@@ -48,10 +48,11 @@ Respond with a JSON object only (no markdown):
 
 _REASONING_GUIDE = """\
 ## Reasoning (in the "thought" field)
-Before generating assignments, briefly reason:
+Before generating assignments, briefly reason (MAX 2 sentences):
 1. Which targets are **difficult** (few feasible UAVs)? Assign first.
 2. Which targets are **contested** (preferred by many UAVs)? Assign to best-cost UAV.
 3. Fill remaining using preference rankings. For SRP: use nearest-neighbor for tour order.
+Do NOT list every assignment. Just state your strategy.
 """
 
 _OUTPUT_VALIDATION = """\
@@ -61,6 +62,12 @@ _OUTPUT_VALIDATION = """\
 - For balanced/overloaded: each "targets" list has exactly 1 element.
 - For srp: each "targets" list has >= 1 elements, no duplicate targets across solutions.
 - Invalid outputs will be rejected. Double-check before responding.
+
+## CRITICAL: Keep Response Concise
+- "thought": 1-2 sentences MAX. Do NOT explain every assignment.
+- "reasoning": 1 sentence MAX.
+- Do NOT add extra commentary, markdown, or text outside the JSON.
+- Output ONLY the JSON object. No preamble, no explanation after.
 """
 
 
@@ -294,9 +301,13 @@ POPULATION_INIT_USER_PROMPT = """\
 ## Task
 Generate exactly {k} complete assignment solutions. \
 Each solution must cover ALL {n_uavs} UAVs and satisfy all \
-constraints for the '{model_type}' model type. \
-Keep reasoning brief (1-2 sentences in "thought"). \
-Respond with JSON only, no extra text.
+constraints for the '{model_type}' model type.
+
+IMPORTANT CONSTRAINTS:
+- "thought": MAX 2 sentences. State strategy only, do NOT explain each assignment.
+- "reasoning": MAX 1 sentence.
+- Output ONLY the JSON object. No markdown, no preamble, no extra text.
+- Keep total response under 2000 characters.
 """
 
 
