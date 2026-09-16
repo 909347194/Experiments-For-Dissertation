@@ -9,9 +9,9 @@
         "balanced",
         "10u10t"
       ],
-      "registered_at": "2026-09-14 19:45:40",
+      "registered_at": "2026-09-14 19:50:07",
       "meta": {
-        "n_runs": 1,
+        "n_runs": 2,
         "solver_params": {
           "pop_size": 80,
           "max_generations": 1000,
