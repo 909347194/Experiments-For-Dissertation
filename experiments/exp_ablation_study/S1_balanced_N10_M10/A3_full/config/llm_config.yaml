@@ -1,6 +1,6 @@
 # A3: Full LLM-DMDE（PopInit + CR Control）
 provider: deepseek
-model: deepseek-flash
+model: Qwen/Qwen3.5-9B
 temperature: 0.7
 max_tokens: 8192
 timeout: 60
