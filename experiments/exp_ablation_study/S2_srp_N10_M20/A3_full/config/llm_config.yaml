@@ -1,0 +1,17 @@
+# A3: Full LLM-DMDE（PopInit + CR Control）
+provider: deepseek
+model: deepseek-flash
+temperature: 0.7
+max_tokens: 8192
+timeout: 60
+reasoning_effort: none
+max_tokens_cap: 16384
+
+modules:
+  population_init:
+    enabled: true
+    llm_init_ratio: 0.2
+    preference_top_k: 3
+  search_controller:
+    enabled: true
+    interval: 50

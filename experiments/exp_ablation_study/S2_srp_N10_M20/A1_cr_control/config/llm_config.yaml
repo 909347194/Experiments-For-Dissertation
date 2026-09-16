@@ -1,0 +1,13 @@
+# A1: 仅启用 CR Control
+provider: deepseek
+model: deepseek-flash
+temperature: 0.7
+max_tokens: 8192
+timeout: 60
+reasoning_effort: none
+max_tokens_cap: 16384
+
+modules:
+  search_controller:
+    enabled: true
+    interval: 50
