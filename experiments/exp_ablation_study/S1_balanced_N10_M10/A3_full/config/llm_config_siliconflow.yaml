@@ -1,14 +1,33 @@
-# SiliconFlow Qwen3 配置示例
+# SiliconFlow Qwen3.5-9B 配置示例（硅基流动，性价比优选）
 # 环境变量: export SILICONFLOW_API_KEY=sk-xxx
+#
+# ⚠️ Qwen3.5/3.6/3 系列在 SiliconFlow 上：顶层 enable_thinking 字段被忽略
+# （仅 Qwen3-8B/14B/32B/30B-A3B/235B-A22B 等白名单模型生效）。
+# 必须通过 extra_body.chat_template_kwargs 嵌套字段才能真正关闭思考。
+# 详细说明见 src/algorithms/algorithm_llm_enhanced_dmde/llm/llm_client.py。
 
 provider: siliconflow
 model: Qwen/Qwen3.5-9B
 temperature: 0.7
-max_tokens: 4096
-timeout: 120
+max_tokens: 16384
+timeout: 180
 
-# Qwen3 思考模式（SiliconFlow 用 enable_thinking，不用 reasoning_effort）
-enable_thinking: false        # true=开启思考，false=关闭
-# thinking_budget: 4096       # 思考 token 上限（128-32768）
+# 关闭思考（嵌套形式，Qwen3.5/3.6/3 系列必需）
+extra_body:
+  chat_template_kwargs:
+    enable_thinking: false
 
-max_tokens_cap: 8192
+# 思考 token 上限（兜底：嵌套形式失效时也强制限制）
+thinking_budget: 4096
+
+# 截断重试时 max_tokens 的上限
+max_tokens_cap: 32768
+
+modules:
+  population_init:
+    enabled: true
+    llm_init_ratio: 0.1
+    preference_top_k: 3
+  search_controller:
+    enabled: true
+    interval: 50

@@ -1,11 +1,25 @@
-# A1: 仅启用 CR Control — SiliconFlow Qwen3.6-35B-A3B
+# A1: 仅启用 CR Control — SiliconFlow Qwen3.5-9B
+#
+# ⚠️ Qwen3.5/3.6/3 系列在 SiliconFlow 上：顶层 enable_thinking 字段被忽略
+# （仅 Qwen3-8B/14B/32B/30B-A3B/235B-A22B 等白名单模型生效）。
+# 必须通过 extra_body.chat_template_kwargs 嵌套字段才能真正关闭思考。
+
 provider: siliconflow
-model: Qwen/Qwen3.6-35B-A3B
+model: Qwen/Qwen3.5-9B
 temperature: 0.7
-max_tokens: 8192
-timeout: 120
-enable_thinking: false
-max_tokens_cap: 16384
+max_tokens: 16384
+timeout: 180
+
+# 关闭思考（Qwen3.5/3.6 系列必需，使用嵌套形式）
+extra_body:
+  chat_template_kwargs:
+    enable_thinking: false
+
+# 思考 token 上限（即使嵌套形式失效，也限制思考不超过 4096 tokens）
+thinking_budget: 4096
+
+# 截断重试时 max_tokens 的上限
+max_tokens_cap: 32768
 
 modules:
   search_controller:
