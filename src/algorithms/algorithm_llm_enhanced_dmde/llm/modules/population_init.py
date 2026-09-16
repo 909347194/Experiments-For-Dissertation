@@ -148,7 +148,6 @@ class LLMPopulationInitModule(BaseLLMModule):
         }
 
         # 使用统一的 user prompt 模板
-        from llm.prompts import get_prompt
         user = get_prompt(
             "population_init",
             prompt_type="user",

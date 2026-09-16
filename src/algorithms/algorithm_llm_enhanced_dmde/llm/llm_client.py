@@ -181,9 +181,6 @@ class LLMClient:
                     status in (429, 500, 502, 503, 504)
                     or isinstance(e, (LLMEmptyResponseError, LLMTruncatedResponseError))
                 )
-                if not is_retryable or attempt >= max_retries - 1:
-                    logger.warning("LLM call failed: %s", e)
-                    raise
                 if truncated:
                     new_budget = min(budget * 2, self.max_tokens_cap)
                     if new_budget > budget:
@@ -192,6 +189,27 @@ class LLMClient:
                             budget, new_budget,
                         )
                         budget = new_budget
+                    elif attempt >= max_retries - 1:
+                        # 已达 cap 且最后重试：尝试返回部分内容
+                        try:
+                            resp = self._request(messages, budget)
+                            choices = getattr(resp, "choices", None)
+                            if choices:
+                                raw = choices[0].message.content
+                                if isinstance(raw, str) and raw.strip():
+                                    logger.warning(
+                                        "[LLM] returning truncated content (%d chars) "
+                                        "after %d retries at max_tokens_cap=%d",
+                                        len(raw), max_retries, budget,
+                                    )
+                                    return raw.strip()
+                        except Exception:
+                            pass
+                        logger.warning("LLM call failed: %s", e)
+                        raise
+                if not is_retryable or attempt >= max_retries - 1:
+                    logger.warning("LLM call failed: %s", e)
+                    raise
                 wait = 2 ** attempt  # 1s, 2s, 4s
                 logger.warning(
                     "[LLM] attempt %d/%d failed, retrying in %ds: %s",

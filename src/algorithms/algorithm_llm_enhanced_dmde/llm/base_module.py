@@ -28,6 +28,116 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _try_repair_json(text: str) -> str | None:
+    """尝试修复被截断的 JSON 字符串。
+
+    策略：逐步补全缺失的闭合括号/引号/方括号，
+    直到 json.loads 成功或无法修复。
+    """
+    text = text.strip()
+    if not text:
+        return None
+
+    # 快速检查：如果已经是合法 JSON，直接返回
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 1: 补全缺失的闭合字符
+    # 计算需要补全的括号深度
+    open_braces = 0
+    open_brackets = 0
+    in_string = False
+    escape_next = False
+
+    for ch in text:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            open_braces += 1
+        elif ch == '}':
+            open_braces -= 1
+        elif ch == '[':
+            open_brackets += 1
+        elif ch == ']':
+            open_brackets -= 1
+
+    # 如果在字符串中间被截断，先关闭字符串
+    suffix = ''
+    if in_string:
+        suffix += '"'
+
+    # 补全闭合括号（先方括号，后花括号）
+    suffix += ']' * max(0, open_brackets)
+    suffix += '}' * max(0, open_braces)
+
+    if suffix:
+        candidate = text + suffix
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    # 策略 2: 截断到最后一个完整的顶层值
+    # 找到最后一个合法的截断点（去掉不完整的尾部）
+    # 尝试逐步截短
+    for trim in range(1, min(200, len(text))):
+        truncated = text[:-trim].rstrip()
+        if not truncated:
+            break
+        # 补全括号
+        ob = 0
+        oj = 0
+        ins = False
+        esc = False
+        for ch in truncated:
+            if esc:
+                esc = False
+                continue
+            if ch == '\\' and ins:
+                esc = True
+                continue
+            if ch == '"' and not esc:
+                ins = not ins
+                continue
+            if ins:
+                continue
+            if ch == '{':
+                ob += 1
+            elif ch == '}':
+                ob -= 1
+            elif ch == '[':
+                oj += 1
+            elif ch == ']':
+                oj -= 1
+        suf = ''
+        if ins:
+            suf += '"'
+        suf += ']' * max(0, oj)
+        suf += '}' * max(0, ob)
+        if suf:
+            candidate = truncated + suf
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+
+    return None
+
+
 @dataclass
 class ModuleState:
     """传递给 LLM 模块的搜索状态快照。
@@ -228,6 +338,7 @@ class BaseLLMModule(ABC):
 
         支持三种格式：纯 JSON、markdown 代码块、文本中嵌入的 JSON。
         当文本中包含多个 JSON 对象时，优先取最后一个完整对象。
+        对于截断的 JSON（缺少闭合括号），尝试修复后返回。
         """
         text = text.strip()
         # Case 1: 整个文本就是一个 JSON 对象
@@ -236,7 +347,10 @@ class BaseLLMModule(ABC):
                 json.loads(text)
                 return text
             except json.JSONDecodeError:
-                pass  # 可能是不完整的前缀，继续尝试其他方法
+                # 可能是截断的 JSON，尝试修复
+                repaired = _try_repair_json(text)
+                if repaired is not None:
+                    return repaired
         # Case 2: 代码块
         match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
         if match:
@@ -245,7 +359,9 @@ class BaseLLMModule(ABC):
                 json.loads(candidate)
                 return candidate
             except json.JSONDecodeError:
-                pass
+                repaired = _try_repair_json(candidate)
+                if repaired is not None:
+                    return repaired
         # Case 3: 从后往前扫描，找最后一个合法的 {...} 块
         pos = len(text) - 1
         while pos >= 0:
@@ -260,8 +376,19 @@ class BaseLLMModule(ABC):
                 json.loads(candidate)
                 return candidate
             except json.JSONDecodeError:
-                # 不合法，继续往前搜索下一个 } 块
+                # 不合法，尝试修复
+                repaired = _try_repair_json(candidate)
+                if repaired is not None:
+                    return repaired
+                # 继续往前搜索下一个 } 块
                 pos = start - 1
+        # Case 4: 文本以 { 开头但被截断（没有配对的 }）
+        first_brace = text.find("{")
+        if first_brace >= 0:
+            candidate = text[first_brace:]
+            repaired = _try_repair_json(candidate)
+            if repaired is not None:
+                return repaired
         return None
 
     def __repr__(self) -> str:

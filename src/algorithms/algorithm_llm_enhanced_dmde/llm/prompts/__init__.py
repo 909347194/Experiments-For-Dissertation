@@ -295,7 +295,8 @@ POPULATION_INIT_USER_PROMPT = """\
 Generate exactly {k} complete assignment solutions. \
 Each solution must cover ALL {n_uavs} UAVs and satisfy all \
 constraints for the '{model_type}' model type. \
-Respond with JSON only.
+Keep reasoning brief (1-2 sentences in "thought"). \
+Respond with JSON only, no extra text.
 """
 
 
@@ -602,6 +603,11 @@ def get_prompt(
             )
 
         template = USER_PROMPT_REGISTRY[module_name]
+
+        # model_type 是 get_prompt 的命名参数，不会自动进入 **kwargs，
+        # 但 user prompt 模板中可能需要它，因此手动注入。
+        if model_type is not None and "model_type" not in kwargs:
+            kwargs = {**kwargs, "model_type": model_type}
 
         try:
             return template.format(**kwargs)

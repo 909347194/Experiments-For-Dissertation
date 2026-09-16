@@ -309,13 +309,19 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         elapsed = time.time() - t_start
 
         # 构建结果
+        # 计算 LLM 总耗时
+        llm_decisions_data = self._trajectory.get_llm_decisions() if cfg.save_trajectory else []
+        llm_total_time = sum(d.get("duration", 0.0) for d in llm_decisions_data)
+
         extra = {
             "model_type": model_type,
             "pop_size": cfg.pop_size,
             "zeta": cfg.zeta,
             "delta": cfg.delta,
             "active_modules": [m.name for m in self._modules if m.enabled],
-            "llm_decisions": self._trajectory.get_llm_decisions() if cfg.save_trajectory else [],
+            "llm_decisions": llm_decisions_data,
+            "llm_time": llm_total_time,
+            "llm_call_count": len(llm_decisions_data),
         }
         if cfg.save_trajectory:
             extra["trajectory_entries"] = len(self._trajectory)

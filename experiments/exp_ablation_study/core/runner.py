@@ -70,6 +70,7 @@ def run_llm_dmde(seed: int, cost_matrix: np.ndarray, evaluator: object,
     # 从 result.extra 提取 LLM 时间细分
     extra = result.extra or {}
     llm_time = extra.get("llm_time", 0.0)
+    llm_call_count = extra.get("llm_call_count", 0)
     llm_decisions = recorder._llm_decisions
 
     llm_init_time = sum(d.duration for d in llm_decisions if d.module == "population_init")
@@ -82,4 +83,6 @@ def run_llm_dmde(seed: int, cost_matrix: np.ndarray, evaluator: object,
         llm_init=llm_init_time,
         llm_cr=llm_cr_time,
     )
+    # 覆盖 llm_call_count（从 solver 获取准确值）
+    recorder._llm_call_count = llm_call_count if llm_call_count else recorder._llm_call_count
     return recorder.finalize()
