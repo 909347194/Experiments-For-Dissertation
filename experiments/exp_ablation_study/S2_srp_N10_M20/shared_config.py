@@ -1,26 +1,35 @@
 # -*- coding: utf-8 -*-
-"""S2 场景公共配置：srp N=10 M=20
+"""S2 场景公共配置（薄包装层）。
 
-所有 A0-A3 配置共享相同的场景定义（UAV/Target/约束）。
+实际定义在 scenarios/s2_srp.py。
+此文件保留向后兼容性，供旧 run.py 导入。
 """
 
-import numpy as np
+import sys
+from pathlib import Path
 
-# ── 问题规模 ──────────────────────────────────────────────
-N_UAVS = 10
-N_TARGETS = 20
-MODEL_TYPE = "srp"
+# 确保项目根目录和 exp_ablation_study/ 在路径中
+SCENARIO_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCENARIO_DIR.parents[2]
+ABLAITION_DIR = SCENARIO_DIR.parent
 
-# ── 代价值矩阵 ────────────────────────────────────────────
-# C_UT: 10×20 UAV→Target 距离矩阵
-# C_TT: 20×20 Target→Target 转移矩阵（嵌入 cost_matrix 下半部分）
-COST_MATRIX = None  # run.py 中从 data/ 加载
+for p in [str(PROJECT_ROOT), str(ABLAITION_DIR)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-# ── 约束 ──────────────────────────────────────────────────
-MAX_RANGE = 10000.0      # 最大航程 (m)
-MAX_TARGETS_PER_UAV = 5  # 每架 UAV 最多访问目标数
+from scenarios.s2_srp import S2_CONFIG, build_s2_cost_matrix_and_evaluator
 
-# ── DMDE 参数 ─────────────────────────────────────────────
+# 向后兼容导出
+N_UAVS = S2_CONFIG["n_uavs"]
+N_TARGETS = S2_CONFIG["n_targets"]
+MODEL_TYPE = S2_CONFIG["model_type"]
+
+
+def build_cost_matrix_and_evaluator():
+    return build_s2_cost_matrix_and_evaluator()
+
+
+# DMDE 参数
 POP_SIZE = 50
 MAX_GENERATIONS = 1000
 ZETA = 3

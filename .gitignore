@@ -68,3 +68,11 @@ Thumbs.db
 *.tar.xz
 *.tar.zst
 ```
+# Ablation study results (generated at runtime)
+experiments/exp_ablation_study/**/results/
+experiments/exp_ablation_study/figures/*.csv
+experiments/exp_ablation_study/figures/*.md
+experiments/exp_ablation_study/figures/*.png
+
+# Data symlinks (actual data in exp_dmde)
+experiments/exp_ablation_study/*/data

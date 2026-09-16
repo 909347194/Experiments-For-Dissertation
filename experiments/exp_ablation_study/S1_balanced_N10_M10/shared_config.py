@@ -1,30 +1,35 @@
 # -*- coding: utf-8 -*-
-"""S1 场景公共配置：balanced N=10 M=10
+"""S1 场景公共配置（薄包装层）。
 
-所有 A0-A3 配置共享相同的场景定义（UAV/Target/约束）。
+实际定义在 scenarios/s1_balanced.py。
+此文件保留向后兼容性，供旧 run.py 导入。
 """
 
-import numpy as np
+import sys
+from pathlib import Path
 
-# ── 问题规模 ──────────────────────────────────────────────
-N_UAVS = 10
-N_TARGETS = 10
-MODEL_TYPE = "balanced"
+# 确保项目根目录和 exp_ablation_study/ 在路径中
+SCENARIO_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCENARIO_DIR.parents[2]
+ABLAITION_DIR = SCENARIO_DIR.parent
 
-# ── 代价值矩阵（示例，实际从 data/ 加载） ─────────────────
-# C_UT: 10×10 UAV→Target 距离矩阵
-# 实际运行时从 DEM 地形 + UAV/Target 坐标计算
-COST_MATRIX = None  # run.py 中从 data/ 加载
+for p in [str(PROJECT_ROOT), str(ABLAITION_DIR)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-# ── 约束 ──────────────────────────────────────────────────
-MAX_RANGE = 8000.0       # 最大航程 (m)
-TIME_WINDOWS = {         # 目标时间窗约束
-    0: (0, 300),
-    3: (100, 500),
-    4: (0, 400),
-}
+from scenarios.s1_balanced import S1_CONFIG, build_s1_cost_matrix_and_evaluator
 
-# ── DMDE 参数 ─────────────────────────────────────────────
+# 向后兼容导出
+N_UAVS = S1_CONFIG["n_uavs"]
+N_TARGETS = S1_CONFIG["n_targets"]
+MODEL_TYPE = S1_CONFIG["model_type"]
+
+
+def build_cost_matrix_and_evaluator():
+    return build_s1_cost_matrix_and_evaluator()
+
+
+# DMDE 参数
 POP_SIZE = 50
 MAX_GENERATIONS = 1000
 ZETA = 3
