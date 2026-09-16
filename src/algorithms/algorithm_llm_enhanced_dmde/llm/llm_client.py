@@ -79,7 +79,7 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     "siliconflow": {
         "api_base": "https://api.siliconflow.cn/v1",
         "env_key": "SILICONFLOW_API_KEY",
-        "default_model": "Qwen/Qwen3-8B",
+        "default_model": "Qwen/Qwen3.5-9B",
     },
 }
 
