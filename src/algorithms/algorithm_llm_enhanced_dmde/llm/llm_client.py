@@ -76,6 +76,11 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "env_key": "OPENAI_API_KEY",
         "default_model": "gpt-4o",
     },
+    "siliconflow": {
+        "api_base": "https://api.siliconflow.cn/v1",
+        "env_key": "SILICONFLOW_API_KEY",
+        "default_model": "Qwen/Qwen3-8B",
+    },
 }
 
 
@@ -106,6 +111,8 @@ class LLMClient:
         max_tokens: int = 1024,
         timeout: int = 60,
         reasoning_effort: str | None = None,
+        enable_thinking: bool | None = None,
+        thinking_budget: int | None = None,
         max_tokens_cap: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> None:
@@ -127,6 +134,9 @@ class LLMClient:
         # 思考型模型（deepseek-flash 等）默认 effort="high"，思维链计入
         # max_tokens，不限制时容易把预算吃光导致正文为空。
         self.reasoning_effort = reasoning_effort
+        # SiliconFlow Qwen3 系列用 enable_thinking 而非 reasoning_effort
+        self.enable_thinking = enable_thinking
+        self.thinking_budget = thinking_budget
         # 截断重试时 max_tokens 允许增长到的上限
         self.max_tokens_cap = max_tokens_cap or max(max_tokens * 2, 16384)
         self._extra_body = dict(extra_body or {})
@@ -196,6 +206,11 @@ class LLMClient:
         extra_body = dict(self._extra_body)
         if self.reasoning_effort is not None:
             extra_body["reasoning_effort"] = self.reasoning_effort
+        # SiliconFlow Qwen3: enable_thinking + thinking_budget
+        if self.enable_thinking is not None:
+            extra_body["enable_thinking"] = self.enable_thinking
+        if self.thinking_budget is not None:
+            extra_body["thinking_budget"] = self.thinking_budget
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -245,6 +260,8 @@ def create_llm_client(
     max_tokens: int = 1024,
     timeout: int = 60,
     reasoning_effort: str | None = None,
+    enable_thinking: bool | None = None,
+    thinking_budget: int | None = None,
     max_tokens_cap: int | None = None,
     extra_body: dict[str, Any] | None = None,
 ) -> LLMClient:
@@ -278,6 +295,8 @@ def create_llm_client(
             max_tokens=max_tokens,
             timeout=timeout,
             reasoning_effort=reasoning_effort,
+            enable_thinking=enable_thinking,
+            thinking_budget=thinking_budget,
             max_tokens_cap=max_tokens_cap,
             extra_body=extra_body,
         )
@@ -307,6 +326,8 @@ def create_llm_client(
         max_tokens=max_tokens,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        enable_thinking=enable_thinking,
+        thinking_budget=thinking_budget,
         max_tokens_cap=max_tokens_cap,
         extra_body=extra_body,
     )
@@ -317,18 +338,21 @@ def create_llm_client_from_config(config_path: str | Path) -> LLMClient:
 
     配置文件格式::
 
-        provider: deepseek
+        provider: deepseek          # deepseek / openai / siliconflow / custom
         model: deepseek-flash
         temperature: 0.7
         max_tokens: 8192
         timeout: 60
-        # 思维链强度（"none" 关闭思考，可大幅降低耗时与 token 消耗）
-        reasoning_effort: low
+        # 思维链强度（DeepSeek: "none"/"low"/"high"/"max"）
+        reasoning_effort: none
+        # SiliconFlow Qwen3 思考模式
+        # enable_thinking: true
+        # thinking_budget: 4096
         # 截断重试时的 token 上限
         max_tokens_cap: 16384
-        # 以下可选（覆盖 provider 默认值）
-        # api_base: https://custom.api.com/v1
-        # api_key: sk-...
+        # custom provider 必填
+        # api_base: https://api.siliconflow.cn/v1
+        # api_key: sk-...   (建议用环境变量 SILICONFLOW_API_KEY)
 
     Args:
         config_path: YAML 配置文件路径。
@@ -354,6 +378,8 @@ def create_llm_client_from_config(config_path: str | Path) -> LLMClient:
         max_tokens=cfg.get("max_tokens", 1024),
         timeout=cfg.get("timeout", 60),
         reasoning_effort=cfg.get("reasoning_effort"),
+        enable_thinking=cfg.get("enable_thinking"),
+        thinking_budget=cfg.get("thinking_budget"),
         max_tokens_cap=cfg.get("max_tokens_cap"),
         extra_body=cfg.get("extra_body"),
     )
