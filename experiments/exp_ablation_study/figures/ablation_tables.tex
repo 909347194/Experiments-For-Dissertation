@@ -11,14 +11,21 @@
 
 \begin{table}[htbp]
 \centering
-\caption{消融实验结果：解质量对比}
+\caption{消融实验结果：解质量对比（最优值加粗）}
 \label{tab:ablation_results}
 \begin{tabular}{llcccc}
 \toprule
 场景 & 配置 & Best & Mean $\pm$ Std & Median \\
 \midrule
-balanced ($N{=}M{=}10$) & Vanilla DMDE & 325672.23 & 325672.23 $\pm$ 0.00 & 325672.23 \\
+balanced ($N=M=10$) & Vanilla DMDE & \textbf{325847.82} & \textbf{325847.82} $\pm$ 0.00 & \textbf{325847.82} \\
+ & +CR Control & 336438.28 & 336438.28 $\pm$ 0.00 & 336438.28 \\
+ & +PopInit & \textbf{325847.82} & \textbf{325847.82} $\pm$ 0.00 & \textbf{325847.82} \\
+ & Full LLM-DMDE & 336438.28 & 336438.28 $\pm$ 0.00 & 336438.28 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 689102.82 & 689102.82 $\pm$ 0.00 & 689102.82 \\
+ & +CR Control & 689102.82 & 689102.82 $\pm$ 0.00 & 689102.82 \\
+ & +PopInit & \textbf{547680.36} & \textbf{547680.36} $\pm$ 0.00 & \textbf{547680.36} \\
+ & Full LLM-DMDE & 689102.82 & 689102.82 $\pm$ 0.00 & 689102.82 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -31,26 +38,33 @@ balanced ($N{=}M{=}10$) & Vanilla DMDE & 325672.23 & 325672.23 $\pm$ 0.00 & 3256
 \toprule
 场景 & 配置 & 总耗时(s) & DMDE(s) & LLM总耗时(s) & LLM Init(s) & LLM CR(s) \\
 \midrule
-balanced ($N{=}M{=}10$) & Vanilla DMDE & 36.5 & 36.5 & --- & --- & --- \\
+balanced ($N=M=10$) & Vanilla DMDE & 22.3 & 22.3 & --- & --- & --- \\
+ & +CR Control & 526.8 & 1.8 & 525.0 & --- & 525.0 \\
+ & +PopInit & 78.9 & 22.3 & 56.6 & 56.6 & --- \\
+ & Full LLM-DMDE & 724.9 & 1.7 & 723.1 & 459.3 & 263.9 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 19.7 & 19.7 & --- & --- & --- \\
+ & +CR Control & 1317.3 & 13.3 & 1304.1 & --- & 1304.1 \\
+ & +PopInit & 106.2 & 19.9 & 86.4 & 86.4 & --- \\
+ & Full LLM-DMDE & 1747.4 & 13.3 & 1734.1 & 177.3 & 1556.8 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[htbp]
 \centering
-\caption{统计显著性检验（Wilcoxon 秩和检验，A3 vs 基线）}
-\label{tab:wilcoxon}
+\caption{统计显著性检验（Mann-Whitney U 秩和检验，A3 vs 基线）}
+\label{tab:mannwhitney}
 \begin{tabular}{lccc}
 \toprule
 场景 & A3 vs A0 & A3 vs A1 & A3 vs A2 \\
 \midrule
-balanced ($N{=}M{=}10$) & --- & --- & --- \\
-srp ($N{=}10, M{=}20$) & --- & --- & --- \\
+balanced ($N=M=10$) & --- & --- & --- \\
+srp ($N=10, M=20$) & --- & --- & --- \\
 \bottomrule
 \end{tabular}
 
-\footnotesize{*$p < 0.05$，**$p < 0.01$，n.s. 不显著}
+\footnotesize{*$p < 0.05$，**$p < 0.01$，n.s. 不显著；样本量 $n<5$ 时未检验}
 \end{table}
 
 \end{document}

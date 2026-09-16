@@ -556,10 +556,13 @@ cp .env.example .env
 # 编辑 .env 填入 DEEPSEEK_API_KEY
 
 # 运行 DMDE 基线实验
-python experiments/exp_dmde/exp_dmde_01/run.py
+uv run python experiments/exp_dmde/exp_dmde_01/run.py
 
 # 运行 LLM 增强实验（需配置 API）
-python experiments/exp_llm_enhanced_dmde/exp_llm_dmde_01/run.py
+uv run python experiments/exp_llm_enhanced_dmde/exp_llm_dmde_01/run.py
+
+# 运行消融实验（S1/S2 × A0-A3，详见 experiments/exp_ablation_study/README.md）
+uv run python experiments/exp_ablation_study/run_ablation.py --runs 30
 
 # 运行测试
 pytest tests/

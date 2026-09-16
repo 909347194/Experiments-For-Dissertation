@@ -34,10 +34,12 @@ experiments/exp_ablation_study/
 ├── run_ablation.py            # 统一入口脚本
 ├── analyze.py                 # 统计分析 + 可视化 + LaTeX 表格生成
 │
-├── core/                      # 核心逻辑包（各文件 <120 行）
+├── core/                      # 核心逻辑包（各文件职责单一）
 │   ├── config.py              # 实验配置数据类
 │   ├── scenario.py            # 场景构建 + DEM 加载
 │   ├── runner.py              # A0-A3 单次运行封装
+│   ├── recorder.py            # 过程记录器（每代 fitness/CR/F + LLM 决策）
+│   ├── solver_wrappers.py     # 求解器包装器（无侵入式过程记录）
 │   └── results.py             # 结果保存/加载 + YAML 解析
 │
 ├── scenarios/                 # 场景定义包
@@ -50,11 +52,11 @@ experiments/exp_ablation_study/
 │   ├── A0_dmde/               # Vanilla DMDE
 │   │   ├── run.py             # 37 行，无 LLM 配置
 │   │   ├── config/
-│   │   └── results/           # 30 个 .json 结果文件
+│   │   └── results/ablation_results.json   # 汇总结果（内含各 run 的数组）
 │   ├── A1_cr_control/         # 仅 CR Control
 │   │   ├── run.py             # 48 行，自动读取 llm_config.yaml
 │   │   ├── config/llm_config.yaml
-│   │   └── results/
+│   │   └── results/ablation_results.json
 │   ├── A2_pop_init/           # 仅 PopInit
 │   │   ├── run.py
 │   │   ├── config/llm_config.yaml
@@ -67,15 +69,14 @@ experiments/exp_ablation_study/
 ├── S2_srp_N10_M20/            # 场景 2 工作目录（同 S1 结构）
 │   └── ...
 │
-└── figures/                   # analyze.py 输出目录
-    ├── convergence_comparison_S1.png
-    ├── convergence_comparison_S2.png
-    ├── boxplot_S1.png
-    ├── boxplot_S2.png
-    ├── time_breakdown.png
-    ├── ablation_results.tex   # SCI 标准三线表（解质量）
-    ├── ablation_significance.tex  # Wilcoxon 检验表
-    └── *.csv                  # 原始数据导出
+└── figures/                   # analyze.py 输出目录（运行时生成）
+    ├── convergence_S1.png / convergence_S2.png       # 收敛曲线对比
+    ├── cr_trajectory_S1.png / cr_trajectory_S2.png   # CR 变化轨迹
+    ├── boxplot_S1.png / boxplot_S2.png               # 解质量箱线图
+    ├── time_breakdown.png                            # 时间开销堆叠柱状图
+    ├── ablation_tables.tex   # SCI 标准三线表（解质量 + 时间 + 显著性）
+    ├── summary_table.md / summary_table.csv          # 汇总表
+    └── llm_decisions_*.json  # LLM 决策日志
 ```
 
 ## 快速开始
@@ -113,42 +114,47 @@ cd S1_balanced_N10_M10/A3_full && uv run python run.py --runs 5
 | `--runs` | 30 | 独立运行次数（建议≥30 保证统计显著性） |
 | `--scenario` | all | 选择场景：S1, S2, 或 all |
 | `--config` | all | 选择配置：A0, A1, A2, A3, 或 all |
-| `--parallel` | 1 | 并行进程数（慎用，可能触发 API 限流） |
+
+> 说明：早期版本曾计划 `--parallel` 并行参数，当前 `run_ablation.py` **未实现**该参数，各组按顺序串行执行。
 
 ## 分析与可视化
+
+依赖：`numpy`（必需）；`matplotlib`（可选，缺省则跳过图表）；`scipy`（可选，缺省则跳过统计检验，显著性表显示 `---`）。通常随实验环境一并安装。
 
 ```bash
 # 生成所有图表和 LaTeX 表格
 uv run python analyze.py
 
-# 输出文件：
-# - figures/convergence_comparison_S1.png  # 收敛曲线对比
-# - figures/boxplot_S1.png                 # 解质量箱线图
-# - figures/time_breakdown.png             # 时间开销堆叠柱状图
-# - figures/ablation_results.tex           # SCI 标准主表（带显著性标记）
-# - figures/ablation_significance.tex      # Wilcoxon p 值矩阵表
-# - figures/summary_table.csv              # 汇总数据（Excel 可读）
+# 输出文件（figures/ 目录，运行时生成）：
+# - figures/convergence_S1.png, convergence_S2.png    # 收敛曲线对比
+# - figures/cr_trajectory_S1.png, cr_trajectory_S2.png # CR 变化轨迹
+# - figures/boxplot_S1.png, boxplot_S2.png            # 解质量箱线图
+# - figures/time_breakdown.png                        # 时间开销堆叠柱状图
+# - figures/ablation_tables.tex                       # 三张表（解质量/时间/显著性）
+# - figures/summary_table.md, summary_table.csv       # 汇总表（Markdown / Excel）
+# - figures/llm_decisions_<场景>_<配置>_seed<种子>.json # LLM 决策日志
 ```
 
 ### LaTeX 表格使用说明
 
-生成的 `.tex` 文件可直接插入论文：
+`figures/ablation_tables.tex` 是一份**完整的可编译文档**（含 `\documentclass` 与
+解质量表、时间表、显著性表三张表）：
 
 ```latex
-\usepackage{booktabs}  % 在导言区添加
+\usepackage{booktabs}  % 若只把表格片段拷进自己的论文，请在导言区添加
 
-% 插入主结果表
-\input{figures/ablation_results.tex}
+% 方式一：直接编译整份文档
+%   pdflatex figures/ablation_tables.tex
 
-% 插入显著性检验表
-\input{figures/ablation_significance.tex}
+% 方式二：只取你需要的表
+%   打开 ablation_tables.tex，复制对应 \begin{table}...\end{table} 片段即可
 ```
 
 **表格特性**：
-- ✅ 自动最优值加粗 (`\textbf{}`)
-- ✅ 显著性标记：`*` (p<0.05), `**` (p<0.01)
+- ✅ 自动最优值加粗（`\textbf{}`，在场景分组内取最优）
+- ✅ 显著性标记：`*` (p<0.05)、`**` (p<0.01)、`n.s.` 不显著、`---` 未检验
 - ✅ 专业三线表风格（无竖线）
-- ✅ 完整表注说明缩写和统计方法
+- ✅ 表注说明统计方法与阈值
 
 ## 评估指标
 
@@ -182,7 +188,10 @@ uv run python analyze.py
 
 | 检验 | 用途 | 显著性阈值 |
 |------|------|------------|
-| **Wilcoxon signed-rank** | A3 vs A0/A1/A2 配对检验 | p < 0.05 (*) / p < 0.01 (**) |
+| **Mann-Whitney U 秩和检验** | A3 vs A0/A1/A2 组间（非配对）检验 | p < 0.05 (*) / p < 0.01 (**) |
+
+> 实现说明：`analyze.py` 使用 `scipy.stats.mannwhitneyu`（双侧）。样本量 `n < 5`
+> 或未安装 `scipy` 时跳过检验，表格对应单元格显示 `---`。
 
 ## 预期结论与验证点
 
@@ -213,9 +222,10 @@ providers:
 4. 运行 `python run_ablation.py --scenario S3`
 
 ### Q3: 实验中断后如何恢复？
-结果自动保存到 `results/` 目录，重新运行会自动跳过已完成的 runs：
+目前 `run.py` 每次运行都会**从头重跑全部 runs，并覆盖** `results/ablation_results.json`
+（尚无断点续跑机制）。中断后需重新运行；如需控制单次耗时，可用 `--runs` 指定较少次数：
 ```bash
-uv run python run_ablation.py --runs 30  # 自动检测已有结果
+uv run python run_ablation.py --runs 5   # 只跑前 5 个种子
 ```
 
 ### Q4: 如何自定义随机种子？

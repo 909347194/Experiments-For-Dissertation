@@ -1,0 +1,8 @@
+# analyze.py 运行产物（自动生成，不纳入版本控制）
+*.png
+*.csv
+summary_table.md
+llm_decisions_*.json
+
+# 保留手工维护/示例的 LaTeX 表格
+!ablation_tables.tex

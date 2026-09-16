@@ -5,10 +5,15 @@
 - 汇总表（Markdown / LaTeX / CSV）
 - 收敛曲线对比图
 - CR 变化轨迹图
+- 解质量箱线图
+- 时间开销堆叠柱状图
 - LLM 决策日志摘要
-- Wilcoxon 统计检验
+- Mann-Whitney U 统计检验
 
 用法：python analyze.py
+
+依赖：numpy（必需）、matplotlib（可选，图表）、scipy（可选，统计检验）。
+缺失的可选依赖会优雅降级，文本输出仍可用。
 """
 import json
 import sys
@@ -60,8 +65,8 @@ CONFIG_COLORS = {
     "A3": "#d62728",
 }
 SCENARIO_LABELS = {
-    "S1": r"balanced ($N{=}M{=}10$)",
-    "S2": r"srp ($N{=}10, M{=}20$)",
+    "S1": r"balanced ($N=M=10$)",
+    "S2": r"srp ($N=10, M=20$)",
 }
 
 
@@ -77,11 +82,13 @@ def compute_stats(results: list[dict]) -> dict:
     llm_cr_times = np.array([r.get("llm_cr_time", 0) for r in results])
     llm_calls = np.array([r.get("llm_call_count", 0) for r in results])
     dmde_times = np.array([r.get("dmde_time", 0) for r in results])
+    # ddof=1 (样本标准差)；n=1 时返回 0.0 而非 nan
+    std_val = float(fitness.std(ddof=1)) if len(fitness) > 1 else 0.0
     return {
         "n_runs": len(results),
         "best": round(float(fitness.min()), 2),
         "mean": round(float(fitness.mean()), 2),
-        "std": round(float(fitness.std()), 2),
+        "std": round(std_val, 2),
         "median": round(float(np.median(fitness)), 2),
         "total_time_mean": round(float(times.mean()), 2),
         "dmde_time_mean": round(float(dmde_times.mean()), 2),
@@ -95,7 +102,13 @@ def compute_stats(results: list[dict]) -> dict:
     }
 
 
-def wilcoxon_test(a: np.ndarray, b: np.ndarray) -> float:
+def mannwhitney_test(a: np.ndarray, b: np.ndarray) -> float:
+    """Mann-Whitney U 秩和检验（非配对双侧）。
+
+    注意：文献里常被误称为"Wilcoxon 秩和检验"，两者等价时
+    此处用 Mann-Whitney U 实现（适用非配对样本）。
+    当样本量 < 5 时返回 -1.0 表示"未检验"。
+    """
     if not HAS_SCIPY:
         return -1.0
     if len(a) < 5 or len(b) < 5:
@@ -108,6 +121,7 @@ def wilcoxon_test(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def p_mark(p: float) -> str:
+    """根据 p 值返回显著性标记；p < 0 表示未检验。"""
     if p < 0: return "---"
     if p < 0.01: return "**"
     if p < 0.05: return "*"
@@ -153,7 +167,10 @@ def compute_convergence_stats(curves: list[list[float]]) -> dict:
 
 
 def find_convergence_gen(curve: list[float], threshold: float = 0.95) -> int:
-    """找到达到 95% 最终最优解的代数。"""
+    """找到达到 95% 最终最优解的代数。
+
+    注：当前未被调用，预留给后续单 run 收敛速度分析模块。
+    """
     if not curve:
         return -1
     final_best = curve[-1]
@@ -313,7 +330,11 @@ def plot_boxplot(all_stats: dict, scenario_key: str):
         plt.close(fig)
         return
 
-    bp = ax.boxplot(data, labels=labels, patch_artist=True)
+    # matplotlib >=3.9 用 tick_labels；旧版用 labels
+    try:
+        bp = ax.boxplot(data, tick_labels=labels, patch_artist=True)
+    except TypeError:
+        bp = ax.boxplot(data, labels=labels, patch_artist=True)
     for patch, color in zip(bp["boxes"], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.6)
@@ -378,38 +399,65 @@ def plot_time_breakdown(all_stats: dict):
 # ── LaTeX 表格 ───────────────────────────────────────────
 
 def generate_latex_table1(all_stats: dict) -> str:
+    """解质量对比表（按场景分组，每组自动加粗最优 Best/Mean/Median）。"""
     lines = [
         r"\begin{table}[htbp]", r"\centering",
-        r"\caption{消融实验结果：解质量对比}", r"\label{tab:ablation_results}",
+        r"\caption{消融实验结果：解质量对比（最优值加粗）}",
+        r"\label{tab:ablation_results}",
         r"\begin{tabular}{llcccc}", r"\toprule",
         r"场景 & 配置 & Best & Mean $\pm$ Std & Median \\", r"\midrule",
     ]
     for s_key in SCENARIOS:
-        first_row = True
+        # 收集本场景的所有有效 stats，用于找最优
+        group = []
         for c_key in CONFIGS:
             stats = all_stats.get(f"{s_key}_{c_key}", {})
-            if not stats: continue
+            if stats:
+                group.append((c_key, stats))
+        if not group:
+            continue
+        best_vals = [s["best"] for _, s in group]
+        mean_vals = [s["mean"] for _, s in group]
+        median_vals = [s["median"] for _, s in group]
+        best_min = min(best_vals)
+        mean_min = min(mean_vals)
+        median_min = min(median_vals)
+
+        first_row = True
+        for c_key, stats in group:
             s_label = SCENARIO_LABELS[s_key] if first_row else ""
             c_label = CONFIG_LABELS[c_key]
-            best = f"{stats['best']:.2f}"
-            mean_std = f"{stats['mean']:.2f} $\\pm$ {stats['std']:.2f}"
-            median = f"{stats['median']:.2f}"
+            best_s = f"{stats['best']:.2f}"
+            mean_s = f"{stats['mean']:.2f} $\\pm$ {stats['std']:.2f}"
+            median_s = f"{stats['median']:.2f}"
+            # 最优值加粗（仅当 group size > 1）
+            if len(group) > 1:
+                if stats["best"] == best_min:
+                    best_s = r"\textbf{" + best_s + r"}"
+                if stats["mean"] == mean_min:
+                    mean_s = mean_s.replace(f"{stats['mean']:.2f}",
+                                            r"\textbf{" + f"{stats['mean']:.2f}" + r"}", 1)
+                if stats["median"] == median_min:
+                    median_s = r"\textbf{" + median_s + r"}"
             if first_row:
-                lines.append(f"{s_label} & {c_label} & {best} & {mean_std} & {median} \\\\")
+                lines.append(f"{s_label} & {c_label} & {best_s} & {mean_s} & {median_s} \\\\")
                 first_row = False
             else:
-                lines.append(f" & {c_label} & {best} & {mean_std} & {median} \\\\")
+                lines.append(f" & {c_label} & {best_s} & {mean_s} & {median_s} \\\\")
         lines.append(r"\midrule")
-    lines.pop()
+    # 移除最后多出的 \midrule
+    if lines and lines[-1] == r"\midrule":
+        lines.pop()
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
     return "\n".join(lines)
 
 
 def generate_latex_table2(all_stats: dict) -> str:
+    """Mann-Whitney U 显著性检验表（A3 vs 各基线）。"""
     lines = [
         r"\begin{table}[htbp]", r"\centering",
-        r"\caption{统计显著性检验（Wilcoxon 秩和检验，A3 vs 基线）}",
-        r"\label{tab:wilcoxon}",
+        r"\caption{统计显著性检验（Mann-Whitney U 秩和检验，A3 vs 基线）}",
+        r"\label{tab:mannwhitney}",
         r"\begin{tabular}{lccc}", r"\toprule",
         r"场景 & A3 vs A0 & A3 vs A1 & A3 vs A2 \\", r"\midrule",
     ]
@@ -418,11 +466,11 @@ def generate_latex_table2(all_stats: dict) -> str:
         row = [SCENARIO_LABELS[s_key]]
         for c_key in ["A0", "A1", "A2"]:
             other = all_stats.get(f"{s_key}_{c_key}", {}).get("fitness_array", np.array([]))
-            p = wilcoxon_test(a3, other)
+            p = mannwhitney_test(a3, other)
             row.append("---" if p < 0 else f"{p:.4f} {p_mark(p)}")
         lines.append(" & ".join(row) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}", r"",
-              r"\footnotesize{*$p < 0.05$，**$p < 0.01$，n.s. 不显著}", r"\end{table}"]
+              r"\footnotesize{*$p < 0.05$，**$p < 0.01$，n.s. 不显著；样本量 $n<5$ 时未检验}", r"\end{table}"]
     return "\n".join(lines)
 
 
@@ -600,9 +648,9 @@ def main():
     print(f"  CSV:      {csv_out}")
     print(f"  LaTeX:    {tex_out}")
     if HAS_SCIPY:
-        print(f"  (scipy 可用，Wilcoxon 检验已计算)")
+        print(f"  (scipy 可用，Mann-Whitney U 检验已计算)")
     else:
-        print(f"  (scipy 不可用，Wilcoxon 检验跳过)")
+        print(f"  (scipy 不可用，统计检验跳过；表格显示 ---)")
 
 
 if __name__ == "__main__":
