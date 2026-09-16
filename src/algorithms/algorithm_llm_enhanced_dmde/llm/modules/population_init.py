@@ -40,12 +40,9 @@ class LLMPopulationInitModule(BaseLLMModule):
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
-        # 从配置加载自定义 system prompt，支持外部文件覆盖
-        prompt_path = self._config.get("system_prompt_path")
-        self._system_prompt: str = get_prompt(
-            "population_init",
-            prompt_path=prompt_path,
-        )
+        # 保存 prompt_path，延迟到 build_prompt() 时根据 model_type 解析
+        self._prompt_path = self._config.get("system_prompt_path")
+        self._system_prompt: str | None = None  # 缓存，按 model_type 分别解析
 
     @property
     def name(self) -> str:
@@ -160,6 +157,15 @@ class LLMPopulationInitModule(BaseLLMModule):
             n_uavs=n_uavs,
             model_type=model_type,
         )
+
+        # 场景化 system prompt：根据 model_type 只加载对应场景的规则
+        if self._system_prompt is None:
+            self._system_prompt = get_prompt(
+                "population_init",
+                prompt_type="system",
+                prompt_path=self._prompt_path,
+                model_type=model_type,
+            )
 
         return [
             {"role": "system", "content": self._system_prompt},

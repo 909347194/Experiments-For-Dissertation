@@ -29,15 +29,9 @@ class LLMSearchControllerModule(BaseLLMModule):
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
-        # 从配置加载自定义 system prompt，支持外部文件覆盖和动态参数
-        prompt_path = self._config.get("system_prompt_path")
-        cr_choices = self._config.get("cr_choices", CR_CHOICES)
-        self._system_prompt: str = get_prompt(
-            "search_controller",
-            prompt_type="system",
-            prompt_path=prompt_path,
-            cr_choices=cr_choices,
-        )
+        self._prompt_path = self._config.get("system_prompt_path")
+        self._cr_choices = self._config.get("cr_choices", CR_CHOICES)
+        self._system_prompt: str | None = None  # 缓存，按 model_type 分别解析
 
     @property
     def name(self) -> str:
@@ -89,6 +83,16 @@ class LLMSearchControllerModule(BaseLLMModule):
             state_json=json.dumps(features, indent=2),
             trajectory_text=trajectory_text,
         )
+
+        # 场景化 system prompt：根据 model_type 只加载对应场景的 CR 调控建议
+        if self._system_prompt is None:
+            self._system_prompt = get_prompt(
+                "search_controller",
+                prompt_type="system",
+                prompt_path=self._prompt_path,
+                model_type=state.model_type,
+                cr_choices=self._cr_choices,
+            )
 
         return [
             {"role": "system", "content": self._system_prompt},
