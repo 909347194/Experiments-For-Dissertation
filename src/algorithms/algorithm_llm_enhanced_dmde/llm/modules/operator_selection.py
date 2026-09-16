@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from ..base_module import BaseLLMModule, ModuleState
+from ..prompts import get_operator_selection_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -24,31 +25,30 @@ AVAILABLE_STRATEGIES = [
     "current-to-pbest/1", "rand/2", "rand-to-best/1",
 ]
 
-_SYSTEM_PROMPT = """\
-You are an expert in Differential Evolution (DE) for combinatorial optimization \
-(UAV-target assignment with discrete mapping).
-
-Your task: Select the most suitable DE operator strategy for the current search state.
-
-## Available Strategies
-{strategies}
-
-## Decision Format
-Respond with a JSON object only (no markdown):
-{{
-    "strategy": "<strategy name>",
-    "reasoning": "<brief explanation>"
-}}
-
-## Guidelines
-- Low diversity + stagnation → exploratory (rand/1, rand/2)
-- High diversity + slow convergence → exploitative (best/1, best/2)
-- Balanced state → balanced (current-to-pbest/1)
-"""
-
 
 class LLMOperatorSelectionModule(BaseLLMModule):
     """LLM 算子策略选择模块。"""
+
+    def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
+        super().__init__(llm_client, config)
+        # 从配置加载自定义 system prompt，支持外部文件覆盖和动态参数
+        prompt_path = self._config.get("system_prompt_path")
+        strategies = self._config.get("strategies", AVAILABLE_STRATEGIES)
+        self._system_prompt: str = get_operator_selection_prompt(
+            strategies=strategies,
+        ) if prompt_path is None else None
+        
+        if prompt_path is not None:
+            from pathlib import Path
+            p = Path(prompt_path)
+            if p.exists():
+                self._system_prompt = p.read_text(encoding="utf-8")
+            else:
+                logger.warning(
+                    "[operator_selection] system_prompt_path not found: %s, using default",
+                    prompt_path,
+                )
+                self._system_prompt = get_operator_selection_prompt(strategies=strategies)
 
     @property
     def name(self) -> str:
@@ -59,9 +59,7 @@ class LLMOperatorSelectionModule(BaseLLMModule):
         return "after_evolve"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
-        system = _SYSTEM_PROMPT.format(
-            strategies=", ".join(AVAILABLE_STRATEGIES)
-        )
+        system = self._system_prompt
 
         # 构建用户消息
         features = {

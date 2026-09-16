@@ -16,40 +16,12 @@ import logging
 from typing import Any
 
 from ..base_module import BaseLLMModule, ModuleState
+from ..prompts import get_search_controller_prompt
 
 logger = logging.getLogger(__name__)
 
 # 预定义 CR 候选值
 CR_CHOICES = [0.1, 0.3, 0.5, 0.7, 0.9]
-
-_SYSTEM_PROMPT = """\
-You are an expert in Differential Evolution (DE) for combinatorial optimization \
-(UAV-target assignment with discrete mapping).
-
-Your task: Select the crossover rate (CR) from {cr_choices}.
-
-The scaling factor F will be automatically computed from your chosen CR \
-using the DMDE parameter relationship (formula 3-11).
-
-## How CR Affects Search
-In the DMDE hybrid strategy (formula 3-10), each gene independently uses:
-- DE/rand/1 (exploration) when random value <= CR
-- DE/best/2 (exploitation) when random value > CR
-
-Therefore:
-- High CR (0.7/0.9): More genes use rand/1 → broader exploration
-  Best when diversity is LOW or stagnation is HIGH.
-- Low CR (0.1/0.3): More genes use best/2 → focused exploitation
-  Best when diversity is HIGH but convergence is SLOW.
-- Mid CR (0.5): Balanced exploration/exploitation.
-
-## Decision Format
-Respond with a JSON object only (no markdown):
-{{
-    "cr": <one of {cr_choices}>,
-    "reasoning": "<brief explanation of your CR choice based on the current state>"
-}}
-""".format(cr_choices=str(CR_CHOICES))
 
 
 class LLMSearchControllerModule(BaseLLMModule):
@@ -57,25 +29,24 @@ class LLMSearchControllerModule(BaseLLMModule):
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
-        # 支持从配置加载自定义 system prompt
-        self._system_prompt = self._config.get("system_prompt", _SYSTEM_PROMPT)
+        # 从配置加载自定义 system prompt，支持外部文件覆盖和动态参数
         prompt_path = self._config.get("system_prompt_path")
-        if prompt_path:
-            try:
-                from pathlib import Path
-                p = Path(prompt_path)
-                if p.exists():
-                    self._system_prompt = p.read_text(encoding="utf-8")
-                else:
-                    logger.warning(
-                        "[search_controller] system_prompt_path not found: %s, using default",
-                        prompt_path,
-                    )
-            except Exception as e:
+        cr_choices = self._config.get("cr_choices", CR_CHOICES)
+        self._system_prompt: str = get_search_controller_prompt(
+            cr_choices=cr_choices,
+        ) if prompt_path is None else None
+        
+        if prompt_path is not None:
+            from pathlib import Path
+            p = Path(prompt_path)
+            if p.exists():
+                self._system_prompt = p.read_text(encoding="utf-8")
+            else:
                 logger.warning(
-                    "[search_controller] Failed to load system_prompt_path: %s, using default",
-                    e,
+                    "[search_controller] system_prompt_path not found: %s, using default",
+                    prompt_path,
                 )
+                self._system_prompt = get_search_controller_prompt(cr_choices=cr_choices)
 
     @property
     def name(self) -> str:

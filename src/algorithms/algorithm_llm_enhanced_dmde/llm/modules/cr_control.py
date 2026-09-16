@@ -17,34 +17,22 @@ from typing import Any
 import numpy as np
 
 from ..base_module import BaseLLMModule, ModuleState
+from ..prompts import get_prompt
 
 logger = logging.getLogger(__name__)
-
-_SYSTEM_PROMPT = """\
-You are an expert in Differential Evolution parameter control.
-
-Your task: Adjust the crossover rate (CR) and scale factor (F) offsets \
-based on the current search state.
-
-## Decision Format
-Respond with a JSON object only (no markdown):
-{
-    "cr_offset": <float in [-0.3, 0.3], or null to keep default>,
-    "f_offset": <float in [-0.3, 0.3], or null to keep default>,
-    "reasoning": "<brief explanation>"
-}
-
-## Guidelines
-- High stagnation + low diversity → increase CR (more exploration)
-- Converging well → decrease CR slightly (more exploitation)
-- Large fitness variance → increase F (bigger steps)
-- Near convergence → decrease F (fine-tuning)
-- Only adjust when the state clearly warrants a change (prefer null)
-"""
 
 
 class LLMCRControlModule(BaseLLMModule):
     """LLM 交叉率/缩放因子控制模块。"""
+
+    def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
+        super().__init__(llm_client, config)
+        # 从配置加载自定义 system prompt，支持外部文件覆盖
+        prompt_path = self._config.get("system_prompt_path")
+        self._system_prompt: str = get_prompt(
+            "cr_control",
+            prompt_path=prompt_path,
+        )
 
     @property
     def name(self) -> str:
@@ -74,7 +62,7 @@ class LLMCRControlModule(BaseLLMModule):
         )
 
         return [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": user},
         ]
 

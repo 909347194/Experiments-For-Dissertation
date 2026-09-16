@@ -26,66 +26,9 @@ from typing import Any
 import numpy as np
 
 from ..base_module import BaseLLMModule, ModuleState
+from ..prompts import get_prompt
 
 logger = logging.getLogger(__name__)
-
-
-# ── System Prompt ──────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """\
-You are an expert in UAV-target assignment optimization.
-
-Your task: Generate candidate assignment plans for a UAV scheduling problem. \
-The solver will convert your assignments into an evolutionary algorithm's \
-internal encoding, so you only need to produce **discrete assignments**.
-
-## Output Format
-Respond with a JSON object only (no markdown):
-{
-    "solutions": [
-        {
-            "assignments": [
-                {"uav": <int>, "targets": [<int>, ...]},
-                ...
-            ]
-        },
-        ...
-    ],
-    "reasoning": "<brief explanation of your strategy>"
-}
-
-Each "solution" is a **complete assignment plan** covering ALL N UAVs.
-Generate exactly the requested number of solutions (k).
-
-## Assignment Rules by Model Type
-
-### balanced (N == M, one-to-one)
-- Each solution has exactly N assignments (one per UAV).
-- Each UAV appears exactly once, each target appears exactly once.
-- Each "targets" list has exactly 1 element.
-- Example solution: {"assignments": [{"uav": 0, "targets": [2]}, {"uav": 1, "targets": [0]}, {"uav": 2, "targets": [1]}]}
-
-### overloaded (N > M, UAVs outnumber targets)
-- Each solution has exactly N assignments (one per UAV).
-- Each UAV appears exactly once.
-- Each target must appear at least once across all assignments.
-- Each "targets" list has exactly 1 element.
-- Example solution: {"assignments": [{"uav": 0, "targets": [1]}, {"uav": 1, "targets": [0]}, {"uav": 2, "targets": [1]}]}
-
-### srp (N < M, UAVs visit multiple targets in sequence)
-- Each solution has exactly N assignments (one per UAV).
-- Each UAV appears exactly once.
-- Each target appears exactly once across all assignments.
-- "targets" list length >= 1, and the order represents the **tour sequence**.
-- Example solution: {"assignments": [{"uav": 0, "targets": [3, 1, 4]}, {"uav": 1, "targets": [2, 0]}]}
-
-## Guidelines
-- Focus on minimizing total cost while respecting constraints.
-- Use the preference summary to identify low-cost assignments.
-- For SRP, order targets to minimize transition costs (nearest-neighbor heuristic).
-- Generate exactly the requested number of complete solutions (k).
-- Each solution must satisfy all constraints (every target covered, etc.).
-"""
 
 
 class LLMPopulationInitModule(BaseLLMModule):
@@ -97,25 +40,12 @@ class LLMPopulationInitModule(BaseLLMModule):
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
-        # 支持从配置加载自定义 system prompt（与 search_controller 一致）
-        self._system_prompt: str = self._config.get("system_prompt", _SYSTEM_PROMPT)
+        # 从配置加载自定义 system prompt，支持外部文件覆盖
         prompt_path = self._config.get("system_prompt_path")
-        if prompt_path:
-            try:
-                from pathlib import Path
-                p = Path(prompt_path)
-                if p.exists():
-                    self._system_prompt = p.read_text(encoding="utf-8")
-                else:
-                    logger.warning(
-                        "[population_init] system_prompt_path not found: %s, using default",
-                        prompt_path,
-                    )
-            except Exception as e:
-                logger.warning(
-                    "[population_init] Failed to load system_prompt_path: %s, using default",
-                    e,
-                )
+        self._system_prompt: str = get_prompt(
+            "population_init",
+            prompt_path=prompt_path,
+        )
 
     @property
     def name(self) -> str:
