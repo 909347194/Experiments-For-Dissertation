@@ -26,66 +26,9 @@ from typing import Any
 import numpy as np
 
 from ..base_module import BaseLLMModule, ModuleState
+from ..prompts import get_prompt
 
 logger = logging.getLogger(__name__)
-
-
-# ── System Prompt ──────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """\
-You are an expert in UAV-target assignment optimization.
-
-Your task: Generate candidate assignment plans for a UAV scheduling problem. \
-The solver will convert your assignments into an evolutionary algorithm's \
-internal encoding, so you only need to produce **discrete assignments**.
-
-## Output Format
-Respond with a JSON object only (no markdown):
-{{
-    "solutions": [
-        {{
-            "assignments": [
-                {{"uav": <int>, "targets": [<int>, ...]}},
-                ...
-            ]
-        }},
-        ...
-    ],
-    "reasoning": "<brief explanation of your strategy>"
-}}
-
-Each "solution" is a **complete assignment plan** covering ALL N UAVs.
-Generate exactly the requested number of solutions (k).
-
-## Assignment Rules by Model Type
-
-### balanced (N == M, one-to-one)
-- Each solution has exactly N assignments (one per UAV).
-- Each UAV appears exactly once, each target appears exactly once.
-- Each "targets" list has exactly 1 element.
-- Example solution: {{"assignments": [{{"uav": 0, "targets": [2]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
-
-### overloaded (N > M, UAVs outnumber targets)
-- Each solution has exactly N assignments (one per UAV).
-- Each UAV appears exactly once.
-- Each target must appear at least once across all assignments.
-- Each "targets" list has exactly 1 element.
-- Example solution: {{"assignments": [{{"uav": 0, "targets": [1]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
-
-### srp (N < M, UAVs visit multiple targets in sequence)
-- Each solution has exactly N assignments (one per UAV).
-- Each UAV appears exactly once.
-- Each target appears exactly once across all assignments.
-- "targets" list length >= 1, and the order represents the **tour sequence**.
-- Example solution: {{"assignments": [{{"uav": 0, "targets": [3, 1, 4]}}, {{"uav": 1, "targets": [2, 0]}}]}}
-
-## Guidelines
-- Focus on minimizing total cost while respecting constraints.
-- Use the preference summary to identify low-cost assignments.
-- For SRP, order targets to minimize transition costs (nearest-neighbor heuristic).
-- Generate exactly the requested number of complete solutions (k).
-- Each solution must satisfy all constraints (every target covered, etc.).
-"""
 
 
 class LLMPopulationInitModule(BaseLLMModule):
@@ -97,25 +40,9 @@ class LLMPopulationInitModule(BaseLLMModule):
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
-        # 支持从配置加载自定义 system prompt（与 search_controller 一致）
-        self._system_prompt: str = self._config.get("system_prompt", _SYSTEM_PROMPT)
-        prompt_path = self._config.get("system_prompt_path")
-        if prompt_path:
-            try:
-                from pathlib import Path
-                p = Path(prompt_path)
-                if p.exists():
-                    self._system_prompt = p.read_text(encoding="utf-8")
-                else:
-                    logger.warning(
-                        "[population_init] system_prompt_path not found: %s, using default",
-                        prompt_path,
-                    )
-            except Exception as e:
-                logger.warning(
-                    "[population_init] Failed to load system_prompt_path: %s, using default",
-                    e,
-                )
+        # 保存 prompt_path，延迟到 build_prompt() 时根据 model_type 解析
+        self._prompt_path = self._config.get("system_prompt_path")
+        self._system_prompt: str | None = None  # 缓存，按 model_type 分别解析
 
     @property
     def name(self) -> str:
@@ -220,13 +147,25 @@ class LLMPopulationInitModule(BaseLLMModule):
             },
         }
 
-        user = (
-            f"## Problem (S_problem)\n{json.dumps(s_problem, indent=2)}\n\n"
-            f"## Task\nGenerate exactly {k} complete assignment solutions. "
-            f"Each solution must cover ALL {n_uavs} UAVs and satisfy all "
-            f"constraints for the '{model_type}' model type. "
-            f"Respond with JSON only."
+        # 使用统一的 user prompt 模板
+        from llm.prompts import get_prompt
+        user = get_prompt(
+            "population_init",
+            prompt_type="user",
+            problem_json=json.dumps(s_problem, indent=2),
+            k=k,
+            n_uavs=n_uavs,
+            model_type=model_type,
         )
+
+        # 场景化 system prompt：根据 model_type 只加载对应场景的规则
+        if self._system_prompt is None:
+            self._system_prompt = get_prompt(
+                "population_init",
+                prompt_type="system",
+                prompt_path=self._prompt_path,
+                model_type=model_type,
+            )
 
         return [
             {"role": "system", "content": self._system_prompt},
@@ -269,6 +208,7 @@ class LLMPopulationInitModule(BaseLLMModule):
                     validated_solutions.append(validated)
             return {
                 "solutions": validated_solutions,
+                "thought": data.get("thought", ""),
                 "reasoning": data.get("reasoning", ""),
             }
 
@@ -280,9 +220,10 @@ class LLMPopulationInitModule(BaseLLMModule):
         if validated:
             return {
                 "solutions": [validated],
+                "thought": data.get("thought", ""),
                 "reasoning": data.get("reasoning", ""),
             }
-        return {"solutions": [], "reasoning": data.get("reasoning", "")}
+        return {"solutions": [], "thought": data.get("thought", ""), "reasoning": data.get("reasoning", "")}
 
     @staticmethod
     def _validate_assignments(raw_assignments: list) -> list[dict[str, Any]]:
@@ -387,7 +328,7 @@ class LLMPopulationInitModule(BaseLLMModule):
 
         # ── Feasibility Statistics ────────────────────────────────
         n_infeasible = 0
-        n_finite = 0
+        n_total = 0
         targets_with_few_feasible = 0
         uavs_with_few_feasible = 0
 
@@ -403,11 +344,11 @@ class LLMPopulationInitModule(BaseLLMModule):
 
         for i in range(ut_rows):
             for j in range(ut_cols):
-                n_finite += 1
+                n_total += 1
                 if not np.isfinite(cm[i, j]):
                     n_infeasible += 1
 
-        infeasible_pct = round(100.0 * n_infeasible / max(n_finite, 1), 1)
+        infeasible_pct = round(100.0 * n_infeasible / max(n_total, 1), 1)
 
         summary = {
             "problem_scale": {
