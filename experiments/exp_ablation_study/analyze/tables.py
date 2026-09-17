@@ -166,3 +166,162 @@ def generate_llm_decision_summary(all_stats: dict) -> str:
                     f"| {mod_data['total_duration']:.1f} | {cr_mean} | {cr_std} |"
                 )
     return "\n".join(lines)
+
+
+def generate_synergy_table(synergy: dict) -> str:
+    """协同效应分析表。"""
+    lines = [
+        "| 场景 | A0 均值 | ΔA1 (CR) | ΔA2 (PopInit) | ΔA3 (Full) | ΔA1+ΔA2 | 协同比 | 结论 |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for s_key, d in synergy.items():
+        ratio = d["synergy_ratio"]
+        if ratio > 1.05:
+            conclusion = "协同增益"
+        elif ratio > 0.95:
+            conclusion = "近似加性"
+        else:
+            conclusion = "存在冗余"
+        lines.append(
+            f"| {s_key} | {d['A0_mean']:.2f} "
+            f"| {d['delta_A1']:+.2f} | {d['delta_A2']:+.2f} "
+            f"| {d['delta_A3']:+.2f} | {d['sum_delta']:+.2f} "
+            f"| {ratio:.3f} | {conclusion} |"
+        )
+    return "\n".join(lines)
+
+
+def generate_latex_synergy_table(synergy: dict) -> str:
+    """LaTeX 协同效应表。"""
+    lines = [
+        r"\begin{table}[htbp]", r"\centering",
+        r"\caption{协同效应分析：A3 增益 vs A1+A2 增益之和}",
+        r"\label{tab:synergy}",
+        r"\begin{tabular}{lcccccc}", r"\toprule",
+        r"场景 & $\Delta A_1$ (CR) & $\Delta A_2$ (PopInit) & $\Delta A_3$ (Full) "
+        r"& $\Delta A_1 + \Delta A_2$ & 协同比 & 结论 \\", r"\midrule",
+    ]
+    for s_key, d in synergy.items():
+        ratio = d["synergy_ratio"]
+        if ratio > 1.05:
+            conclusion = "协同增益"
+        elif ratio > 0.95:
+            conclusion = "近似加性"
+        else:
+            conclusion = "存在冗余"
+        lines.append(
+            f"${s_key}$ & {d['delta_A1']:+.2f} & {d['delta_A2']:+.2f} "
+            f"& {d['delta_A3']:+.2f} & {d['sum_delta']:+.2f} "
+            f"& {ratio:.3f} & {conclusion} \\\\"
+        )
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(lines)
+
+
+def generate_convergence_speed_table(conv_gens: dict, thresholds: list[float] = None) -> str:
+    """收敛速度量化表（Markdown）。"""
+    if thresholds is None:
+        thresholds = [0.90, 0.95, 0.99]
+    from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
+    header = "| 场景 | 配置 | " + " | ".join(f"达到{int(t*100)}%最优" for t in thresholds) + " |"
+    sep = "|---|---|" + "|".join(["---"] * len(thresholds)) + "|"
+    lines = [header, sep]
+    for s_key in SCENARIOS:
+        for c_key in CONFIGS:
+            data = conv_gens.get(f"{s_key}_{c_key}", {})
+            if not data:
+                continue
+            vals = " | ".join(
+                f"Gen {data.get(t, -1)}" if data.get(t, -1) >= 0 else "---"
+                for t in thresholds
+            )
+            lines.append(f"| {s_key} | {CONFIG_LABELS[c_key]} | {vals} |")
+    return "\n".join(lines)
+
+
+def generate_latex_convergence_speed_table(conv_gens: dict, thresholds: list[float] = None) -> str:
+    """收敛速度量化表（LaTeX）。"""
+    if thresholds is None:
+        thresholds = [0.90, 0.95, 0.99]
+    from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
+    cols = "l" + "l" + "c" * len(thresholds)
+    th_headers = " & ".join(f"达到{int(t*100)}\\%" for t in thresholds)
+    lines = [
+        r"\begin{table}[htbp]", r"\centering",
+        r"\caption{收敛速度对比（达到最优解的代数，取中位数）}",
+        r"\label{tab:convergence_speed}",
+        r"\begin{tabular}{" + cols + "}", r"\toprule",
+        f"场景 & 配置 & {th_headers} \\\\", r"\midrule",
+    ]
+    for s_key in SCENARIOS:
+        first_row = True
+        for c_key in CONFIGS:
+            data = conv_gens.get(f"{s_key}_{c_key}", {})
+            if not data:
+                continue
+            s_label = SCENARIO_LABELS[s_key] if first_row else ""
+            c_label = CONFIG_LABELS[c_key]
+            vals = " & ".join(
+                str(data.get(t, -1)) if data.get(t, -1) >= 0 else "---"
+                for t in thresholds
+            )
+            if first_row:
+                lines.append(f"{s_label} & {c_label} & {vals} \\\\")
+                first_row = False
+            else:
+                lines.append(f" & {c_label} & {vals} \\\\")
+        lines.append(r"\midrule")
+    lines.pop()
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(lines)
+
+
+def generate_initial_pop_table(init_pop: dict) -> str:
+    """初始种群质量对比表（Markdown）。"""
+    from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS
+    lines = [
+        "| 场景 | 配置 | 初始种群 Mean ± Std | 初始种群 Median |",
+        "|---|---|---|---|",
+    ]
+    for s_key in SCENARIOS:
+        for c_key in ["A0", "A2", "A3"]:
+            data = init_pop.get(f"{s_key}_{c_key}", {})
+            if not data:
+                continue
+            lines.append(
+                f"| {s_key} | {CONFIG_LABELS[c_key]} "
+                f"| {data['mean']:.2f} ± {data['std']:.2f} "
+                f"| {data['median']:.2f} |"
+            )
+    return "\n".join(lines)
+
+
+def generate_latex_initial_pop_table(init_pop: dict) -> str:
+    """初始种群质量对比表（LaTeX）。"""
+    from .constants import SCENARIOS, CONFIG_LABELS, SCENARIO_LABELS
+    lines = [
+        r"\begin{table}[htbp]", r"\centering",
+        r"\caption{初始种群质量对比（PopInit 效果验证）}",
+        r"\label{tab:initial_pop}",
+        r"\begin{tabular}{llcc}", r"\toprule",
+        r"场景 & 配置 & 初始 Mean $\pm$ Std & 初始 Median \\", r"\midrule",
+    ]
+    for s_key in SCENARIOS:
+        first_row = True
+        for c_key in ["A0", "A2", "A3"]:
+            data = init_pop.get(f"{s_key}_{c_key}", {})
+            if not data:
+                continue
+            s_label = SCENARIO_LABELS[s_key] if first_row else ""
+            c_label = CONFIG_LABELS[c_key]
+            ms = f"{data['mean']:.2f} $\\pm$ {data['std']:.2f}"
+            md = f"{data['median']:.2f}"
+            if first_row:
+                lines.append(f"{s_label} & {c_label} & {ms} & {md} \\\\")
+                first_row = False
+            else:
+                lines.append(f" & {c_label} & {ms} & {md} \\\\")
+        lines.append(r"\midrule")
+    lines.pop()
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(lines)

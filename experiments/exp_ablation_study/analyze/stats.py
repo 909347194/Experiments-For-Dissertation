@@ -109,6 +109,121 @@ def find_convergence_gen(curve: list[float], threshold: float = 0.95) -> int:
     return len(curve) - 1
 
 
+# ── 协同效应分析 ──────────────────────────────────────────
+
+def compute_synergy(all_stats: dict) -> dict:
+    """计算协同效应：A3 增益 vs A1+A2 增益之和。
+
+    对每个场景计算：
+        ΔA1 = A1_mean - A0_mean  (CR Control 单独增益)
+        ΔA2 = A2_mean - A0_mean  (PopInit 单独增益)
+        ΔA3 = A3_mean - A0_mean  (双模块增益)
+        协同比 = ΔA3 / (ΔA1 + ΔA2)
+            >1 → 超加性（协同）
+            =1 → 加性（独立）
+            <1 → 亚加性（冗余）
+    """
+    from .constants import SCENARIOS
+    result = {}
+    for s_key in SCENARIOS:
+        a0 = all_stats.get(f"{s_key}_A0", {}).get("mean")
+        a1 = all_stats.get(f"{s_key}_A1", {}).get("mean")
+        a2 = all_stats.get(f"{s_key}_A2", {}).get("mean")
+        a3 = all_stats.get(f"{s_key}_A3", {}).get("mean")
+        if any(v is None for v in [a0, a1, a2, a3]):
+            continue
+        delta_a1 = a1 - a0
+        delta_a2 = a2 - a0
+        delta_a3 = a3 - a0
+        sum_delta = delta_a1 + delta_a2
+        ratio = delta_a3 / sum_delta if abs(sum_delta) > 1e-9 else float("inf")
+        result[s_key] = {
+            "A0_mean": a0,
+            "A1_mean": a1,
+            "A2_mean": a2,
+            "A3_mean": a3,
+            "delta_A1": round(delta_a1, 2),
+            "delta_A2": round(delta_a2, 2),
+            "delta_A3": round(delta_a3, 2),
+            "sum_delta": round(sum_delta, 2),
+            "synergy_ratio": round(ratio, 3),
+            "is_synergistic": ratio > 1.0,
+        }
+    return result
+
+
+def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) -> dict:
+    """计算各配置达到 X% 最优所需代数（跨 run 取中位数）。
+
+    Args:
+        all_stats: compute_stats 输出
+        thresholds: 目标阈值列表，如 [0.90, 0.95, 0.99]
+
+    Returns:
+        {"S1_A0": {0.90: gen, 0.95: gen, 0.99: gen}, ...}
+    """
+    if thresholds is None:
+        thresholds = [0.90, 0.95, 0.99]
+    from .constants import SCENARIOS, CONFIGS
+    result = {}
+    for s_key in SCENARIOS:
+        for c_key in CONFIGS:
+            stats = all_stats.get(f"{s_key}_{c_key}", {})
+            raw = stats.get("_raw", [])
+            if not raw:
+                continue
+            # 收集每个 run 的收敛代数
+            gen_at = {t: [] for t in thresholds}
+            for r in raw:
+                curve = r.get("convergence_curve", [])
+                if not curve:
+                    continue
+                final_best = curve[-1]
+                for t in thresholds:
+                    target = final_best * t
+                    gen = len(curve) - 1  # 默认最后一代
+                    for i, v in enumerate(curve):
+                        if v <= target:
+                            gen = i
+                            break
+                    gen_at[t].append(gen)
+            # 取中位数
+            result[f"{s_key}_{c_key}"] = {
+                t: int(np.median(gens)) if gens else -1
+                for t, gens in gen_at.items()
+            }
+    return result
+
+
+def extract_initial_pop_fitness(all_stats: dict) -> dict:
+    """提取各配置初始种群（gen 0）的 mean fitness，用于 PopInit 质量对比。
+
+    Returns:
+        {"S1_A0": float, "S1_A2": float, ...}
+    """
+    from .constants import SCENARIOS, CONFIGS
+    result = {}
+    for s_key in SCENARIOS:
+        for c_key in CONFIGS:
+            stats = all_stats.get(f"{s_key}_{c_key}", {})
+            raw = stats.get("_raw", [])
+            if not raw:
+                continue
+            init_fitnesses = []
+            for r in raw:
+                curve = r.get("convergence_curve", [])
+                if curve:
+                    init_fitnesses.append(curve[0])
+            if init_fitnesses:
+                arr = np.array(init_fitnesses)
+                result[f"{s_key}_{c_key}"] = {
+                    "mean": round(float(arr.mean()), 2),
+                    "std": round(float(arr.std(ddof=1)) if len(arr) > 1 else 0.0, 2),
+                    "median": round(float(np.median(arr)), 2),
+                }
+    return result
+
+
 # ── LLM 决策分析 ──────────────────────────────────────────
 
 def extract_llm_decisions(results: list[dict]) -> list[dict]:
