@@ -77,7 +77,7 @@ def generate_latex_table2(all_stats: dict) -> str:
         lines.append(" & ".join(row) + r" \\")
     lines += [
         r"\bottomrule", r"\end{tabular}", r"",
-        r"\footnotesize{*$p < 0.05$，**$p < 0.01$，n.s. 不显著}",
+        r"\footnotesize{$*\, p<0.05$，$**\, p<0.01$，n.s. 不显著}",
         r"\end{table}",
     ]
     return "\n".join(lines)
@@ -176,17 +176,20 @@ def generate_synergy_table(synergy: dict) -> str:
     ]
     for s_key, d in synergy.items():
         ratio = d["synergy_ratio"]
-        if ratio > 1.05:
+        if ratio is None or d.get("is_meaningful") is False:
+            conclusion = "无显著差异"
+        elif ratio > 1.05:
             conclusion = "协同增益"
-        elif ratio > 0.95:
+        elif ratio >= 0.95:
             conclusion = "近似加性"
         else:
             conclusion = "存在冗余"
+        ratio_s = f"{ratio:.3f}" if ratio is not None else "n/a"
         lines.append(
             f"| {s_key} | {d['A0_mean']:.2f} "
             f"| {d['delta_A1']:+.2f} | {d['delta_A2']:+.2f} "
             f"| {d['delta_A3']:+.2f} | {d['sum_delta']:+.2f} "
-            f"| {ratio:.3f} | {conclusion} |"
+            f"| {ratio_s} | {conclusion} |"
         )
     return "\n".join(lines)
 
@@ -203,16 +206,19 @@ def generate_latex_synergy_table(synergy: dict) -> str:
     ]
     for s_key, d in synergy.items():
         ratio = d["synergy_ratio"]
-        if ratio > 1.05:
+        if ratio is None or d.get("is_meaningful") is False:
+            conclusion = "无显著差异"
+        elif ratio > 1.05:
             conclusion = "协同增益"
-        elif ratio > 0.95:
+        elif ratio >= 0.95:
             conclusion = "近似加性"
         else:
             conclusion = "存在冗余"
+        ratio_s = f"{ratio:.3f}" if ratio is not None else "n/a"
         lines.append(
             f"${s_key}$ & {d['delta_A1']:+.2f} & {d['delta_A2']:+.2f} "
             f"& {d['delta_A3']:+.2f} & {d['sum_delta']:+.2f} "
-            f"& {ratio:.3f} & {conclusion} \\\\"
+            f"& {ratio_s} & {conclusion} \\\\"
         )
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
     return "\n".join(lines)
@@ -223,7 +229,7 @@ def generate_convergence_speed_table(conv_gens: dict, thresholds: list[float] = 
     if thresholds is None:
         thresholds = [0.90, 0.95, 0.99]
     from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
-    header = "| 场景 | 配置 | " + " | ".join(f"达到{int(t*100)}%最优" for t in thresholds) + " |"
+    header = "| 场景 | 配置 | " + " | ".join(f"达到{int(t*100)}%改进" for t in thresholds) + " |"
     sep = "|---|---|" + "|".join(["---"] * len(thresholds)) + "|"
     lines = [header, sep]
     for s_key in SCENARIOS:
@@ -245,10 +251,10 @@ def generate_latex_convergence_speed_table(conv_gens: dict, thresholds: list[flo
         thresholds = [0.90, 0.95, 0.99]
     from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
     cols = "l" + "l" + "c" * len(thresholds)
-    th_headers = " & ".join(f"达到{int(t*100)}\\%" for t in thresholds)
+    th_headers = " & ".join(f"达到{int(t*100)}\\%\\改进" for t in thresholds)
     lines = [
         r"\begin{table}[htbp]", r"\centering",
-        r"\caption{收敛速度对比（达到最优解的代数，取中位数）}",
+        r"\caption{收敛速度对比：达到 X\% 改进所需的代数（cost 场景下取中位数）}",
         r"\label{tab:convergence_speed}",
         r"\begin{tabular}{" + cols + "}", r"\toprule",
         f"场景 & 配置 & {th_headers} \\\\", r"\midrule",
@@ -277,7 +283,11 @@ def generate_latex_convergence_speed_table(conv_gens: dict, thresholds: list[flo
 
 
 def generate_initial_pop_table(init_pop: dict) -> str:
-    """初始种群质量对比表（Markdown）。"""
+    """初始种群质量对比表（Markdown）。
+
+    说明：仅展示 A0/A2/A3，因为 A1（仅 CR Control）不修改初始种群，
+    与 A0 数值完全一致，省略以避免冗余。
+    """
     from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS
     lines = [
         "| 场景 | 配置 | 初始种群 Mean ± Std | 初始种群 Median |",
@@ -297,11 +307,14 @@ def generate_initial_pop_table(init_pop: dict) -> str:
 
 
 def generate_latex_initial_pop_table(init_pop: dict) -> str:
-    """初始种群质量对比表（LaTeX）。"""
+    """初始种群质量对比表（LaTeX）。
+
+    说明：仅展示 A0/A2/A3（A1 不影响初始种群，省略）。
+    """
     from .constants import SCENARIOS, CONFIG_LABELS, SCENARIO_LABELS
     lines = [
         r"\begin{table}[htbp]", r"\centering",
-        r"\caption{初始种群质量对比（PopInit 效果验证）}",
+        r"\caption{初始种群质量对比（PopInit 效果验证；A1+CR Control 不影响初始种群，故省略）}",
         r"\label{tab:initial_pop}",
         r"\begin{tabular}{llcc}", r"\toprule",
         r"场景 & 配置 & 初始 Mean $\pm$ Std & 初始 Median \\", r"\midrule",

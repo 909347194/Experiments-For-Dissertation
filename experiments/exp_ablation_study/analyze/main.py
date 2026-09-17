@@ -112,8 +112,9 @@ def main():
     # ═══════════════════════════════════════════════════════════
     csv_out = FIGURES_DIR / "summary_table.csv"
     with open(csv_out, "w", encoding="utf-8") as f:
-        f.write("scenario,config,best,mean,std,median,total_time,dmde_time,llm_time,"
-                "llm_init_time,llm_cr_time,llm_calls\n")
+        f.write("scenario,config,best,mean,std,median,"
+                "total_time_mean,dmde_time_mean,llm_time_mean,"
+                "llm_init_time_mean,llm_cr_time_mean,llm_calls_mean\n")
         for s_key in SCENARIOS:
             for c_key in CONFIGS:
                 stats = all_stats.get(f"{s_key}_{c_key}", {})

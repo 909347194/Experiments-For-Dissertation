@@ -17,15 +17,15 @@
 \toprule
 场景 & 配置 & Best & Mean $\pm$ Std & Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & \textbf{325847.82} & \textbf{325847.82} $\pm$ 0.00 & \textbf{325847.82} \\
- & +CR Control & 336438.28 & 336438.28 $\pm$ 0.00 & 336438.28 \\
- & +PopInit & \textbf{325847.82} & \textbf{325847.82} $\pm$ 0.00 & \textbf{325847.82} \\
- & Full LLM-DMDE & 336438.28 & 336438.28 $\pm$ 0.00 & 336438.28 \\
+balanced ($N=M=10$) & Vanilla DMDE & 325847.82 & 325847.82 $\pm$ 0.00 & 325847.82 \\
+ & +CR Control & 325847.82 & 325847.82 $\pm$ 0.00 & 325847.82 \\
+ & +PopInit & 325940.44 & 325940.44 $\pm$ 0.00 & 325940.44 \\
+ & Full LLM-DMDE & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & 689102.82 & 689102.82 $\pm$ 0.00 & 689102.82 \\
- & +CR Control & 689102.82 & 689102.82 $\pm$ 0.00 & 689102.82 \\
- & +PopInit & \textbf{547680.36} & \textbf{547680.36} $\pm$ 0.00 & \textbf{547680.36} \\
- & Full LLM-DMDE & 689102.82 & 689102.82 $\pm$ 0.00 & 689102.82 \\
+srp ($N=10, M=20$) & Vanilla DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+ & +CR Control & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+ & +PopInit & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+ & Full LLM-DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -38,22 +38,22 @@ srp ($N=10, M=20$) & Vanilla DMDE & 689102.82 & 689102.82 $\pm$ 0.00 & 689102.82
 \toprule
 场景 & 配置 & 总耗时(s) & DMDE(s) & LLM总耗时(s) & LLM Init(s) & LLM CR(s) \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 22.3 & 22.3 & --- & --- & --- \\
- & +CR Control & 526.8 & 1.8 & 525.0 & --- & 525.0 \\
- & +PopInit & 78.9 & 22.3 & 56.6 & 56.6 & --- \\
- & Full LLM-DMDE & 724.9 & 1.7 & 723.1 & 459.3 & 263.9 \\
+balanced ($N=M=10$) & Vanilla DMDE & 21.5 & 21.5 & --- & --- & --- \\
+ & +CR Control & 103.2 & 15.3 & 87.8 & --- & 87.8 \\
+ & +PopInit & 74.4 & 21.4 & 53.0 & 53.0 & --- \\
+ & Full LLM-DMDE & 122.5 & 15.6 & 107.0 & 42.7 & 64.3 \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & 19.7 & 19.7 & --- & --- & --- \\
- & +CR Control & 1317.3 & 13.3 & 1304.1 & --- & 1304.1 \\
- & +PopInit & 106.2 & 19.9 & 86.4 & 86.4 & --- \\
- & Full LLM-DMDE & 1747.4 & 13.3 & 1734.1 & 177.3 & 1556.8 \\
+srp ($N=10, M=20$) & Vanilla DMDE & 19.6 & 19.6 & --- & --- & --- \\
+ & +CR Control & 70.3 & 13.3 & 57.0 & --- & 57.0 \\
+ & +PopInit & 109.6 & 20.1 & 89.5 & 89.5 & --- \\
+ & Full LLM-DMDE & 136.8 & 13.3 & 123.5 & 68.3 & 55.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[htbp]
 \centering
-\caption{统计显著性检验（Mann-Whitney U 秩和检验，A3 vs 基线）}
+\caption{统计显著性检验（Mann-Whitney U，A3 vs 基线）}
 \label{tab:mannwhitney}
 \begin{tabular}{lccc}
 \toprule
@@ -64,7 +64,67 @@ srp ($N=10, M=20$) & --- & --- & --- \\
 \bottomrule
 \end{tabular}
 
-\footnotesize{*$p < 0.05$，**$p < 0.01$，n.s. 不显著；样本量 $n<5$ 时未检验}
+\footnotesize{$*\, p<0.05$，$**\, p<0.01$，n.s. 不显著}
+\end{table}
+
+\section*{协同效应分析}
+
+\begin{table}[htbp]
+\centering
+\caption{协同效应分析：A3 增益 vs A1+A2 增益之和}
+\label{tab:synergy}
+\begin{tabular}{lcccccc}
+\toprule
+场景 & $\Delta A_1$ (CR) & $\Delta A_2$ (PopInit) & $\Delta A_3$ (Full) & $\Delta A_1 + \Delta A_2$ & 协同比 & 结论 \\
+\midrule
+$S1$ & +0.00 & -92.62 & +175.59 & -92.62 & -1.896 & 存在冗余 \\
+$S2$ & +0.00 & +0.00 & +0.00 & +0.00 & n/a & 无显著差异 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{收敛速度对比}
+
+\begin{table}[htbp]
+\centering
+\caption{收敛速度对比：达到 X\% 改进所需的代数（cost 场景下取中位数）}
+\label{tab:convergence_speed}
+\begin{tabular}{llccc}
+\toprule
+场景 & 配置 & 达到90\%\改进 & 达到95\%\改进 & 达到99\%\改进 \\
+\midrule
+balanced ($N=M=10$) & Vanilla DMDE & 280 & 280 & 280 \\
+ & +CR Control & 15 & 15 & 15 \\
+ & +PopInit & 0 & 0 & 0 \\
+ & Full LLM-DMDE & 0 & 0 & 0 \\
+\midrule
+srp ($N=10, M=20$) & Vanilla DMDE & --- & --- & --- \\
+ & +CR Control & --- & --- & --- \\
+ & +PopInit & 0 & 0 & 0 \\
+ & Full LLM-DMDE & 0 & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{初始种群质量对比}
+
+\begin{table}[htbp]
+\centering
+\caption{初始种群质量对比（PopInit 效果验证；A1+CR Control 不影响初始种群，故省略）}
+\label{tab:initial_pop}
+\begin{tabular}{llcc}
+\toprule
+场景 & 配置 & 初始 Mean $\pm$ Std & 初始 Median \\
+\midrule
+balanced ($N=M=10$) & Vanilla DMDE & 361831.27 $\pm$ 0.00 & 361831.27 \\
+ & +PopInit & inf $\pm$ 0.00 & inf \\
+ & Full LLM-DMDE & inf $\pm$ 0.00 & inf \\
+\midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 689102.82 $\pm$ 0.00 & 689102.82 \\
+ & +PopInit & inf $\pm$ 0.00 & inf \\
+ & Full LLM-DMDE & inf $\pm$ 0.00 & inf \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \end{document}

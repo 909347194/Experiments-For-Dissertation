@@ -98,31 +98,22 @@ def compute_convergence_stats(curves: list[list[float]]) -> dict:
     }
 
 
-def find_convergence_gen(curve: list[float], threshold: float = 0.95) -> int:
-    if not curve:
-        return -1
-    final_best = curve[-1]
-    target = final_best * threshold
-    for i, v in enumerate(curve):
-        if v <= target:
-            return i
-    return len(curve) - 1
-
-
 # ── 协同效应分析 ──────────────────────────────────────────
 
 def compute_synergy(all_stats: dict) -> dict:
     """计算协同效应：A3 增益 vs A1+A2 增益之和。
 
-    对每个场景计算：
-        ΔA1 = A1_mean - A0_mean  (CR Control 单独增益)
-        ΔA2 = A2_mean - A0_mean  (PopInit 单独增益)
-        ΔA3 = A3_mean - A0_mean  (双模块增益)
+    对每个场景计算（cost 场景下，**增益 = A0 fitness - 自身 fitness**，越小越好）：
+        ΔA1 = A0_mean - A1_mean  (CR Control 单独增益，正值 = 有效)
+        ΔA2 = A0_mean - A2_mean  (PopInit 单独增益)
+        ΔA3 = A0_mean - A3_mean  (双模块增益)
         协同比 = ΔA3 / (ΔA1 + ΔA2)
             >1 → 超加性（协同）
             =1 → 加性（独立）
             <1 → 亚加性（冗余）
+            NaN → A1+A2 增益近乎 0（两者均无效或相互抵消），结论无意义
     """
+    import math
     from .constants import SCENARIOS
     result = {}
     for s_key in SCENARIOS:
@@ -132,11 +123,19 @@ def compute_synergy(all_stats: dict) -> dict:
         a3 = all_stats.get(f"{s_key}_A3", {}).get("mean")
         if any(v is None for v in [a0, a1, a2, a3]):
             continue
-        delta_a1 = a1 - a0
-        delta_a2 = a2 - a0
-        delta_a3 = a3 - a0
+        # 增益 = A0 - 自身（cost 场景下，正值代表变好）
+        delta_a1 = a0 - a1
+        delta_a2 = a0 - a2
+        delta_a3 = a0 - a3
         sum_delta = delta_a1 + delta_a2
-        ratio = delta_a3 / sum_delta if abs(sum_delta) > 1e-9 else float("inf")
+        if abs(sum_delta) < 1e-9:
+            ratio = float("nan")
+            is_synergistic = False
+            is_meaningful = False
+        else:
+            ratio = delta_a3 / sum_delta
+            is_synergistic = ratio > 1.0
+            is_meaningful = True
         result[s_key] = {
             "A0_mean": a0,
             "A1_mean": a1,
@@ -146,14 +145,23 @@ def compute_synergy(all_stats: dict) -> dict:
             "delta_A2": round(delta_a2, 2),
             "delta_A3": round(delta_a3, 2),
             "sum_delta": round(sum_delta, 2),
-            "synergy_ratio": round(ratio, 3),
-            "is_synergistic": ratio > 1.0,
+            "synergy_ratio": None if math.isnan(ratio) else round(ratio, 3),
+            "is_synergistic": is_synergistic,
+            "is_meaningful": is_meaningful,
         }
     return result
 
 
 def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) -> dict:
-    """计算各配置达到 X% 最优所需代数（跨 run 取中位数）。
+    """计算各配置达到 X% 改进所需代数（跨 run 取中位数）。
+
+    语义：
+        improvement = initial_best - final_best  (cost 场景下为正)
+        target = final_best + improvement * (1 - t)
+        t = 0.90 → 需要达到 90% 改进（fitness 已下降到 initial - 0.90*(initial-final)）
+        t = 0.95 → 95% 改进
+        t = 0.99 → 99% 改进
+    注意：cost 场景下 t 越大越难（需要收敛到离 final 更近），但**目标值变大**。
 
     Args:
         all_stats: compute_stats 输出
@@ -176,20 +184,28 @@ def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) ->
             gen_at = {t: [] for t in thresholds}
             for r in raw:
                 curve = r.get("convergence_curve", [])
-                if not curve:
+                if len(curve) < 2:
                     continue
+                initial_best = curve[0]
                 final_best = curve[-1]
+                improvement = initial_best - final_best
+                # 无改进（卡点或震荡）：无法定义 X% 改进 → 记 -1
+                if improvement <= 0:
+                    for t in thresholds:
+                        gen_at[t].append(-1)
+                    continue
                 for t in thresholds:
-                    target = final_best * t
+                    # 目标：fitness 已下降到 initial - t*improvement
+                    target = final_best + improvement * (1 - t)
                     gen = len(curve) - 1  # 默认最后一代
                     for i, v in enumerate(curve):
                         if v <= target:
                             gen = i
                             break
                     gen_at[t].append(gen)
-            # 取中位数
+            # 取中位数（忽略 -1 卡点）
             result[f"{s_key}_{c_key}"] = {
-                t: int(np.median(gens)) if gens else -1
+                t: int(np.median([g for g in gens if g >= 0])) if any(g >= 0 for g in gens) else -1
                 for t, gens in gen_at.items()
             }
     return result
