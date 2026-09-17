@@ -3,15 +3,20 @@
 
 职责：
     在种群初始化阶段（before_init），由 LLM 基于结构化问题表示 S_problem
-    直接生成离散的候选分配方案（assignment），代码侧负责将 assignment
-    转换为 DMDE 统一基因编码。
+    生成少量高质量候选分配方案（assignment），为 DMDE 提供高层搜索先验。
+    代码侧负责将 assignment 转换为 DMDE 统一基因编码。
 
 注入点：before_init（种群初始化之前，生成候选 assignments）
+
+研究定位：
+    LLM 的角色不是“生成尽可能多的优秀解”，而是“为 DMDE 提供有价值的
+    高层搜索先验”。LLM 生成 K 个候选解作为种子，其余种群由随机初始化补齐。
+    K 通过规模自适应公式确定：K = min(K_max, max(K_min, ceil(α × P)))。
 
 设计原则：
     1. LLM 只输出 assignment，不碰 gene 编码
     2. 代码负责 assignment → gene 转换 + cost 补全
-    3. K = ceil(r × N_pop)，r 是超参数（llm_init_ratio）
+    3. K = min(K_max, max(K_min, ceil(α × P)))，规模自适应
     4. Quality + Diversity 过滤
     5. 模块化、支持消融实验
 """
@@ -85,10 +90,12 @@ class LLMPopulationInitModule(BaseLLMModule):
         constraints_desc = self._describe_constraints(model_type, n_uavs, n_targets)
 
         # ── 需要生成的候选数量 ──────────────────────────────────────
+        # K = min(K_max, max(K_min, ceil(α × P)))
         pop_size = state.extra.get("pop_size", 50)
-        llm_init_ratio = state.extra.get("llm_init_ratio",
-                                         self._config.get("llm_init_ratio", 0.2))
-        k = max(1, math.ceil(llm_init_ratio * pop_size))
+        alpha = state.extra.get("alpha", self._config.get("llm_init_ratio", 0.2))
+        k_min = state.extra.get("k_min", self._config.get("llm_init_k_min", 3))
+        k_max = state.extra.get("k_max", self._config.get("llm_init_k_max", 10))
+        k = min(k_max, max(k_min, math.ceil(alpha * pop_size)))
 
         # ── 代价矩阵原始数据（小规模时附带） ────────────────────────
         _MAX_MATRIX_ELEMENTS = self._config.get("max_matrix_elements", 500)

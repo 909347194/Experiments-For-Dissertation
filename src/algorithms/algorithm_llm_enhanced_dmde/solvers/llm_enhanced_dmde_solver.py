@@ -99,7 +99,9 @@ class LLMEnhancedDMDEConfig:
 
     # LLM 种群初始化参数（v2）
     # ⚠️ 以下参数均为实验调参项
-    llm_init_ratio: float = 0.2           # r，LLM 候选注入比例（K = ceil(r × N_pop)）
+    llm_init_ratio: float = 0.2           # α，LLM 候选注入比例（K = ceil(α × P)）
+    llm_init_k_min: int = 3               # K_min，LLM 最少生成候选数
+    llm_init_k_max: int = 10              # K_max，LLM 最多生成候选数
     llm_init_max_retries: int = 3         # LLM 生成失败时的重试次数
     llm_init_diversity_threshold: float = 0.1  # 多样性过滤阈值（0~1）
     llm_init_preference_top_k: int = 3    # prompt 中每行/列的 top-k 最小代价统计
@@ -377,18 +379,23 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             return encoder.generate(pop_size, seed=cfg.seed)
 
         # ---- LLM 种群初始化 (hook: before_init) ----
-        llm_init_ratio = getattr(cfg, "llm_init_ratio", 0.2)
-        k = max(1, int(np.ceil(llm_init_ratio * pop_size)))
+        # K = min(K_max, max(K_min, ceil(α × P)))
+        alpha = getattr(cfg, "llm_init_ratio", 0.2)
+        k_min = getattr(cfg, "llm_init_k_min", 3)
+        k_max = getattr(cfg, "llm_init_k_max", 10)
+        k = min(k_max, max(k_min, int(np.ceil(alpha * pop_size))))
 
         # 构建 before_init 状态（此时还没有种群）
         state = self._build_state_before_init(
             cost_matrix, n_uavs, n_targets, model_type,
         )
         state.extra["pop_size"] = pop_size
-        state.extra["llm_init_ratio"] = llm_init_ratio
+        state.extra["alpha"] = alpha
+        state.extra["k_min"] = k_min
+        state.extra["k_max"] = k_max
         state.extra["preference_top_k"] = getattr(cfg, "llm_init_preference_top_k", 3)
 
-        # state.extra 已包含 pop_size 和 llm_init_ratio（见上方 _build_state_before_init）
+        # state.extra 已包含 pop_size, alpha, k_min, k_max（见上方 _build_state_before_init）
         # build_prompt 会从 state.extra 读取这些值，无需直接修改模块私有配置
 
         # 带重试的 LLM 调用
