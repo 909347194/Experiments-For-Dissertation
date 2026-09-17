@@ -168,8 +168,12 @@ class RecordingLLMDESolver:
                     temperature=d.get("llm_input", {}).get("temperature", 0.0),
                 )
 
-            # 从 trajectory 提取每代记录
+            # 从 trajectory 提取每代记录（跳过 LLM 决策条目，
+            # 它们的 fitness_best 来自 _build_state_before_init()=inf，
+            # 不代表真实种群状态，混入会污染收敛曲线起点）
             for entry in trajectory.get_all():
+                if entry.llm_module:
+                    continue
                 self._rec.record_generation(
                     gen=entry.generation,
                     fitness_best=entry.fitness_best,
@@ -178,10 +182,6 @@ class RecordingLLMDESolver:
                     f_scale=entry.f_scale,
                     diversity=entry.diversity,
                     feasible_ratio=entry.feasible_ratio,
-                    llm_module=entry.llm_module,
-                    llm_decision=entry.llm_decision,
-                    llm_reasoning=entry.llm_reasoning,
-                    llm_call_duration=entry.llm_call_duration,
                 )
 
         return result

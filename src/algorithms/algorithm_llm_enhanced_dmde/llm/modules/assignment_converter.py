@@ -68,6 +68,9 @@ class AssignmentConverter:
         对于 srp，assignments 列表包含 N 个字典，
         每个字典对应一个 UAV 的巡游路线。
 
+        如果 assignments 存在 target 重复/缺失（LLM 常见错误），
+        会自动尝试修复后再转换。
+
         Args:
             assignments: 一个完整解的 assignment 字典列表。
 
@@ -77,6 +80,21 @@ class AssignmentConverter:
         if not assignments:
             return None
 
+        # 先尝试直接转换
+        result = self._try_convert(assignments)
+        if result is not None:
+            return result
+
+        # 直接转换失败 → 尝试修复 target 重复/缺失
+        repaired = self._repair_duplicates(assignments)
+        if repaired is not None:
+            logger.debug("修复后转换成功")
+            return self._try_convert(repaired)
+
+        return None
+
+    def _try_convert(self, assignments: list[dict[str, Any]]) -> Individual | None:
+        """尝试转换 assignments（含验证）。"""
         # 逐个验证格式
         for a in assignments:
             is_valid, err_msg = self.validate(a)
@@ -212,6 +230,93 @@ class AssignmentConverter:
             a["uav"] = a["uav"] % self._n
 
         return a
+
+    def _repair_duplicates(
+        self, assignments: list[dict[str, Any]]
+    ) -> list[dict[str, Any]] | None:
+        """修复 target 重复/缺失问题（LLM 常见错误）。
+
+        balanced/overloaded 模型下，LLM 经常生成有重复 target 的解。
+        本方法检测重复，将重复的 UAV 重新分配到缺失的 target。
+
+        Args:
+            assignments: 原始 assignment 字典列表。
+
+        Returns:
+            修复后的列表，无法修复时返回 None。
+        """
+        mt = self.model_type
+        if mt == "srp":
+            # SRP 的约束更复杂，暂不修复
+            return None
+
+        if len(assignments) != self._n:
+            return None
+
+        # 收集所有 target
+        all_targets = [a["targets"][0] for a in assignments]
+        target_counts: dict[int, int] = {}
+        for t in all_targets:
+            target_counts[t] = target_counts.get(t, 0) + 1
+
+        # 找出重复和缺失
+        duplicated_uavs: list[int] = []  # 有重复 target 的 UAV 索引
+        seen_targets: set[int] = set()
+        for i, a in enumerate(assignments):
+            t = a["targets"][0]
+            if t in seen_targets:
+                duplicated_uavs.append(i)
+            else:
+                seen_targets.add(t)
+
+        if not duplicated_uavs:
+            return None  # 没有重复，不需要修复
+
+        missing_targets = sorted(set(range(self._m)) - seen_targets)
+        if len(missing_targets) != len(duplicated_uavs):
+            # 缺失数 != 重复数，无法一对一修复
+            logger.debug(
+                "修复失败: %d 个重复 UAV, %d 个缺失 target",
+                len(duplicated_uavs), len(missing_targets),
+            )
+            return None
+
+        # 修复：将重复 UAV 重分配到缺失 target（最小代价匹配）
+        repaired = [dict(a) for a in assignments]  # 浅拷贝
+        n_fix = len(duplicated_uavs)
+        if n_fix == 1:
+            # 单个重复：直接选代价最小的缺失 target
+            uav_id = repaired[duplicated_uavs[0]]["uav"]
+            best_tgt = min(missing_targets, key=lambda t: self._cm[uav_id, t])
+            repaired[duplicated_uavs[0]] = {"uav": uav_id, "targets": [best_tgt]}
+        else:
+            # 多个重复：尝试最优匹配，回退到贪心
+            try:
+                from scipy.optimize import linear_sum_assignment
+                cost_sub = np.array([
+                    [self._cm[repaired[i]["uav"], t] for t in missing_targets]
+                    for i in duplicated_uavs
+                ])
+                row_ind, col_ind = linear_sum_assignment(cost_sub)
+                for r, c in zip(row_ind, col_ind):
+                    uav_id = repaired[duplicated_uavs[r]]["uav"]
+                    repaired[duplicated_uavs[r]] = {"uav": uav_id, "targets": [missing_targets[c]]}
+            except ImportError:
+                # scipy 不可用，回退贪心
+                remaining = list(missing_targets)
+                for idx in duplicated_uavs:
+                    uav_id = repaired[idx]["uav"]
+                    best_tgt = min(remaining, key=lambda t: self._cm[uav_id, t])
+                    repaired[idx] = {"uav": uav_id, "targets": [best_tgt]}
+                    remaining.remove(best_tgt)
+
+        logger.debug(
+            "修复 %d 个重复 target: UAV %s → target %s",
+            len(duplicated_uavs),
+            [repaired[i]["uav"] for i in duplicated_uavs],
+            [repaired[i]["targets"][0] for i in duplicated_uavs],
+        )
+        return repaired
 
     # ── 转换逻辑 ──────────────────────────────────────────────
 

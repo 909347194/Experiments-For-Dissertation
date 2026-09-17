@@ -62,6 +62,11 @@ _OUTPUT_VALIDATION = """\
 - UAV IDs must be in [0, N-1], target IDs in [0, M-1].
 - For balanced/overloaded: each "targets" list has exactly 1 element.
 - For srp: each "targets" list has >= 1 elements, no duplicate targets across solutions.
+- **VERIFICATION STEP**: Before outputting, for each solution check:
+  1. Count total targets — must equal M.
+  2. Check no target appears twice.
+  3. Check all targets in [0, M-1] are covered.
+  If any check fails, fix the solution before outputting.
 - Invalid outputs will be rejected. Double-check before responding.
 
 ## CRITICAL: Keep Response Concise
@@ -106,6 +111,9 @@ Each "solution" is a **complete one-to-one assignment** covering ALL N UAVs.
 - Each UAV appears exactly once, each target appears exactly once.
 - Each "targets" list has exactly 1 element.
 - This is a **permutation problem**: find the best UAV→Target matching.
+- **CRITICAL**: The set of all target IDs in a solution must be exactly [0, 1, ..., M-1]. \
+  No target may appear twice. No target may be missing. \
+  Before outputting, VERIFY each solution is a valid permutation.
 
 {_reasoning}
 {_validation}
@@ -154,6 +162,8 @@ Each "solution" is a **complete assignment** covering ALL N UAVs.
 - Each target **must appear at least once** across all assignments.
 - Each "targets" list has exactly 1 element.
 - Multiple UAVs may be assigned to the same target.
+- **CRITICAL**: Before outputting, VERIFY every target in [0, M-1] appears \
+  at least once across all assignments.
 
 {_reasoning}
 {_validation}
@@ -203,6 +213,8 @@ Each "solution" is a **complete assignment** covering ALL N UAVs and ALL M targe
 - Each target appears exactly once across all assignments.
 - "targets" list length >= 1, and the **order represents the tour sequence**.
 - Tour costs include both UAV→first_target (C_UT) and target→target transitions (C_TT).
+- **CRITICAL**: Before outputting, VERIFY every target in [0, M-1] appears \
+  exactly once across all UAVs' target lists. No duplicates, no missing targets.
 
 {_reasoning}
 

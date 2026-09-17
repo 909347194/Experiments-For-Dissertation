@@ -211,6 +211,11 @@ class LLMPopulationInitModule(BaseLLMModule):
                 raw_assignments = sol.get("assignments", [])
                 validated = self._validate_assignments(raw_assignments)
                 if validated:
+                    if self._has_duplicate_targets(validated):
+                        logger.info(
+                            "[population_init] solution 有 target 重复，"
+                            "将交由 converter 修复"
+                        )
                     validated_solutions.append(validated)
             return {
                 "solutions": validated_solutions,
@@ -248,6 +253,18 @@ class LLMPopulationInitModule(BaseLLMModule):
                 continue
             validated.append({"uav": uav, "targets": targets})
         return validated
+
+    @staticmethod
+    def _has_duplicate_targets(assignments: list[dict[str, Any]]) -> bool:
+        """检查 assignments 中是否有 target 重复。
+
+        对于 balanced/overloaded（targets 长度=1），检查单值重复。
+        对于 SRP（targets 长度≥1），检查所有 target 是否有交叉。
+        """
+        all_targets: list[int] = []
+        for a in assignments:
+            all_targets.extend(a.get("targets", []))
+        return len(all_targets) != len(set(all_targets))
 
     def apply_decision(
         self, decision: dict[str, Any], state: ModuleState

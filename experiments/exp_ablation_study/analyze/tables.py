@@ -298,10 +298,16 @@ def generate_initial_pop_table(init_pop: dict) -> str:
             data = init_pop.get(f"{s_key}_{c_key}", {})
             if not data:
                 continue
+            if not np.isfinite(data["mean"]):
+                ms = "N/A (不可行)"
+                md = "N/A"
+            else:
+                ms = f"{data['mean']:.2f} ± {data['std']:.2f}"
+                md = f"{data['median']:.2f}"
             lines.append(
                 f"| {s_key} | {CONFIG_LABELS[c_key]} "
-                f"| {data['mean']:.2f} ± {data['std']:.2f} "
-                f"| {data['median']:.2f} |"
+                f"| {ms} "
+                f"| {md} |"
             )
     return "\n".join(lines)
 
@@ -327,8 +333,12 @@ def generate_latex_initial_pop_table(init_pop: dict) -> str:
                 continue
             s_label = SCENARIO_LABELS[s_key] if first_row else ""
             c_label = CONFIG_LABELS[c_key]
-            ms = f"{data['mean']:.2f} $\\pm$ {data['std']:.2f}"
-            md = f"{data['median']:.2f}"
+            if not np.isfinite(data["mean"]):
+                ms = r"N/A \textit{(不可行)}"
+                md = "N/A"
+            else:
+                ms = f"{data['mean']:.2f} $\\pm$ {data['std']:.2f}"
+                md = f"{data['median']:.2f}"
             if first_row:
                 lines.append(f"{s_label} & {c_label} & {ms} & {md} \\\\")
                 first_row = False

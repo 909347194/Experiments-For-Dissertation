@@ -199,6 +199,19 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         best_individual = population[best_idx].copy()
         cost_history = [best_individual.fitness]
 
+        # 显式记录 gen=0 轨迹点（真实初始种群 fitness），
+        # 避免 LLM 决策条目（fitness_best=inf）污染收敛曲线。
+        if cfg.save_trajectory:
+            fitness_arr = np.array([ind.fitness for ind in population])
+            self._trajectory.record(TrajectoryEntry(
+                generation=0,
+                fitness_best=best_individual.fitness,
+                fitness_mean=float(np.mean(fitness_arr)),
+                fitness_worst=float(np.max(fitness_arr)),
+                diversity=compute_diversity(population),
+                feasible_ratio=compute_feasible_ratio(population),
+            ))
+
         # LLM 决策状态缓存
         llm_cr = None          # None = 未被 LLM 设置，使用公式 3-9
         llm_cr_prev_fitness = best_individual.fitness  # 上次 LLM CR 决定时的 best fitness

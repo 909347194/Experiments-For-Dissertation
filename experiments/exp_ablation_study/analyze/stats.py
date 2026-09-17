@@ -189,8 +189,9 @@ def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) ->
                 initial_best = curve[0]
                 final_best = curve[-1]
                 improvement = initial_best - final_best
-                # 无改进（卡点或震荡）：无法定义 X% 改进 → 记 -1
-                if improvement <= 0:
+                # 无改进（卡点、震荡、或初始种群全部不可行）：
+                # 无法定义 X% 改进 → 记 -1
+                if not np.isfinite(improvement) or improvement <= 0:
                     for t in thresholds:
                         gen_at[t].append(-1)
                     continue
@@ -215,7 +216,8 @@ def extract_initial_pop_fitness(all_stats: dict) -> dict:
     """提取各配置初始种群（gen 0）的 mean fitness，用于 PopInit 质量对比。
 
     Returns:
-        {"S1_A0": float, "S1_A2": float, ...}
+        {"S1_A0": {"mean": float, "std": float, "median": float, "n_infeasible": int}, ...}
+        n_infeasible > 0 时表示该配置有部分 run 的初始种群全部不可行（fitness=inf）。
     """
     from .constants import SCENARIOS, CONFIGS
     result = {}
@@ -226,16 +228,30 @@ def extract_initial_pop_fitness(all_stats: dict) -> dict:
             if not raw:
                 continue
             init_fitnesses = []
+            n_infeasible = 0
             for r in raw:
                 curve = r.get("convergence_curve", [])
                 if curve:
-                    init_fitnesses.append(curve[0])
+                    v = curve[0]
+                    if np.isfinite(v):
+                        init_fitnesses.append(v)
+                    else:
+                        n_infeasible += 1
             if init_fitnesses:
                 arr = np.array(init_fitnesses)
                 result[f"{s_key}_{c_key}"] = {
                     "mean": round(float(arr.mean()), 2),
                     "std": round(float(arr.std(ddof=1)) if len(arr) > 1 else 0.0, 2),
                     "median": round(float(np.median(arr)), 2),
+                    "n_infeasible": n_infeasible,
+                }
+            elif n_infeasible > 0:
+                # 全部 run 都不可行
+                result[f"{s_key}_{c_key}"] = {
+                    "mean": float("inf"),
+                    "std": 0.0,
+                    "median": float("inf"),
+                    "n_infeasible": n_infeasible,
                 }
     return result
 
