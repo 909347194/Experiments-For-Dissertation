@@ -84,5 +84,6 @@ def run_llm_dmde(seed: int, cost_matrix: np.ndarray, evaluator: object,
         llm_cr=llm_cr_time,
     )
     # 覆盖 llm_call_count（从 solver 获取准确值）
-    recorder._llm_call_count = llm_call_count if llm_call_count else recorder._llm_call_count
+    if llm_call_count:
+        recorder.set_llm_call_count(llm_call_count)
     return recorder.finalize()

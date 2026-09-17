@@ -131,6 +131,10 @@ class RunRecorder:
         self._llm_init_time = llm_init
         self._llm_cr_time = llm_cr
 
+    def set_llm_call_count(self, count: int):
+        """设置 LLM 调用次数（用于从 solver 获取准确值）。"""
+        self._llm_call_count = count
+
     # ── 输出 ──────────────────────────────────────────────
 
     def finalize(self) -> dict:

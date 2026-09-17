@@ -4,6 +4,19 @@
 import json
 from pathlib import Path
 
+import numpy as np
+
+
+def _json_default(obj):
+    """JSON 序列化兜底（处理 numpy 类型）。"""
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return str(obj)
+
 
 def save_results(results: list[dict], output_dir: Path) -> Path:
     """保存结果列表到 JSON 文件。
@@ -18,7 +31,7 @@ def save_results(results: list[dict], output_dir: Path) -> Path:
     out = output_dir / "results" / "ablation_results.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+        json.dump(results, f, indent=2, ensure_ascii=False, default=_json_default)
     return out
 
 
