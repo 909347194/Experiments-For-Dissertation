@@ -17,15 +17,10 @@
 \toprule
 场景 & 配置 & Best & Mean $\pm$ Std & Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 325847.82 & 325847.82 $\pm$ 0.00 & 325847.82 \\
- & +CR Control & 325847.82 & 325847.82 $\pm$ 0.00 & 325847.82 \\
- & +PopInit & 325940.44 & 325940.44 $\pm$ 0.00 & 325940.44 \\
- & Full LLM-DMDE & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
-\midrule
-srp ($N=10, M=20$) & Vanilla DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
- & +CR Control & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
- & +PopInit & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
- & Full LLM-DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+balanced ($N=M=10$) & Vanilla DMDE & \textbf{325672.23} & \textbf{325778.55} $\pm$ 155.46 & \textbf{325672.23} \\
+ & +CR Control & \textbf{325672.23} & 325824.78 $\pm$ 123.51 & 325847.82 \\
+ & +PopInit & \textbf{325672.23} & 325798.93 $\pm$ 144.89 & 325760.03 \\
+ & Full LLM-DMDE & \textbf{325672.23} & 326147.83 $\pm$ 1073.72 & 325847.82 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -38,15 +33,11 @@ srp ($N=10, M=20$) & Vanilla DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm
 \toprule
 场景 & 配置 & 总耗时(s) & DMDE(s) & LLM总耗时(s) & LLM Init(s) & LLM CR(s) \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 21.5 & 21.5 & --- & --- & --- \\
- & +CR Control & 103.2 & 15.3 & 87.8 & --- & 87.8 \\
- & +PopInit & 74.4 & 21.4 & 53.0 & 53.0 & --- \\
- & Full LLM-DMDE & 122.5 & 15.6 & 107.0 & 42.7 & 64.3 \\
+balanced ($N=M=10$) & Vanilla DMDE & 60.5 & 60.5 & --- & --- & --- \\
+ & +CR Control & 110.6 & 41.8 & 68.8 & --- & 68.8 \\
+ & +PopInit & 111.7 & 59.3 & 52.4 & 52.4 & --- \\
+ & Full LLM-DMDE & 155.7 & 41.5 & 114.2 & 47.0 & 67.2 \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & 19.6 & 19.6 & --- & --- & --- \\
- & +CR Control & 70.3 & 13.3 & 57.0 & --- & 57.0 \\
- & +PopInit & 109.6 & 20.1 & 89.5 & 89.5 & --- \\
- & Full LLM-DMDE & 136.8 & 13.3 & 123.5 & 68.3 & 55.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -59,7 +50,7 @@ srp ($N=10, M=20$) & Vanilla DMDE & 19.6 & 19.6 & --- & --- & --- \\
 \toprule
 场景 & A3 vs A0 & A3 vs A1 & A3 vs A2 \\
 \midrule
-balanced ($N=M=10$) & --- & --- & --- \\
+balanced ($N=M=10$) & 0.2768 n.s. & 0.8090 n.s. & 0.5776 n.s. \\
 srp ($N=10, M=20$) & --- & --- & --- \\
 \bottomrule
 \end{tabular}
@@ -77,8 +68,7 @@ srp ($N=10, M=20$) & --- & --- & --- \\
 \toprule
 场景 & $\Delta A_1$ (CR) & $\Delta A_2$ (PopInit) & $\Delta A_3$ (Full) & $\Delta A_1 + \Delta A_2$ & 协同比 & 结论 \\
 \midrule
-$S1$ & +0.00 & -92.62 & +175.59 & -92.62 & -1.896 & 存在冗余 \\
-$S2$ & +0.00 & +0.00 & +0.00 & +0.00 & n/a & 无显著差异 \\
+$S1$ & -46.23 & -20.38 & -369.28 & -66.61 & 5.544 & 协同增益 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -93,15 +83,11 @@ $S2$ & +0.00 & +0.00 & +0.00 & +0.00 & n/a & 无显著差异 \\
 \toprule
 场景 & 配置 & 达到90\%\改进 & 达到95\%\改进 & 达到99\%\改进 \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 280 & 280 & 280 \\
- & +CR Control & 15 & 15 & 15 \\
+balanced ($N=M=10$) & Vanilla DMDE & 153 & 216 & 296 \\
+ & +CR Control & 14 & 19 & 19 \\
  & +PopInit & 0 & 0 & 0 \\
  & Full LLM-DMDE & 0 & 0 & 0 \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & --- & --- & --- \\
- & +CR Control & --- & --- & --- \\
- & +PopInit & 0 & 0 & 0 \\
- & Full LLM-DMDE & 0 & 0 & 0 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -116,13 +102,10 @@ srp ($N=10, M=20$) & Vanilla DMDE & --- & --- & --- \\
 \toprule
 场景 & 配置 & 初始 Mean $\pm$ Std & 初始 Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 361831.27 $\pm$ 0.00 & 361831.27 \\
- & +PopInit & inf $\pm$ 0.00 & inf \\
- & Full LLM-DMDE & inf $\pm$ 0.00 & inf \\
+balanced ($N=M=10$) & Vanilla DMDE & 380070.43 $\pm$ 14157.41 & 376608.39 \\
+ & +PopInit & inf $\pm$ nan & inf \\
+ & Full LLM-DMDE & inf $\pm$ nan & inf \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & 689102.82 $\pm$ 0.00 & 689102.82 \\
- & +PopInit & inf $\pm$ 0.00 & inf \\
- & Full LLM-DMDE & inf $\pm$ 0.00 & inf \\
 \bottomrule
 \end{tabular}
 \end{table}
