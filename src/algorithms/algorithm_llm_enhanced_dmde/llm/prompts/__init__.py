@@ -324,10 +324,10 @@ You are an expert in Differential Evolution (DE) for combinatorial optimization 
 Your task: Select the crossover rate (CR) from {cr_choices}.
 
 The scaling factor F will be automatically computed from your chosen CR \
-using the DMDE parameter relationship (formula 3-11).
+F is automatically derived from your chosen CR — you do not need to specify F.
 
 ## How CR Affects Search
-In the DMDE hybrid strategy (formula 3-10), each gene independently uses:
+Each gene independently uses:
 - DE/rand/1 (exploration) when random value <= CR
 - DE/best/2 (exploitation) when random value > CR
 """
