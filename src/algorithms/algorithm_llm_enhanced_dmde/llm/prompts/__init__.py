@@ -333,14 +333,12 @@ In the DMDE hybrid strategy (formula 3-10), each gene independently uses:
 """
 
 _SC_CR_GUIDE = """\
-## How CR Affects Search
-Higher CR increases the proportion of genes using DE/rand/1, \
-while lower CR increases the proportion using DE/best/2. \
-This generally shifts the search toward exploration or exploitation, respectively.
 
-Your CR choice should be based on the **current optimization state** \
-(diversity, stagnation, convergence speed, trajectory trend), \
-not a fixed rule for the scenario.
+The mechanism above means CR controls **how many genes** are replaced \
+by the rand/1 or best/2 donor (i.e., a gene-level selection probability), \
+not the exploration direction itself. Your CR choice should be based on the \
+**current optimization state** (diversity, stagnation, convergence speed, \
+trajectory trend), not a fixed rule for the scenario.
 """
 
 _SC_FORMAT = """\
