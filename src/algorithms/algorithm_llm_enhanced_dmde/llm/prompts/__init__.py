@@ -334,9 +334,9 @@ In the DMDE hybrid strategy (formula 3-10), each gene independently uses:
 
 _SC_CR_GUIDE = """\
 ## How CR Affects Search
-- High CR (0.7/0.9): More genes use rand/1 → broader exploration of new regions.
-- Low CR (0.1/0.3): More genes use best/2 → focused refinement of promising solutions.
-- Mid CR (0.5): Balanced exploration/exploitation.
+Higher CR increases the proportion of genes using DE/rand/1, \
+while lower CR increases the proportion using DE/best/2. \
+This generally shifts the search toward exploration or exploitation, respectively.
 
 Your CR choice should be based on the **current optimization state** \
 (diversity, stagnation, convergence speed, trajectory trend), \
