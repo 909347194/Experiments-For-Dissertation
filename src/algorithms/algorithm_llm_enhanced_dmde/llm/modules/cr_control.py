@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""cr_control.py — LLM 交叉率/缩放因子控制模块
+"""cr_control.py — LLM 交叉率控制模块
 
 职责：
-    根据搜索状态 + 上次决策反馈，由 LLM 动态调整 CR/F。
-    闭环控制：每次决策后记录 CR 和效果，下次决策时提供反馈。
+    根据搜索状态 + 上次决策反馈，由 LLM 动态调整 CR。
+    F 完全由 DMDE 公式 3-11 从 CR 自动推导，LLM 不控制 F。
 
 注入点：before_evolve（每代进化前，按 interval 触发）
 """
@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 class LLMCRControlModule(BaseLLMModule):
-    """LLM 交叉率/缩放因子控制模块（闭环反馈版）。"""
+    """LLM 交叉率控制模块（闭环反馈版）。
+
+    LLM 只决定 CR，F 由公式 3-11 自动产生。
+    """
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
@@ -42,12 +45,11 @@ class LLMCRControlModule(BaseLLMModule):
         return "before_evolve"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
-        # 当前搜索状态
+        # 当前搜索状态（不含 F，F 由公式推导，LLM 无需感知）
         features = {
             "generation": state.generation,
             "max_generations": state.max_generations,
             "current_cr": round(state.cr, 4),
-            "current_f": round(state.f_scale, 4),
             "diversity": round(state.diversity, 4),
             "convergence_speed": f"{state.convergence_speed:.6f}",
             "stagnation_count": state.stagnation_count,
@@ -79,35 +81,31 @@ class LLMCRControlModule(BaseLLMModule):
         ]
 
     def parse_response(self, llm_output: str) -> dict[str, Any]:
+        """解析 LLM 输出，只提取 CR 值。"""
         json_str = self._extract_json(llm_output)
         if json_str is None:
-            return {"cr_offset": None, "f_offset": None, "reasoning": "Parse failed"}
+            return {"cr": None, "reasoning": "Parse failed"}
 
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError:
-            return {"cr_offset": None, "f_offset": None, "reasoning": "Invalid JSON"}
+            return {"cr": None, "reasoning": "Invalid JSON"}
 
-        cr_off = self._clamp(data.get("cr_offset"), -0.3, 0.3)
-        f_off = self._clamp(data.get("f_offset"), -0.3, 0.3)
+        cr = self._clamp(data.get("cr"), 0.0, 1.0)
 
         return {
-            "cr_offset": cr_off,
-            "f_offset": f_off,
+            "cr": cr,
             "reasoning": data.get("reasoning", ""),
         }
 
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
-        cr_off = decision.get("cr_offset")
-        f_off = decision.get("f_offset")
+        """将 LLM 决策的 CR 应用到状态。F 由 solver 根据 CR 自动推导。"""
+        cr = decision.get("cr")
 
-        if cr_off is not None:
-            state.cr = float(np.clip(state.cr + cr_off, 0.0, 1.0))
-        if f_off is not None:
-            state.f_scale = float(np.clip(state.f_scale + f_off, 0.0, 2.0))
+        if cr is not None:
+            state.cr = float(np.clip(cr, 0.0, 1.0))
 
-        state.extra["llm_cr_offset"] = cr_off
-        state.extra["llm_f_offset"] = f_off
+        state.extra["llm_cr"] = cr
         return state
 
     @staticmethod
