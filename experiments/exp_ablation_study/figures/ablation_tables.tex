@@ -17,10 +17,7 @@
 \toprule
 场景 & 配置 & Best & Mean $\pm$ Std & Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & \textbf{325672.23} & \textbf{325778.55} $\pm$ 155.46 & \textbf{325672.23} \\
- & +CR Control & \textbf{325672.23} & 325824.78 $\pm$ 123.51 & 325847.82 \\
- & +PopInit & \textbf{325672.23} & 325798.93 $\pm$ 144.89 & 325760.03 \\
- & Full LLM-DMDE & \textbf{325672.23} & 326147.83 $\pm$ 1073.72 & 325847.82 \\
+balanced ($N=M=10$) & +PopInit & 325672.23 & 325672.23 $\pm$ 0.00 & 325672.23 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -33,10 +30,7 @@ balanced ($N=M=10$) & Vanilla DMDE & \textbf{325672.23} & \textbf{325778.55} $\p
 \toprule
 场景 & 配置 & 总耗时(s) & DMDE(s) & LLM总耗时(s) & LLM Init(s) & LLM CR(s) \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 60.5 & 60.5 & --- & --- & --- \\
- & +CR Control & 110.6 & 41.8 & 68.8 & --- & 68.8 \\
- & +PopInit & 111.7 & 59.3 & 52.4 & 52.4 & --- \\
- & Full LLM-DMDE & 155.7 & 41.5 & 114.2 & 47.0 & 67.2 \\
+balanced ($N=M=10$) & +PopInit & 125.5 & 81.0 & 44.5 & 44.5 & --- \\
 \midrule
 \bottomrule
 \end{tabular}
@@ -50,7 +44,7 @@ balanced ($N=M=10$) & Vanilla DMDE & 60.5 & 60.5 & --- & --- & --- \\
 \toprule
 场景 & A3 vs A0 & A3 vs A1 & A3 vs A2 \\
 \midrule
-balanced ($N=M=10$) & 0.2768 n.s. & 0.8090 n.s. & 0.5776 n.s. \\
+balanced ($N=M=10$) & --- & --- & --- \\
 srp ($N=10, M=20$) & --- & --- & --- \\
 \bottomrule
 \end{tabular}
@@ -68,7 +62,6 @@ srp ($N=10, M=20$) & --- & --- & --- \\
 \toprule
 场景 & $\Delta A_1$ (CR) & $\Delta A_2$ (PopInit) & $\Delta A_3$ (Full) & $\Delta A_1 + \Delta A_2$ & 协同比 & 结论 \\
 \midrule
-$S1$ & -46.23 & -20.38 & -369.28 & -66.61 & 5.544 & 协同增益 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -83,10 +76,7 @@ $S1$ & -46.23 & -20.38 & -369.28 & -66.61 & 5.544 & 协同增益 \\
 \toprule
 场景 & 配置 & 达到90\%\改进 & 达到95\%\改进 & 达到99\%\改进 \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 153 & 216 & 296 \\
- & +CR Control & 14 & 19 & 19 \\
- & +PopInit & 0 & 0 & 0 \\
- & Full LLM-DMDE & 0 & 0 & 0 \\
+balanced ($N=M=10$) & +PopInit & 2 & 2 & 18 \\
 \midrule
 \bottomrule
 \end{tabular}
@@ -102,9 +92,7 @@ balanced ($N=M=10$) & Vanilla DMDE & 153 & 216 & 296 \\
 \toprule
 场景 & 配置 & 初始 Mean $\pm$ Std & 初始 Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 380070.43 $\pm$ 14157.41 & 376608.39 \\
- & +PopInit & inf $\pm$ nan & inf \\
- & Full LLM-DMDE & inf $\pm$ nan & inf \\
+balanced ($N=M=10$) & +PopInit & 361831.27 $\pm$ 0.00 & 361831.27 \\
 \midrule
 \bottomrule
 \end{tabular}
