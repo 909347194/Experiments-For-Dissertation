@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 _JSON_FORMAT_COMMON = """\
 ## Output Format
-Think step by step **before** writing the JSON. \\\nRecord your reasoning in the "thought" field, then output the solutions.
+Briefly consider the relevant problem characteristics before generating the solutions. \\\nRecord a concise rationale in the "thought" field, then output the solutions.
 Respond with a JSON object only (no markdown):
 """
 
@@ -51,7 +51,7 @@ _REASONING_GUIDE = """\
 When constructing candidate solutions, consider (MAX 2 sentences):
 1. Difficult or highly constrained targets (few feasible UAVs).
 2. Contested targets and UAV-target cost compatibility.
-3. Overall assignment balance and coverage.
+3. Assignment feasibility, coverage, and cost compatibility.
 4. For SRP: visiting order and transition costs.
 Use these factors as guidance — organize your reasoning as you see fit.
 """
@@ -67,8 +67,8 @@ _OUTPUT_VALIDATION = """\
 ## CRITICAL: Keep Response Concise
 - "thought": 1-2 sentences MAX. Do NOT explain every assignment.
 - "reasoning": 1 sentence MAX.
-- Do NOT add extra commentary, markdown, or text outside the JSON.
-- Output ONLY the JSON object. No preamble, no explanation after.
+- Keep the response concise and avoid unnecessary explanation.
+- Output ONLY the JSON object. No preamble, no extra text.
 """
 
 
@@ -310,7 +310,6 @@ IMPORTANT CONSTRAINTS:
 - "thought": MAX 2 sentences. State strategy only, do NOT explain each assignment.
 - "reasoning": MAX 1 sentence.
 - Output ONLY the JSON object. No markdown, no preamble, no extra text.
-- Keep total response under 2000 characters.
 """
 
 
