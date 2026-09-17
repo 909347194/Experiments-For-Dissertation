@@ -1,16 +1,15 @@
-# A2: 仅启用 PopInit — SiliconFlow Qwen3.5-9B
+# A2: 仅启用 PopInit — SiliconFlow Qwen3-14B
 #
-# ⚠️ Qwen3.5/3.6/3 系列在 SiliconFlow 上：顶层 enable_thinking 字段被忽略
-# （仅 Qwen3-8B/14B/32B/30B-A3B/235B-A22B 等白名单模型生效）。
-# 必须通过 extra_body.chat_template_kwargs 嵌套字段才能真正关闭思考。
+# Qwen3-14B 在 SiliconFlow enable_thinking 白名单内（与 Qwen3-8B/32B 等并列），
+# 顶层 enable_thinking 与嵌套 chat_template_kwargs 两种形式均能关闭思考。
 
 provider: siliconflow
-model: Qwen/Qwen3.5-9B
+model: Qwen/Qwen3-14B
 temperature: 0.4
 max_tokens: 32768
 timeout: 180
 
-# 关闭思考（Qwen3.5/3.6 系列必需，使用嵌套形式）
+# 关闭思考（使用嵌套 chat_template_kwargs 形式，与顶层字段等价）
 extra_body:
   chat_template_kwargs:
     enable_thinking: false
