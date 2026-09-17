@@ -1,0 +1,1212 @@
+[
+  {
+    "generation": 0,
+    "module": "population_init",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in UAV-target assignment optimization.\n\nTask: Generate candidate assignment plans for a **balanced** UAV-target problem (N == M, one-to-one mapping). The solver will convert your assignments into an evolutionary algorithm's internal encoding, so you only need to produce **discrete assignments**.\n\n## Output Format\nBriefly consider the relevant problem characteristics before generating the solutions. \\\nRecord a concise rationale in the \"thought\" field, then output the solutions.\nRespond with a JSON object only (no markdown):\n\n{\n    \"thought\": \"<brief reasoning: difficult targets, contested targets, assignment strategy>\",\n    \"solutions\": [\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [0]},\n                {\"uav\": 2, \"targets\": [1]}\n            ]\n        }\n    ],\n    \"reasoning\": \"<brief explanation>\"\n}\n\nEach \"solution\" is a **complete one-to-one assignment** covering ALL N UAVs.\n\n## Rules (balanced: N == M)\n- Each solution has exactly N assignments (one per UAV).\n- Each UAV appears exactly once, each target appears exactly once.\n- Each \"targets\" list has exactly 1 element.\n- This is a **permutation problem**: find the best UAV→Target matching.\n\n## Reasoning (in the \"thought\" field)\nWhen constructing candidate solutions, consider (MAX 2 sentences):\n1. Difficult or highly constrained targets (few feasible UAVs).\n2. Contested targets and UAV-target cost compatibility.\n3. Assignment feasibility, coverage, and cost compatibility.\n4. For SRP: visiting order and transition costs.\nUse these factors as guidance — organize your reasoning as you see fit.\n\n## Output Validation\n- Each solution must contain exactly N assignments (one per UAV).\n- UAV IDs must be in [0, N-1], target IDs in [0, M-1].\n- For balanced/overloaded: each \"targets\" list has exactly 1 element.\n- For srp: each \"targets\" list has >= 1 elements, no duplicate targets across solutions.\n- Invalid outputs will be rejected. Double-check before responding.\n\n## CRITICAL: Keep Response Concise\n- \"thought\": 1-2 sentences MAX. Do NOT explain every assignment.\n- \"reasoning\": 1 sentence MAX.\n- Keep the response concise and avoid unnecessary explanation.\n- Output ONLY the JSON object. No preamble, no extra text.\n\n## Guidelines\n- Focus on minimizing total assignment cost.\n- Use TopKTargets_per_UAV and TopKUAVs_per_target to identify low-cost assignments.\n- Pay attention to contested_targets and difficult_targets — these are often the key differentiators between good and poor solutions.\n\n"
+      },
+      {
+        "role": "user",
+        "content": "## Problem (S_problem)\n{\n  \"problem_structure\": {\n    \"N\": 10,\n    \"M\": 10,\n    \"model_type\": \"balanced\",\n    \"pop_size\": 50,\n    \"requested_candidates\": 10\n  },\n  \"global_summary\": {\n    \"problem_scale\": {\n      \"N\": 10,\n      \"M\": 10,\n      \"model_type\": \"balanced\"\n    },\n    \"cost_statistics\": {\n      \"C_UT\": {\n        \"min\": 9560.61,\n        \"max\": 43664.26,\n        \"mean\": 22848.35,\n        \"std\": 6932.58\n      }\n    },\n    \"feasibility_statistics\": {\n      \"infeasible_pairs_pct\": 0.0,\n      \"targets_with_few_feasible_UAVs\": 0,\n      \"UAVs_with_few_feasible_targets\": 0\n    }\n  },\n  \"local_preference_structure\": {\n    \"TopKTargets_per_UAV\": [\n      {\n        \"uav\": 0,\n        \"top_targets\": [\n          {\n            \"target\": 2,\n            \"cost\": 12118.36\n          },\n          {\n            \"target\": 6,\n            \"cost\": 13311.21\n          },\n          {\n            \"target\": 0,\n            \"cost\": 14446.07\n          }\n        ]\n      },\n      {\n        \"uav\": 1,\n        \"top_targets\": [\n          {\n            \"target\": 5,\n            \"cost\": 12440.7\n          },\n          {\n            \"target\": 3,\n            \"cost\": 16147.74\n          },\n          {\n            \"target\": 8,\n            \"cost\": 16872.27\n          }\n        ]\n      },\n      {\n        \"uav\": 2,\n        \"top_targets\": [\n          {\n            \"target\": 8,\n            \"cost\": 14254.76\n          },\n          {\n            \"target\": 5,\n            \"cost\": 14498.17\n          },\n          {\n            \"target\": 3,\n            \"cost\": 14729.2\n          }\n        ]\n      },\n      {\n        \"uav\": 3,\n        \"top_targets\": [\n          {\n            \"target\": 7,\n            \"cost\": 13926.02\n          },\n          {\n            \"target\": 0,\n            \"cost\": 18958.07\n          },\n          {\n            \"target\": 5,\n            \"cost\": 21193.34\n          }\n        ]\n      },\n      {\n        \"uav\": 4,\n        \"top_targets\": [\n          {\n            \"target\": 5,\n            \"cost\": 9560.61\n          },\n          {\n            \"target\": 6,\n            \"cost\": 20516.34\n          },\n          {\n            \"target\": 3,\n            \"cost\": 21908.84\n          }\n        ]\n      },\n      {\n        \"uav\": 5,\n        \"top_targets\": [\n          {\n            \"target\": 1,\n            \"cost\": 11447.45\n          },\n          {\n            \"target\": 6,\n            \"cost\": 15024.2\n          },\n          {\n            \"target\": 5,\n            \"cost\": 20404.98\n          }\n        ]\n      },\n      {\n        \"uav\": 6,\n        \"top_targets\": [\n          {\n            \"target\": 0,\n            \"cost\": 12732.73\n          },\n          {\n            \"target\": 2,\n            \"cost\": 13672.91\n          },\n          {\n            \"target\": 6,\n            \"cost\": 15166.52\n          }\n        ]\n      },\n      {\n        \"uav\": 7,\n        \"top_targets\": [\n          {\n            \"target\": 7,\n            \"cost\": 13315.81\n          },\n          {\n            \"target\": 0,\n            \"cost\": 18172.27\n          },\n          {\n            \"target\": 5,\n            \"cost\": 20954.41\n          }\n        ]\n      },\n      {\n        \"uav\": 8,\n        \"top_targets\": [\n          {\n            \"target\": 1,\n            \"cost\": 12972.87\n          },\n          {\n            \"target\": 6,\n            \"cost\": 13634.48\n          },\n          {\n            \"target\": 5,\n            \"cost\": 17993.77\n          }\n        ]\n      },\n      {\n        \"uav\": 9,\n        \"top_targets\": [\n          {\n            \"target\": 3,\n            \"cost\": 15933.05\n          },\n          {\n            \"target\": 5,\n            \"cost\": 17043.92\n          },\n          {\n            \"target\": 8,\n            \"cost\": 17084.73\n          }\n        ]\n      }\n    ],\n    \"TopKUAVs_per_target\": [\n      {\n        \"target\": 0,\n        \"top_uavs\": [\n          {\n            \"uav\": 6,\n            \"cost\": 12732.73\n          },\n          {\n            \"uav\": 0,\n            \"cost\": 14446.07\n          },\n          {\n            \"uav\": 7,\n            \"cost\": 18172.27\n          }\n        ]\n      },\n      {\n        \"target\": 1,\n        \"top_uavs\": [\n          {\n            \"uav\": 5,\n            \"cost\": 11447.45\n          },\n          {\n            \"uav\": 8,\n            \"cost\": 12972.87\n          },\n          {\n            \"uav\": 0,\n            \"cost\": 15483.29\n          }\n        ]\n      },\n      {\n        \"target\": 2,\n        \"top_uavs\": [\n          {\n            \"uav\": 0,\n            \"cost\": 12118.36\n          },\n          {\n            \"uav\": 6,\n            \"cost\": 13672.91\n          },\n          {\n            \"uav\": 5,\n            \"cost\": 20572.64\n          }\n        ]\n      },\n      {\n        \"target\": 3,\n        \"top_uavs\": [\n          {\n            \"uav\": 2,\n            \"cost\": 14729.2\n          },\n          {\n            \"uav\": 9,\n            \"cost\": 15933.05\n          },\n          {\n            \"uav\": 1,\n            \"cost\": 16147.74\n          }\n        ]\n      },\n      {\n        \"target\": 4,\n        \"top_uavs\": [\n          {\n            \"uav\": 6,\n            \"cost\": 16491.2\n          },\n          {\n            \"uav\": 0,\n            \"cost\": 19738.05\n          },\n          {\n            \"uav\": 9,\n            \"cost\": 28314.16\n          }\n        ]\n      },\n      {\n        \"target\": 5,\n        \"top_uavs\": [\n          {\n            \"uav\": 4,\n            \"cost\": 9560.61\n          },\n          {\n            \"uav\": 1,\n            \"cost\": 12440.7\n          },\n          {\n            \"uav\": 2,\n            \"cost\": 14498.17\n          }\n        ]\n      },\n      {\n        \"target\": 6,\n        \"top_uavs\": [\n          {\n            \"uav\": 0,\n            \"cost\": 13311.21\n          },\n          {\n            \"uav\": 8,\n            \"cost\": 13634.48\n          },\n          {\n            \"uav\": 5,\n            \"cost\": 15024.2\n          }\n        ]\n      },\n      {\n        \"target\": 7,\n        \"top_uavs\": [\n          {\n            \"uav\": 7,\n            \"cost\": 13315.81\n          },\n          {\n            \"uav\": 3,\n            \"cost\": 13926.02\n          },\n          {\n            \"uav\": 9,\n            \"cost\": 18276.3\n          }\n        ]\n      },\n      {\n        \"target\": 8,\n        \"top_uavs\": [\n          {\n            \"uav\": 2,\n            \"cost\": 14254.76\n          },\n          {\n            \"uav\": 1,\n            \"cost\": 16872.27\n          },\n          {\n            \"uav\": 9,\n            \"cost\": 17084.73\n          }\n        ]\n      },\n      {\n        \"target\": 9,\n        \"top_uavs\": [\n          {\n            \"uav\": 6,\n            \"cost\": 22518.95\n          },\n          {\n            \"uav\": 0,\n            \"cost\": 25129.3\n          },\n          {\n            \"uav\": 7,\n            \"cost\": 32231.2\n          }\n        ]\n      }\n    ],\n    \"contested_targets\": [\n      {\n        \"target\": 5,\n        \"preferred_by_count\": 8\n      },\n      {\n        \"target\": 6,\n        \"preferred_by_count\": 5\n      },\n      {\n        \"target\": 0,\n        \"preferred_by_count\": 4\n      },\n      {\n        \"target\": 3,\n        \"preferred_by_count\": 4\n      },\n      {\n        \"target\": 8,\n        \"preferred_by_count\": 3\n      },\n      {\n        \"target\": 2,\n        \"preferred_by_count\": 2\n      }\n    ],\n    \"difficult_targets\": []\n  },\n  \"cost_matrix\": {\n    \"C_UT\": [\n      [\n        14446.07,\n        15483.29,\n        12118.36,\n        24750.05,\n        19738.05,\n        21447.36,\n        13311.21,\n        25534.97,\n        28997.54,\n        25129.3\n      ],\n      [\n        21935.85,\n        22256.36,\n        25636.96,\n        16147.74,\n        33293.15,\n        12440.7,\n        18888.85,\n        24316.59,\n        16872.27,\n        38527.41\n      ],\n      [\n        20690.73,\n        23188.15,\n        25254.45,\n        14729.2,\n        31672.29,\n        14498.17,\n        19526.06,\n        21352.02,\n        14254.76,\n        36502.47\n      ],\n      [\n        18958.07,\n        27830.27,\n        27450.49,\n        23313.12,\n        31246.77,\n        21193.34,\n        23920.79,\n        13926.02,\n        21760.35,\n        33578.28\n      ],\n      [\n        25033.35,\n        22701.69,\n        28384.13,\n        21908.84,\n        37824.67,\n        9560.61,\n        20516.34,\n        29658.84,\n        22685.42,\n        43664.26\n      ],\n      [\n        20871.0,\n        11447.45,\n        20572.64,\n        28337.77,\n        30551.59,\n        20404.98,\n        15024.2,\n        32122.61,\n        32304.13,\n        35864.13\n      ],\n      [\n        12732.73,\n        18106.78,\n        13672.91,\n        24705.45,\n        16491.2,\n        22118.17,\n        15166.52,\n        22852.17,\n        28449.4,\n        22518.95\n      ],\n      [\n        18172.27,\n        26840.76,\n        26220.01,\n        22493.12,\n        29739.01,\n        20954.41,\n        22862.03,\n        13315.81,\n        21518.17,\n        32231.2\n      ],\n      [\n        20721.51,\n        12972.87,\n        20650.8,\n        24923.99,\n        29926.93,\n        17993.77,\n        13634.48,\n        30162.9,\n        28853.96,\n        35694.76\n      ],\n      [\n        18344.3,\n        22775.84,\n        23436.48,\n        15933.05,\n        28314.16,\n        17043.92,\n        18785.31,\n        18276.3,\n        17084.73,\n        32586.97\n      ]\n    ],\n    \"C_TT\": null,\n    \"note\": \"Only included when N*M is small enough. Otherwise rely on global_summary + local_preferences.\"\n  },\n  \"constraints\": {\n    \"objective\": \"minimize total assignment cost\",\n    \"coverage\": \"all targets must be covered\",\n    \"uniqueness\": \"each UAV assigned to exactly one target, each target assigned to exactly one UAV\",\n    \"format\": \"each assignment has exactly 1 target in 'targets' list\"\n  },\n  \"objectives\": {\n    \"direction\": \"minimize\",\n    \"description\": \"Minimize total distance + alpha * max_flight_time + beta * constraint_violation_penalty\"\n  }\n}\n\n## Task\nGenerate exactly 10 complete assignment solutions. Each solution must cover ALL 10 UAVs and satisfy all constraints for the 'balanced' model type.\n\nIMPORTANT CONSTRAINTS:\n- \"thought\": MAX 2 sentences. State strategy only, do NOT explain each assignment.\n- \"reasoning\": MAX 1 sentence.\n- Output ONLY the JSON object. No markdown, no preamble, no extra text.\n"
+      }
+    ],
+    "raw_output": "{\n    \"thought\": \"Prioritize UAV-target pairs with the lowest costs, especially for contested targets like target 5, which is preferred by 8 UAVs. Ensure one-to-one mapping with minimal total cost by leveraging top UAVs and targets from the local preference structure.\",\n    \"solutions\": [\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [5]},\n                {\"uav\": 2, \"targets\": [8]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [5]},\n                {\"uav\": 5, \"targets\": [1]},\n                {\"uav\": 6, \"targets\": [0]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [6]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [6]},\n                {\"uav\": 1, \"targets\": [3]},\n                {\"uav\": 2, \"targets\": [5]},\n                {\"uav\": 3, \"targets\": [0]},\n                {\"uav\": 4, \"targets\": [6]},\n                {\"uav\": 5, \"targets\": [5]},\n                {\"uav\": 6, \"targets\": [2]},\n                {\"uav\": 7, \"targets\": [8]},\n                {\"uav\": 8, \"targets\": [1]},\n                {\"uav\": 9, \"targets\": [7]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [8]},\n                {\"uav\": 2, \"targets\": [5]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [5]},\n                {\"uav\": 5, \"targets\": [6]},\n                {\"uav\": 6, \"targets\": [0]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [1]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [5]},\n                {\"uav\": 2, \"targets\": [8]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [6]},\n                {\"uav\": 5, \"targets\": [1]},\n                {\"uav\": 6, \"targets\": [0]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [6]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [5]},\n                {\"uav\": 2, \"targets\": [8]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [5]},\n                {\"uav\": 5, \"targets\": [1]},\n                {\"uav\": 6, \"targets\": [6]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [0]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [6]},\n                {\"uav\": 1, \"targets\": [5]},\n                {\"uav\": 2, \"targets\": [8]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [5]},\n                {\"uav\": 5, \"targets\": [1]},\n                {\"uav\": 6, \"targets\": [0]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [2]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [8]},\n                {\"uav\": 2, \"targets\": [5]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [6]},\n                {\"uav\": 5, \"targets\": [1]},\n                {\"uav\": 6, \"targets\": [0]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [5]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [3]},\n                {\"uav\": 2, \"targets\": [5]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [5]},\n                {\"uav\": 5, \"targets\": [6]},\n                {\"uav\": 6, \"targets\": [0]},\n                {\"uav\": 7, \"targets\": [8]},\n                {\"uav\": 8, \"targets\": [1]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [5]},\n                {\"uav\": 2, \"targets\": [8]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [6]},\n                {\"uav\": 5, \"targets\": [1]},\n                {\"uav\": 6, \"targets\": [0]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [6]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        },\n        {\n            \"assignments\": [\n                {\"uav\": 0, \"targets\": [2]},\n                {\"uav\": 1, \"targets\": [5]},\n                {\"uav\": 2, \"targets\": [8]},\n                {\"uav\": 3, \"targets\": [7]},\n                {\"uav\": 4, \"targets\": [5]},\n                {\"uav\": 5, \"targets\": [1]},\n                {\"uav\": 6, \"targets\": [6]},\n                {\"uav\": 7, \"targets\": [3]},\n                {\"uav\": 8, \"targets\": [0]},\n                {\"uav\": 9, \"targets\": [4]}\n            ]\n        }\n    ],\n    \"reasoning\": \"The solutions are generated to minimize total assignment cost by prioritizing UAV-target pairs with the lowest individual costs and ensuring all targets are uniquely assigned.\"\n}",
+    "parsed_decision": {
+      "solutions": [
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              7
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ],
+        [
+          {
+            "uav": 0,
+            "targets": [
+              2
+            ]
+          },
+          {
+            "uav": 1,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 2,
+            "targets": [
+              8
+            ]
+          },
+          {
+            "uav": 3,
+            "targets": [
+              7
+            ]
+          },
+          {
+            "uav": 4,
+            "targets": [
+              5
+            ]
+          },
+          {
+            "uav": 5,
+            "targets": [
+              1
+            ]
+          },
+          {
+            "uav": 6,
+            "targets": [
+              6
+            ]
+          },
+          {
+            "uav": 7,
+            "targets": [
+              3
+            ]
+          },
+          {
+            "uav": 8,
+            "targets": [
+              0
+            ]
+          },
+          {
+            "uav": 9,
+            "targets": [
+              4
+            ]
+          }
+        ]
+      ],
+      "thought": "Prioritize UAV-target pairs with the lowest costs, especially for contested targets like target 5, which is preferred by 8 UAVs. Ensure one-to-one mapping with minimal total cost by leveraging top UAVs and targets from the local preference structure.",
+      "reasoning": "The solutions are generated to minimize total assignment cost by prioritizing UAV-target pairs with the lowest individual costs and ensuring all targets are uniquely assigned."
+    },
+    "reasoning": "The solutions are generated to minimize total assignment cost by prioritizing UAV-target pairs with the lowest individual costs and ensuring all targets are uniquely assigned.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 55.09,
+    "_run_seed": 50
+  },
+  {
+    "generation": 50,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 50,\n  \"max_generations\": 1000,\n  \"temperature\": 0.95,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 351557.38822508464,\n  \"mean_fitness\": 390657.6066503306,\n  \"diversity\": 0.6321,\n  \"gene_variance\": 44997324.26,\n  \"convergence_speed\": \"0.000998\",\n  \"stagnation_count\": 0,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 390657.60665,\n  \"violation_max\": 425182.324496,\n  \"current_cr\": 0.8184,\n  \"current_f\": 1.4694\n}\n\n## Recent Trajectory\n  gen=0: fitness=inf, div=0.000, stag=0, last_decision=population_init\n  gen=10: fitness=364015.5, div=0.650, stag=3\n  gen=20: fitness=364015.5, div=0.653, stag=10\n  gen=30: fitness=355679.6, div=0.640, stag=3\n  gen=40: fitness=355099.6, div=0.638, stag=2\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The current CR is 0.8184, which is relatively high, suggesting a focus on exploitation. However, the diversity is still moderate (0.6321) and the convergence speed is slow (0.000998). Reducing CR to 0.7 will slightly increase exploration by allowing more genes to be replaced with DE/rand/1, helping maintain diversity and potentially avoiding premature convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The current CR is 0.8184, which is relatively high, suggesting a focus on exploitation. However, the diversity is still moderate (0.6321) and the convergence speed is slow (0.000998). Reducing CR to 0.7 will slightly increase exploration by allowing more genes to be replaced with DE/rand/1, helping maintain diversity and potentially avoiding premature convergence."
+    },
+    "reasoning": "The current CR is 0.8184, which is relatively high, suggesting a focus on exploitation. However, the diversity is still moderate (0.6321) and the convergence speed is slow (0.000998). Reducing CR to 0.7 will slightly increase exploration by allowing more genes to be replaced with DE/rand/1, helping maintain diversity and potentially avoiding premature convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 3.878,
+    "_run_seed": 50
+  },
+  {
+    "generation": 100,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 100,\n  \"max_generations\": 1000,\n  \"temperature\": 0.9,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 333251.24226258055,\n  \"mean_fitness\": 370990.21080873633,\n  \"diversity\": 0.588,\n  \"gene_variance\": 33113847.77,\n  \"convergence_speed\": \"0.004509\",\n  \"stagnation_count\": 0,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 370990.210809,\n  \"violation_max\": 393098.703975,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.19\n}\n\n## Recent Trajectory\n  gen=50: fitness=351557.4, div=0.632, stag=1\n  gen=60: fitness=348985.9, div=0.627, stag=7\n  gen=70: fitness=348985.9, div=0.621, stag=10\n  gen=80: fitness=348985.9, div=0.615, stag=10\n  gen=90: fitness=348985.9, div=0.595, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The current diversity is 0.588, which is lower than earlier generations (e.g., 0.632 at gen=50), indicating a potential loss of diversity. While the feasible ratio is 1.0 and there is no stagnation, the convergence speed is slow. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) and decrease DE/rand/1 (exploration), helping to accelerate convergence while maintaining enough diversity to avoid premature convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The current diversity is 0.588, which is lower than earlier generations (e.g., 0.632 at gen=50), indicating a potential loss of diversity. While the feasible ratio is 1.0 and there is no stagnation, the convergence speed is slow. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) and decrease DE/rand/1 (exploration), helping to accelerate convergence while maintaining enough diversity to avoid premature convergence."
+    },
+    "reasoning": "The current diversity is 0.588, which is lower than earlier generations (e.g., 0.632 at gen=50), indicating a potential loss of diversity. While the feasible ratio is 1.0 and there is no stagnation, the convergence speed is slow. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) and decrease DE/rand/1 (exploration), helping to accelerate convergence while maintaining enough diversity to avoid premature convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 4.754,
+    "_run_seed": 50
+  },
+  {
+    "generation": 150,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 150,\n  \"max_generations\": 1000,\n  \"temperature\": 0.85,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 326051.589446752,\n  \"mean_fitness\": 354214.8881787818,\n  \"diversity\": 0.5705,\n  \"gene_variance\": 25755158.14,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 354214.888179,\n  \"violation_max\": 373928.654288,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.885\n}\n\n## Recent Trajectory\n  gen=100: fitness=333251.2, div=0.592, stag=1\n  gen=110: fitness=326051.6, div=0.606, stag=5\n  gen=120: fitness=326051.6, div=0.593, stag=10\n  gen=130: fitness=326051.6, div=0.596, stag=10\n  gen=140: fitness=326051.6, div=0.579, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The current search state shows stagnation_count of 10, indicating the population has not improved for several generations. While diversity is relatively high (0.5705), the convergence_speed is zero, suggesting the algorithm may be stuck. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to diversify the search and potentially escape local optima.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The current search state shows stagnation_count of 10, indicating the population has not improved for several generations. While diversity is relatively high (0.5705), the convergence_speed is zero, suggesting the algorithm may be stuck. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to diversify the search and potentially escape local optima."
+    },
+    "reasoning": "The current search state shows stagnation_count of 10, indicating the population has not improved for several generations. While diversity is relatively high (0.5705), the convergence_speed is zero, suggesting the algorithm may be stuck. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to diversify the search and potentially escape local optima.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 3.079,
+    "_run_seed": 50
+  },
+  {
+    "generation": 200,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 200,\n  \"max_generations\": 1000,\n  \"temperature\": 0.8,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 326051.589446752,\n  \"mean_fitness\": 349938.5260732483,\n  \"diversity\": 0.6168,\n  \"gene_variance\": 24274108.84,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 349938.526073,\n  \"violation_max\": 369488.620527,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.205\n}\n\n## Recent Trajectory\n  gen=150: fitness=326051.6, div=0.570, stag=10\n  gen=160: fitness=326051.6, div=0.565, stag=10\n  gen=170: fitness=326051.6, div=0.562, stag=10\n  gen=180: fitness=326051.6, div=0.567, stag=10\n  gen=190: fitness=326051.6, div=0.582, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The current diversity is moderate (0.6168), but the trajectory shows minimal improvement in fitness and consistent stagnation (10 generations). This suggests the population may be converging too slowly or getting stuck in a local optimum. Lowering CR from 0.7 to 0.5 will increase the use of DE/best/2, promoting exploitation of better solutions while still maintaining some diversity through DE/rand/1.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The current diversity is moderate (0.6168), but the trajectory shows minimal improvement in fitness and consistent stagnation (10 generations). This suggests the population may be converging too slowly or getting stuck in a local optimum. Lowering CR from 0.7 to 0.5 will increase the use of DE/best/2, promoting exploitation of better solutions while still maintaining some diversity through DE/rand/1."
+    },
+    "reasoning": "The current diversity is moderate (0.6168), but the trajectory shows minimal improvement in fitness and consistent stagnation (10 generations). This suggests the population may be converging too slowly or getting stuck in a local optimum. Lowering CR from 0.7 to 0.5 will increase the use of DE/best/2, promoting exploitation of better solutions while still maintaining some diversity through DE/rand/1.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.86,
+    "_run_seed": 50
+  },
+  {
+    "generation": 250,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 250,\n  \"max_generations\": 1000,\n  \"temperature\": 0.75,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 345491.2319304704,\n  \"diversity\": 0.6006,\n  \"gene_variance\": 22277185.74,\n  \"convergence_speed\": \"0.000116\",\n  \"stagnation_count\": 3,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 345491.23193,\n  \"violation_max\": 360681.459064,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.87\n}\n\n## Recent Trajectory\n  gen=200: fitness=326051.6, div=0.618, stag=10\n  gen=210: fitness=326051.6, div=0.608, stag=10\n  gen=220: fitness=326051.6, div=0.614, stag=10\n  gen=230: fitness=326051.6, div=0.616, stag=10\n  gen=240: fitness=326051.6, div=0.614, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The current generation (250) is in the middle of the optimization process, and the diversity (0.6006) is moderate. However, the recent trajectory shows stagnation in fitness (326051.6) for several generations, indicating the population may be converging too slowly. Increasing CR to 0.7 will favor exploration (DE/rand/1) more than exploitation (DE/best/2), helping maintain diversity and potentially escape local optima to improve convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The current generation (250) is in the middle of the optimization process, and the diversity (0.6006) is moderate. However, the recent trajectory shows stagnation in fitness (326051.6) for several generations, indicating the population may be converging too slowly. Increasing CR to 0.7 will favor exploration (DE/rand/1) more than exploitation (DE/best/2), helping maintain diversity and potentially escape local optima to improve convergence."
+    },
+    "reasoning": "The current generation (250) is in the middle of the optimization process, and the diversity (0.6006) is moderate. However, the recent trajectory shows stagnation in fitness (326051.6) for several generations, indicating the population may be converging too slowly. Increasing CR to 0.7 will favor exploration (DE/rand/1) more than exploitation (DE/best/2), helping maintain diversity and potentially escape local optima to improve convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 5.968,
+    "_run_seed": 50
+  },
+  {
+    "generation": 300,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 300,\n  \"max_generations\": 1000,\n  \"temperature\": 0.7,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 343719.7095415771,\n  \"diversity\": 0.6064,\n  \"gene_variance\": 22674973.34,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 343719.709542,\n  \"violation_max\": 360681.459064,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.22\n}\n\n## Recent Trajectory\n  gen=250: fitness=325672.2, div=0.601, stag=4\n  gen=260: fitness=325672.2, div=0.605, stag=10\n  gen=270: fitness=325672.2, div=0.605, stag=10\n  gen=280: fitness=325672.2, div=0.597, stag=10\n  gen=290: fitness=325672.2, div=0.601, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The population has been stagnating for 10 generations with no improvement in best_fitness. While diversity remains relatively high (~0.6), the current CR of 0.7 may be favoring exploration over exploitation. Reducing CR to 0.5 will increase the likelihood of using DE/best/2, which can help refine the current solutions and potentially escape the stagnation by focusing more on exploitation.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The population has been stagnating for 10 generations with no improvement in best_fitness. While diversity remains relatively high (~0.6), the current CR of 0.7 may be favoring exploration over exploitation. Reducing CR to 0.5 will increase the likelihood of using DE/best/2, which can help refine the current solutions and potentially escape the stagnation by focusing more on exploitation."
+    },
+    "reasoning": "The population has been stagnating for 10 generations with no improvement in best_fitness. While diversity remains relatively high (~0.6), the current CR of 0.7 may be favoring exploration over exploitation. Reducing CR to 0.5 will increase the likelihood of using DE/best/2, which can help refine the current solutions and potentially escape the stagnation by focusing more on exploitation.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.719,
+    "_run_seed": 50
+  },
+  {
+    "generation": 350,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 350,\n  \"max_generations\": 1000,\n  \"temperature\": 0.65,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 341425.7379270932,\n  \"diversity\": 0.5948,\n  \"gene_variance\": 21885884.89,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 341425.737927,\n  \"violation_max\": 360681.459064,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.855\n}\n\n## Recent Trajectory\n  gen=300: fitness=325672.2, div=0.614, stag=10\n  gen=310: fitness=325672.2, div=0.613, stag=10\n  gen=320: fitness=325672.2, div=0.601, stag=10\n  gen=330: fitness=325672.2, div=0.600, stag=10\n  gen=340: fitness=325672.2, div=0.595, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity has been gradually decreasing, indicating the population may be converging prematurely. Increasing CR to 0.7 will promote exploration by replacing more genes with DE/rand/1, helping to escape local optima and maintain diversity in the search space.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity has been gradually decreasing, indicating the population may be converging prematurely. Increasing CR to 0.7 will promote exploration by replacing more genes with DE/rand/1, helping to escape local optima and maintain diversity in the search space."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity has been gradually decreasing, indicating the population may be converging prematurely. Increasing CR to 0.7 will promote exploration by replacing more genes with DE/rand/1, helping to escape local optima and maintain diversity in the search space.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.303,
+    "_run_seed": 50
+  },
+  {
+    "generation": 400,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 400,\n  \"max_generations\": 1000,\n  \"temperature\": 0.6,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 340596.73742547736,\n  \"diversity\": 0.5796,\n  \"gene_variance\": 20829000.96,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 340596.737425,\n  \"violation_max\": 360452.437154,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.145\n}\n\n## Recent Trajectory\n  gen=350: fitness=325672.2, div=0.595, stag=10\n  gen=360: fitness=325672.2, div=0.591, stag=10\n  gen=370: fitness=325672.2, div=0.594, stag=10\n  gen=380: fitness=325672.2, div=0.587, stag=10\n  gen=390: fitness=325672.2, div=0.587, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best fitness, and diversity is gradually decreasing. Lowering CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while still allowing some exploration via DE/rand/1, helping to break stagnation and maintain sufficient diversity for further convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness, and diversity is gradually decreasing. Lowering CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while still allowing some exploration via DE/rand/1, helping to break stagnation and maintain sufficient diversity for further convergence."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness, and diversity is gradually decreasing. Lowering CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while still allowing some exploration via DE/rand/1, helping to break stagnation and maintain sufficient diversity for further convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 3.524,
+    "_run_seed": 50
+  },
+  {
+    "generation": 450,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 450,\n  \"max_generations\": 1000,\n  \"temperature\": 0.55,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 338857.5054674513,\n  \"diversity\": 0.5668,\n  \"gene_variance\": 19906870.84,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 338857.505467,\n  \"violation_max\": 355523.936771,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.845\n}\n\n## Recent Trajectory\n  gen=400: fitness=325672.2, div=0.583, stag=10\n  gen=410: fitness=325672.2, div=0.583, stag=10\n  gen=420: fitness=325672.2, div=0.579, stag=10\n  gen=430: fitness=325672.2, div=0.569, stag=10\n  gen=440: fitness=325672.2, div=0.567, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity is decreasing (from 0.583 to 0.567), indicating premature convergence. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to diversify the population and escape local optima.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity is decreasing (from 0.583 to 0.567), indicating premature convergence. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to diversify the population and escape local optima."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity is decreasing (from 0.583 to 0.567), indicating premature convergence. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to diversify the population and escape local optima.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 3.446,
+    "_run_seed": 50
+  },
+  {
+    "generation": 500,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 500,\n  \"max_generations\": 1000,\n  \"temperature\": 0.5,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 337500.11527974816,\n  \"diversity\": 0.6433,\n  \"gene_variance\": 19211274.82,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 337500.11528,\n  \"violation_max\": 349812.851997,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.1\n}\n\n## Recent Trajectory\n  gen=450: fitness=325672.2, div=0.633, stag=10\n  gen=460: fitness=325672.2, div=0.636, stag=10\n  gen=470: fitness=325672.2, div=0.597, stag=10\n  gen=480: fitness=325672.2, div=0.596, stag=10\n  gen=490: fitness=325672.2, div=0.598, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best fitness. Diversity is moderate (0.6433), but it has been fluctuating slightly. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2, promoting exploitation to escape stagnation while still maintaining enough diversity to avoid premature convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness. Diversity is moderate (0.6433), but it has been fluctuating slightly. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2, promoting exploitation to escape stagnation while still maintaining enough diversity to avoid premature convergence."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness. Diversity is moderate (0.6433), but it has been fluctuating slightly. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2, promoting exploitation to escape stagnation while still maintaining enough diversity to avoid premature convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 7.522,
+    "_run_seed": 50
+  },
+  {
+    "generation": 550,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 550,\n  \"max_generations\": 1000,\n  \"temperature\": 0.45,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 336605.9552693148,\n  \"diversity\": 0.6468,\n  \"gene_variance\": 19455342.89,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 336605.955269,\n  \"violation_max\": 349812.851997,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.885\n}\n\n## Recent Trajectory\n  gen=500: fitness=325672.2, div=0.643, stag=10\n  gen=510: fitness=325672.2, div=0.649, stag=10\n  gen=520: fitness=325672.2, div=0.647, stag=10\n  gen=530: fitness=325672.2, div=0.647, stag=10\n  gen=540: fitness=325672.2, div=0.647, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in fitness. While diversity is moderate (0.6468), the current CR of 0.5 may not be sufficiently promoting exploration. Increasing CR to 0.7 will allow more genes to be replaced by the DE/rand/1 strategy, enhancing exploration and potentially breaking the stagnation by introducing more variation in the permutation space.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in fitness. While diversity is moderate (0.6468), the current CR of 0.5 may not be sufficiently promoting exploration. Increasing CR to 0.7 will allow more genes to be replaced by the DE/rand/1 strategy, enhancing exploration and potentially breaking the stagnation by introducing more variation in the permutation space."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in fitness. While diversity is moderate (0.6468), the current CR of 0.5 may not be sufficiently promoting exploration. Increasing CR to 0.7 will allow more genes to be replaced by the DE/rand/1 strategy, enhancing exploration and potentially breaking the stagnation by introducing more variation in the permutation space.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.672,
+    "_run_seed": 50
+  },
+  {
+    "generation": 600,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 600,\n  \"max_generations\": 1000,\n  \"temperature\": 0.4,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 335340.1353679283,\n  \"diversity\": 0.634,\n  \"gene_variance\": 18996735.83,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 335340.135368,\n  \"violation_max\": 346163.016781,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.265\n}\n\n## Recent Trajectory\n  gen=550: fitness=325672.2, div=0.647, stag=10\n  gen=560: fitness=325672.2, div=0.647, stag=10\n  gen=570: fitness=325672.2, div=0.648, stag=10\n  gen=580: fitness=325672.2, div=0.643, stag=10\n  gen=590: fitness=325672.2, div=0.638, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The current state shows stagnation with a fitness value remaining constant for multiple generations and a slight decline in diversity. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while maintaining enough exploration to prevent premature convergence and restore diversity in the population.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The current state shows stagnation with a fitness value remaining constant for multiple generations and a slight decline in diversity. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while maintaining enough exploration to prevent premature convergence and restore diversity in the population."
+    },
+    "reasoning": "The current state shows stagnation with a fitness value remaining constant for multiple generations and a slight decline in diversity. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while maintaining enough exploration to prevent premature convergence and restore diversity in the population.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.663,
+    "_run_seed": 50
+  },
+  {
+    "generation": 650,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 650,\n  \"max_generations\": 1000,\n  \"temperature\": 0.35,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 333931.15395967243,\n  \"diversity\": 0.6298,\n  \"gene_variance\": 18709104.01,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 333931.15396,\n  \"violation_max\": 344672.175208,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.87\n}\n\n## Recent Trajectory\n  gen=600: fitness=325672.2, div=0.634, stag=10\n  gen=610: fitness=325672.2, div=0.630, stag=10\n  gen=620: fitness=325672.2, div=0.629, stag=10\n  gen=630: fitness=325672.2, div=0.632, stag=10\n  gen=640: fitness=325672.2, div=0.631, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best fitness. While diversity is moderate (0.6298), the current CR of 0.5 may not be sufficient to explore new permutations effectively. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to break stagnation and diversify the search trajectory.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness. While diversity is moderate (0.6298), the current CR of 0.5 may not be sufficient to explore new permutations effectively. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to break stagnation and diversify the search trajectory."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness. While diversity is moderate (0.6298), the current CR of 0.5 may not be sufficient to explore new permutations effectively. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to break stagnation and diversify the search trajectory.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 4.786,
+    "_run_seed": 50
+  },
+  {
+    "generation": 700,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 700,\n  \"max_generations\": 1000,\n  \"temperature\": 0.3,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 333279.93891434,\n  \"diversity\": 0.6408,\n  \"gene_variance\": 18085263.02,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 333279.938914,\n  \"violation_max\": 344650.870723,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.25\n}\n\n## Recent Trajectory\n  gen=650: fitness=325672.2, div=0.630, stag=10\n  gen=660: fitness=325672.2, div=0.624, stag=10\n  gen=670: fitness=325672.2, div=0.624, stag=10\n  gen=680: fitness=325672.2, div=0.635, stag=10\n  gen=690: fitness=325672.2, div=0.635, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The current search state shows stagnation_count of 10 and a low convergence_speed, indicating the population may be stuck in a local optimum. While diversity is moderate (0.6408), the recent trajectory shows minimal changes in fitness, suggesting a need to balance exploration and exploitation. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while still allowing some exploration via DE/rand/1, helping to escape stagnation and improve convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The current search state shows stagnation_count of 10 and a low convergence_speed, indicating the population may be stuck in a local optimum. While diversity is moderate (0.6408), the recent trajectory shows minimal changes in fitness, suggesting a need to balance exploration and exploitation. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while still allowing some exploration via DE/rand/1, helping to escape stagnation and improve convergence."
+    },
+    "reasoning": "The current search state shows stagnation_count of 10 and a low convergence_speed, indicating the population may be stuck in a local optimum. While diversity is moderate (0.6408), the recent trajectory shows minimal changes in fitness, suggesting a need to balance exploration and exploitation. Reducing CR from 0.7 to 0.5 will increase the use of DE/best/2 (exploitation) while still allowing some exploration via DE/rand/1, helping to escape stagnation and improve convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 7.233,
+    "_run_seed": 50
+  },
+  {
+    "generation": 750,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 750,\n  \"max_generations\": 1000,\n  \"temperature\": 0.25,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 332072.23859906755,\n  \"diversity\": 0.6289,\n  \"gene_variance\": 18043249.91,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 332072.238599,\n  \"violation_max\": 344650.870723,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.885\n}\n\n## Recent Trajectory\n  gen=700: fitness=325672.2, div=0.641, stag=10\n  gen=710: fitness=325672.2, div=0.623, stag=10\n  gen=720: fitness=325672.2, div=0.637, stag=10\n  gen=730: fitness=325672.2, div=0.637, stag=10\n  gen=740: fitness=325672.2, div=0.629, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in fitness. While diversity is moderate (0.6289), it has been fluctuating slightly. Increasing CR to 0.7 will favor exploration (DE/rand/1) for more genes, helping to break stagnation and potentially discover better permutations without losing too much diversity.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in fitness. While diversity is moderate (0.6289), it has been fluctuating slightly. Increasing CR to 0.7 will favor exploration (DE/rand/1) for more genes, helping to break stagnation and potentially discover better permutations without losing too much diversity."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in fitness. While diversity is moderate (0.6289), it has been fluctuating slightly. Increasing CR to 0.7 will favor exploration (DE/rand/1) for more genes, helping to break stagnation and potentially discover better permutations without losing too much diversity.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 4.676,
+    "_run_seed": 50
+  },
+  {
+    "generation": 800,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 800,\n  \"max_generations\": 1000,\n  \"temperature\": 0.2,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 331414.85295772296,\n  \"diversity\": 0.6226,\n  \"gene_variance\": 17679401.35,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 331414.852958,\n  \"violation_max\": 342224.575998,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.25\n}\n\n## Recent Trajectory\n  gen=750: fitness=325672.2, div=0.629, stag=10\n  gen=760: fitness=325672.2, div=0.629, stag=10\n  gen=770: fitness=325672.2, div=0.625, stag=10\n  gen=780: fitness=325672.2, div=0.619, stag=10\n  gen=790: fitness=325672.2, div=0.619, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.5,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best fitness and declining diversity. Lowering CR from 0.7 to 0.5 will reduce the exploration pressure and increase exploitation, helping the algorithm converge more effectively while maintaining enough diversity to avoid premature convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.5,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness and declining diversity. Lowering CR from 0.7 to 0.5 will reduce the exploration pressure and increase exploitation, helping the algorithm converge more effectively while maintaining enough diversity to avoid premature convergence."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best fitness and declining diversity. Lowering CR from 0.7 to 0.5 will reduce the exploration pressure and increase exploitation, helping the algorithm converge more effectively while maintaining enough diversity to avoid premature convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 3.309,
+    "_run_seed": 50
+  },
+  {
+    "generation": 850,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 850,\n  \"max_generations\": 1000,\n  \"temperature\": 0.15,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 330912.30797446775,\n  \"diversity\": 0.6183,\n  \"gene_variance\": 17429013.31,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 330912.307974,\n  \"violation_max\": 342224.575998,\n  \"current_cr\": 0.5,\n  \"current_f\": 0.885\n}\n\n## Recent Trajectory\n  gen=800: fitness=325672.2, div=0.623, stag=10\n  gen=810: fitness=325672.2, div=0.621, stag=10\n  gen=820: fitness=325672.2, div=0.619, stag=10\n  gen=830: fitness=325672.2, div=0.620, stag=10\n  gen=840: fitness=325672.2, div=0.617, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best_fitness. While diversity is still relatively high (0.6183), the trajectory shows minimal change, suggesting the algorithm may be converging too slowly. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to escape local optima and potentially improve convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. While diversity is still relatively high (0.6183), the trajectory shows minimal change, suggesting the algorithm may be converging too slowly. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to escape local optima and potentially improve convergence."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. While diversity is still relatively high (0.6183), the trajectory shows minimal change, suggesting the algorithm may be converging too slowly. Increasing CR to 0.7 will promote more exploration via DE/rand/1, helping to escape local optima and potentially improve convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.721,
+    "_run_seed": 50
+  },
+  {
+    "generation": 900,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 900,\n  \"max_generations\": 1000,\n  \"temperature\": 0.1,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 330812.2431155573,\n  \"diversity\": 0.6189,\n  \"gene_variance\": 17237499.1,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 330812.243116,\n  \"violation_max\": 341269.590601,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.175\n}\n\n## Recent Trajectory\n  gen=850: fitness=325672.2, div=0.618, stag=10\n  gen=860: fitness=325672.2, div=0.608, stag=10\n  gen=870: fitness=325672.2, div=0.608, stag=10\n  gen=880: fitness=325672.2, div=0.619, stag=10\n  gen=890: fitness=325672.2, div=0.619, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.3,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in fitness. Diversity has fluctuated slightly but remains relatively high. Reducing CR to 0.3 will favor exploitation (DE/best/2) more, helping the algorithm converge toward the best-known solution while maintaining some diversity to avoid premature convergence.\"\n}",
+    "parsed_decision": {
+      "cr": 0.3,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in fitness. Diversity has fluctuated slightly but remains relatively high. Reducing CR to 0.3 will favor exploitation (DE/best/2) more, helping the algorithm converge toward the best-known solution while maintaining some diversity to avoid premature convergence."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in fitness. Diversity has fluctuated slightly but remains relatively high. Reducing CR to 0.3 will favor exploitation (DE/best/2) more, helping the algorithm converge toward the best-known solution while maintaining some diversity to avoid premature convergence.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.499,
+    "_run_seed": 50
+  },
+  {
+    "generation": 950,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 950,\n  \"max_generations\": 1000,\n  \"temperature\": 0.05,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 330423.70434199215,\n  \"diversity\": 0.6037,\n  \"gene_variance\": 16449628.47,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 330423.704342,\n  \"violation_max\": 340457.119155,\n  \"current_cr\": 0.3,\n  \"current_f\": 0.76\n}\n\n## Recent Trajectory\n  gen=900: fitness=325672.2, div=0.619, stag=10\n  gen=910: fitness=325672.2, div=0.614, stag=10\n  gen=920: fitness=325672.2, div=0.611, stag=10\n  gen=930: fitness=325672.2, div=0.611, stag=10\n  gen=940: fitness=325672.2, div=0.607, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.7,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best_fitness, and diversity has been gradually decreasing. Increasing CR to 0.7 will promote exploration by replacing more genes with DE/rand/1, helping to escape local optima and reintroduce diversity into the population.\"\n}",
+    "parsed_decision": {
+      "cr": 0.7,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness, and diversity has been gradually decreasing. Increasing CR to 0.7 will promote exploration by replacing more genes with DE/rand/1, helping to escape local optima and reintroduce diversity into the population."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness, and diversity has been gradually decreasing. Increasing CR to 0.7 will promote exploration by replacing more genes with DE/rand/1, helping to escape local optima and reintroduce diversity into the population.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 3.417,
+    "_run_seed": 50
+  },
+  {
+    "generation": 1000,
+    "module": "search_controller",
+    "model": "Qwen/Qwen3-14B",
+    "temperature": 0.4,
+    "prompt_messages": [
+      {
+        "role": "system",
+        "content": "You are an expert in Differential Evolution (DE) for combinatorial optimization (UAV-target assignment with discrete mapping).\n\nYour task: Select the crossover rate (CR) from [0.1, 0.3, 0.5, 0.7, 0.9].\n\nThe scaling factor F will be automatically computed from your chosen CR F is automatically derived from your chosen CR — you do not need to specify F.\n\n## How CR Affects Search\nEach gene independently uses:\n- DE/rand/1 (exploration) when random value <= CR\n- DE/best/2 (exploitation) when random value > CR\n\nThe mechanism above means CR controls **how many genes** are replaced by the rand/1 or best/2 donor (i.e., a gene-level selection probability), not the exploration direction itself. Your CR choice should be based on the **current optimization state** (diversity, stagnation, convergence speed, trajectory trend), not a fixed rule for the scenario.\n## Scene: balanced (N == M)\n- One-to-one assignment: each UAV maps to exactly one target.\n- The search space is a **permutation space** — diversity tends to drop quickly because swapping assignments between UAVs can lead to rapid convergence.\n- Consider the trade-off between maintaining population diversity and converging toward low-cost permutations.\n- Use the observed optimization state and recent trajectory to determine the appropriate CR.\n## Decision Format\nRespond with a JSON object only (no markdown):\n{\n    \"cr\": <one of [0.1, 0.3, 0.5, 0.7, 0.9]>,\n    \"reasoning\": \"<brief explanation of your CR choice based on the current state>\"\n}\n"
+      },
+      {
+        "role": "user",
+        "content": "## Current Search State\n{\n  \"generation\": 1000,\n  \"max_generations\": 1000,\n  \"temperature\": 0.0,\n  \"model_type\": \"balanced\",\n  \"n_uavs\": 10,\n  \"n_targets\": 10,\n  \"best_fitness\": 325672.2339984661,\n  \"mean_fitness\": 329879.3815891742,\n  \"diversity\": 0.6261,\n  \"gene_variance\": 15843518.11,\n  \"convergence_speed\": \"0.000000\",\n  \"stagnation_count\": 10,\n  \"feasible_ratio\": 1.0,\n  \"violation_mean\": 329879.381589,\n  \"violation_max\": 340457.119155,\n  \"current_cr\": 0.7,\n  \"current_f\": 1.25\n}\n\n## Recent Trajectory\n  gen=950: fitness=325672.2, div=0.604, stag=10\n  gen=960: fitness=325672.2, div=0.607, stag=10\n  gen=970: fitness=325672.2, div=0.624, stag=10\n  gen=980: fitness=325672.2, div=0.624, stag=10\n  gen=990: fitness=325672.2, div=0.626, stag=10\n\n## Task\nSelect the best CR for the next interval. Respond with JSON only.\n"
+      }
+    ],
+    "raw_output": "{\n    \"cr\": 0.3,\n    \"reasoning\": \"The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity is relatively stable but low, indicating the need to reduce exploration and increase exploitation to refine the current solutions and escape local optima.\"\n}",
+    "parsed_decision": {
+      "cr": 0.3,
+      "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity is relatively stable but low, indicating the need to reduce exploration and increase exploitation to refine the current solutions and escape local optima."
+    },
+    "reasoning": "The population has been stagnant for 10 generations with no improvement in best_fitness. Diversity is relatively stable but low, indicating the need to reduce exploration and increase exploitation to refine the current solutions and escape local optima.",
+    "cr_before": 0.0,
+    "cr_after": 0.0,
+    "fitness_before": 0.0,
+    "fitness_after": 0.0,
+    "duration": 2.138,
+    "_run_seed": 50
+  }
+]
