@@ -2,10 +2,10 @@
 """cr_control.py — LLM 交叉率/缩放因子控制模块
 
 职责：
-    根据搜索状态，由 LLM 动态调整交叉率 CR 和缩放因子 F 的偏移量。
-    与 DMDE 的公式 3-9/3-11 叠加使用。
+    根据搜索状态 + 上次决策反馈，由 LLM 动态调整 CR/F。
+    闭环控制：每次决策后记录 CR 和效果，下次决策时提供反馈。
 
-注入点：before_evolve（每代进化前，调整本轮 CR/F）
+注入点：before_evolve（每代进化前，按 interval 触发）
 """
 
 from __future__ import annotations
@@ -23,11 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 class LLMCRControlModule(BaseLLMModule):
-    """LLM 交叉率/缩放因子控制模块。"""
+    """LLM 交叉率/缩放因子控制模块（闭环反馈版）。"""
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
-        # 从配置加载自定义 system prompt，支持外部文件覆盖
         prompt_path = self._config.get("system_prompt_path")
         self._system_prompt: str = get_prompt(
             "cr_control",
@@ -43,6 +42,7 @@ class LLMCRControlModule(BaseLLMModule):
         return "before_evolve"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
+        # 当前搜索状态
         features = {
             "generation": state.generation,
             "max_generations": state.max_generations,
@@ -55,12 +55,22 @@ class LLMCRControlModule(BaseLLMModule):
             "fitness_improvement": state.extra.get("fitness_improvement", 0.0),
         }
 
-        # 使用统一的 user prompt 模板
+        # 上次 LLM CR 决策的反馈（闭环控制核心）
+        prev_cr = state.extra.get("previous_llm_cr")
+        feedback = {
+            "previous_llm_cr": round(prev_cr, 4) if prev_cr is not None else None,
+            "previous_interval_gens": state.extra.get("previous_interval_gens"),
+            "fitness_change": round(state.extra.get("fitness_change_since_last", 0.0), 2),
+            "diversity_change": round(state.extra.get("diversity_change_since_last", 0.0), 4),
+        }
+
+        full_state = {**features, "previous_decision_feedback": feedback}
+
         from llm.prompts import get_prompt
         user = get_prompt(
             "cr_control",
             prompt_type="user",
-            state_json=json.dumps(features, indent=2),
+            state_json=json.dumps(full_state, indent=2),
         )
 
         return [
@@ -99,8 +109,6 @@ class LLMCRControlModule(BaseLLMModule):
         state.extra["llm_cr_offset"] = cr_off
         state.extra["llm_f_offset"] = f_off
         return state
-
-
 
     @staticmethod
     def _clamp(value: Any, min_val: float, max_val: float) -> float | None:

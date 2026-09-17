@@ -199,6 +199,9 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
         # LLM 决策状态缓存
         llm_cr = None          # None = 未被 LLM 设置，使用公式 3-9
+        llm_cr_prev_fitness = best_individual.fitness  # 上次 LLM CR 决定时的 best fitness
+        llm_cr_prev_diversity = 0.0                     # 上次 LLM CR 决定时的 diversity
+        llm_cr_prev_gen = 0                             # 上次 LLM CR 决定时的代数
 
         t_start = time.time()
 
@@ -221,11 +224,21 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 )
                 state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
 
+                # 注入上次 LLM CR 决策的反馈（闭环控制）
+                state.extra["previous_llm_cr"] = llm_cr
+                state.extra["previous_interval_gens"] = gen - llm_cr_prev_gen
+                state.extra["fitness_change_since_last"] = llm_cr_prev_fitness - best_individual.fitness
+                state.extra["diversity_change_since_last"] = compute_diversity(population) - llm_cr_prev_diversity
+
                 decision = sc_module.inject(state)
                 self._record_decision(gen, "search_controller", decision, state)
 
                 if decision and "cr" in decision:
                     llm_cr = decision["cr"]
+                    # 记录本次决策时的状态快照，供下次反馈
+                    llm_cr_prev_fitness = best_individual.fitness
+                    llm_cr_prev_diversity = compute_diversity(population)
+                    llm_cr_prev_gen = gen
 
             # CR 来源：LLM 决定 or 公式 3-9（与纯 DMDE 一致）
             if llm_cr is not None:

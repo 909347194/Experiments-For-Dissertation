@@ -331,12 +331,14 @@ In the DMDE hybrid strategy (formula 3-10), each gene independently uses:
 """
 
 _SC_CR_GUIDE = """\
-Therefore:
-- High CR (0.7/0.9): More genes use rand/1 → broader exploration
-  Best when diversity is LOW or stagnation is HIGH.
-- Low CR (0.1/0.3): More genes use best/2 → focused exploitation
-  Best when diversity is HIGH but convergence is SLOW.
+## How CR Affects Search
+- High CR (0.7/0.9): More genes use rand/1 → broader exploration of new regions.
+- Low CR (0.1/0.3): More genes use best/2 → focused refinement of promising solutions.
 - Mid CR (0.5): Balanced exploration/exploitation.
+
+Your CR choice should be based on the **current optimization state** \
+(diversity, stagnation, convergence speed, trajectory trend), \
+not a fixed rule for the scenario.
 """
 
 _SC_FORMAT = """\
@@ -351,25 +353,35 @@ Respond with a JSON object only (no markdown):
 _SC_BALANCED_EXTRA = """\
 ## Scene: balanced (N == M)
 - One-to-one assignment: each UAV maps to exactly one target.
-- The search space is a **permutation space** — diversity drops quickly.
-- Prefer moderate CR (0.3-0.5) to maintain exploration without disrupting good permutations.
-- Only increase CR above 0.5 when stagnation is clearly detected.
+- The search space is a **permutation space** — diversity tends to drop quickly \
+because swapping assignments between UAVs can lead to rapid convergence.
+- Consider the trade-off between maintaining population diversity \
+and converging toward low-cost permutations.
+- Use the observed optimization state and recent trajectory \
+to determine the appropriate CR.
 """
 
 _SC_OVERLOADED_EXTRA = """\
 ## Scene: overloaded (N > M)
-- Multiple UAVs share targets — the search space has **redundancy**.
-- Diversity is naturally higher due to target sharing.
-- Can use lower CR (0.1-0.3) to focus exploitation on promising regions.
-- Increase CR if the solver struggles to cover all targets.
+- Multiple UAVs share targets — the search space has **redundancy** \
+(different UAV combinations can achieve similar coverage).
+- Diversity is naturally higher due to target sharing, \
+but this also means many solutions are near-equivalent.
+- Consider whether the solver is exploring enough distinct assignment patterns \
+or getting stuck in redundant regions.
+- Use the observed optimization state and recent trajectory \
+to determine the appropriate CR.
 """
 
 _SC_SRP_EXTRA = """\
 ## Scene: srp (N < M)
 - Each UAV visits multiple targets in sequence — **tour ordering** matters.
-- The search space is larger (assignment + ordering).
-- Higher CR (0.5-0.7) helps explore different tour orderings.
-- Be cautious with very high CR (>0.7) — it may disrupt good tour segments.
+- The search space is larger (assignment + ordering combined), \
+and the interaction between assignment and ordering creates complex fitness landscapes.
+- Consider whether the solver needs to explore different assignment-to-ordering combinations \
+or refine existing tour segments.
+- Use the observed optimization state and recent trajectory \
+to determine the appropriate CR.
 """
 
 _SC_SCENE_MAP: dict[str, str] = {
@@ -388,7 +400,7 @@ def get_search_controller_prompt(
     Args:
         cr_choices: CR 候选值列表
         model_type: 场景类型 ("balanced"/"overloaded"/"srp")，
-                     非空时追加场景特定的 CR 调控建议
+                     非空时追加场景搜索特性描述（供 LLM 参考，非决策规则）
     """
     if cr_choices is None:
         cr_choices = [0.1, 0.3, 0.5, 0.7, 0.9]
@@ -446,8 +458,15 @@ CR_CONTROL_USER_PROMPT = """\
 ## Current Search State
 {state_json}
 
+The `previous_decision_feedback` section shows the effect of your last CR decision.
+Use this feedback to evaluate whether your previous adjustment helped or hurt,
+and adapt your next decision accordingly.
+
 ## Task
-Adjust CR and F offsets for the next generation. Respond with JSON only.
+Adjust CR and F offsets for the next generation.
+Base your decision on the **current state and feedback trajectory**, \
+not on preset rules for the scenario.
+Respond with JSON only.
 """
 
 
