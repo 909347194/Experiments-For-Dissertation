@@ -48,11 +48,12 @@ Respond with a JSON object only (no markdown):
 
 _REASONING_GUIDE = """\
 ## Reasoning (in the "thought" field)
-Before generating assignments, briefly reason (MAX 2 sentences):
-1. Which targets are **difficult** (few feasible UAVs)? Assign first.
-2. Which targets are **contested** (preferred by many UAVs)? Assign to best-cost UAV.
-3. Fill remaining using preference rankings. For SRP: use nearest-neighbor for tour order.
-Do NOT list every assignment. Just state your strategy.
+When constructing candidate solutions, consider (MAX 2 sentences):
+1. Difficult or highly constrained targets (few feasible UAVs).
+2. Contested targets and UAV-target cost compatibility.
+3. Overall assignment balance and coverage.
+4. For SRP: visiting order and transition costs.
+Use these factors as guidance — organize your reasoning as you see fit.
 """
 
 _OUTPUT_VALIDATION = """\
@@ -117,8 +118,8 @@ Each "solution" is a **complete one-to-one assignment** covering ALL N UAVs.
 ## Guidelines
 - Focus on minimizing total assignment cost.
 - Use TopKTargets_per_UAV and TopKUAVs_per_target to identify low-cost assignments.
-- Pay attention to contested_targets: assign them to the UAV with the best cost advantage.
-- Pay attention to difficult_targets: these have few feasible UAVs and must be handled first.
+- Pay attention to contested_targets and difficult_targets — \
+these are often the key differentiators between good and poor solutions.
 """,
 )
 
@@ -167,7 +168,8 @@ Each "solution" is a **complete assignment** covering ALL N UAVs.
 - **Critical**: ensure every target is covered by at least one UAV.
 - Use TopKUAVs_per_target to find the best UAV for each target.
 - Use TopKTargets_per_UAV to distribute surplus UAVs to low-cost targets.
-- Pay attention to difficult_targets (few feasible UAVs) — these must be assigned first.
+- Pay attention to difficult_targets (few feasible UAVs) — \
+these are often the key differentiators between good and poor solutions.
 """,
 )
 
@@ -181,7 +183,7 @@ produce **discrete assignments**.
 
 {_json_format}
 {{
-    "thought": "<brief reasoning: target distribution among UAVs, tour ordering by nearest-neighbor>",
+    "thought": "<brief reasoning: target distribution among UAVs, tour ordering and transition costs>",
     "solutions": [
         {{
             "assignments": [
@@ -206,8 +208,8 @@ Each "solution" is a **complete assignment** covering ALL N UAVs and ALL M targe
 
 For SRP specifically:
 1. Divide targets among UAVs (each UAV gets at least 1 target).
-2. For each UAV's target list, order by **nearest-neighbor** to minimize transition costs.
-3. Use TopKNextTargets_per_target to find low-cost transitions.
+2. For each UAV's target list, consider the visiting order and transition costs (C_TT).
+3. Use TopKNextTargets_per_target to identify efficient transitions.
 
 {_validation}
 {_guidelines}
@@ -218,9 +220,10 @@ For SRP specifically:
     _guidelines="""\
 ## Guidelines
 - Minimize total cost = sum of C_UT (UAV→first target) + C_TT (target→target transitions).
-- Use TopKTargets_per_UAV to assign each UAV to its nearest initial target.
-- Use TopKNextTargets_per_target to build efficient tour sequences.
-- Pay attention to difficult_targets (few feasible UAVs) — assign these first.
+- Use TopKTargets_per_UAV to identify low-cost initial targets for each UAV.
+- Use TopKNextTargets_per_target to explore efficient tour sequences.
+- Pay attention to difficult_targets (few feasible UAVs) — \
+these are often the key differentiators between good and poor solutions.
 - Avoid creating long tours for a single UAV when targets are geographically spread out.
 """,
 )
