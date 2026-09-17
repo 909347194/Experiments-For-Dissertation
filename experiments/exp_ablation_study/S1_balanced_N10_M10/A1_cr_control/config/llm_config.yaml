@@ -14,9 +14,7 @@ timeout: 180
 extra_body:
   chat_template_kwargs:
     enable_thinking: false
-
-# 思考 token 上限（即使嵌套形式失效，也限制思考不超过 4096 tokens）
-thinking_budget: 4096
+    thinking_budget: 4096
 
 # 截断重试时 max_tokens 的上限
 max_tokens_cap: 32768
