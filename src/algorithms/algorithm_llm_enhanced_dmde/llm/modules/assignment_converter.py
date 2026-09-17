@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -23,6 +24,26 @@ import numpy as np
 from ...representation.encoder import Gene, Individual
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConversionResult:
+    """单个 solution 转换结果（含修复元数据）。
+
+    Attributes:
+        individual:     转换后的 Individual（失败时为 None）。
+        raw_valid:      LLM 原始输出是否直接可行（未经修复）。
+        repaired:       是否经过修复才转换成功。
+        repair_distance:修复时修改的 UAV-target assignment 数量。
+        raw_cost:       修复前的 assignment 代价值（从 cost_matrix 计算）。
+        repaired_cost:  修复后的 assignment 代价值。
+    """
+    individual: Individual | None = None
+    raw_valid: bool = False
+    repaired: bool = False
+    repair_distance: int = 0
+    raw_cost: float = float("inf")
+    repaired_cost: float = float("inf")
 
 
 class AssignmentConverter:
@@ -33,11 +54,11 @@ class AssignmentConverter:
         converter = AssignmentConverter(cost_matrix, n_uavs, n_targets)
         # 单个完整解转换
         solution = [{"uav": 0, "targets": [2]}, {"uav": 1, "targets": [0]}]
-        is_valid, msg = converter.validate_batch(solution)
-        if is_valid:
-            individual = converter.convert(solution)
+        result = converter.convert(solution)
+        if result.individual is not None:
+            print(f"cost={result.repaired_cost}, repaired={result.repaired}")
         # 批量转换多个完整解
-        individuals = converter.convert_batch([solution1, solution2])
+        individuals, stats = converter.convert_batch([solution1, solution2])
     """
 
     def __init__(
@@ -60,7 +81,7 @@ class AssignmentConverter:
         else:
             return "srp"
 
-    def convert(self, assignments: list[dict[str, Any]]) -> Individual | None:
+    def convert(self, assignments: list[dict[str, Any]]) -> ConversionResult:
         """将一组完整 assignments 转换为 Individual（含完整 gene 序列）。
 
         对于 balanced/overloaded，assignments 列表包含 N 个字典，
@@ -75,23 +96,42 @@ class AssignmentConverter:
             assignments: 一个完整解的 assignment 字典列表。
 
         Returns:
-            转换成功返回 Individual，失败返回 None。
+            ConversionResult，包含 Individual 和修复元数据。
         """
         if not assignments:
-            return None
+            return ConversionResult()
+
+        raw_cost = self._compute_assignment_cost(assignments)
 
         # 先尝试直接转换
         result = self._try_convert(assignments)
         if result is not None:
-            return result
+            return ConversionResult(
+                individual=result,
+                raw_valid=True,
+                repaired=False,
+                repair_distance=0,
+                raw_cost=raw_cost,
+                repaired_cost=raw_cost,
+            )
 
         # 直接转换失败 → 尝试修复 target 重复/缺失
-        repaired = self._repair_duplicates(assignments)
+        repaired, distance = self._repair_duplicates(assignments)
         if repaired is not None:
-            logger.debug("修复后转换成功")
-            return self._try_convert(repaired)
+            repaired_cost = self._compute_assignment_cost(repaired)
+            ind = self._try_convert(repaired)
+            if ind is not None:
+                logger.debug("修复后转换成功 (distance=%d)", distance)
+                return ConversionResult(
+                    individual=ind,
+                    raw_valid=False,
+                    repaired=True,
+                    repair_distance=distance,
+                    raw_cost=raw_cost,
+                    repaired_cost=repaired_cost,
+                )
 
-        return None
+        return ConversionResult(raw_cost=raw_cost)
 
     def _try_convert(self, assignments: list[dict[str, Any]]) -> Individual | None:
         """尝试转换 assignments（含验证）。"""
@@ -233,7 +273,7 @@ class AssignmentConverter:
 
     def _repair_duplicates(
         self, assignments: list[dict[str, Any]]
-    ) -> list[dict[str, Any]] | None:
+    ) -> tuple[list[dict[str, Any]] | None, int]:
         """修复 target 重复/缺失问题（LLM 常见错误）。
 
         balanced/overloaded 模型下，LLM 经常生成有重复 target 的解。
@@ -243,18 +283,25 @@ class AssignmentConverter:
             assignments: 原始 assignment 字典列表。
 
         Returns:
-            修复后的列表，无法修复时返回 None。
+            (repaired, distance) 元组。
+            repaired: 修复后的列表，无法修复时为 None。
+            distance: 修复时修改的 assignment 数量（0 表示无需修复）。
         """
         mt = self.model_type
         if mt == "srp":
             # SRP 的约束更复杂，暂不修复
-            return None
+            return None, 0
 
         if len(assignments) != self._n:
-            return None
+            return None, 0
 
-        # 收集所有 target
-        all_targets = [a["targets"][0] for a in assignments]
+        # 收集所有 target（守卫：跳过空 targets）
+        all_targets: list[int] = []
+        for a in assignments:
+            t = a.get("targets", [])
+            if not t:
+                return None, 0  # 空 targets 无法修复
+            all_targets.append(t[0])
         target_counts: dict[int, int] = {}
         for t in all_targets:
             target_counts[t] = target_counts.get(t, 0) + 1
@@ -270,7 +317,7 @@ class AssignmentConverter:
                 seen_targets.add(t)
 
         if not duplicated_uavs:
-            return None  # 没有重复，不需要修复
+            return None, 0  # 没有重复，不需要修复
 
         missing_targets = sorted(set(range(self._m)) - seen_targets)
         if len(missing_targets) != len(duplicated_uavs):
@@ -279,7 +326,7 @@ class AssignmentConverter:
                 "修复失败: %d 个重复 UAV, %d 个缺失 target",
                 len(duplicated_uavs), len(missing_targets),
             )
-            return None
+            return None, 0
 
         # 修复：将重复 UAV 重分配到缺失 target（最小代价匹配）
         repaired = [dict(a) for a in assignments]  # 浅拷贝
@@ -316,7 +363,23 @@ class AssignmentConverter:
             [repaired[i]["uav"] for i in duplicated_uavs],
             [repaired[i]["targets"][0] for i in duplicated_uavs],
         )
-        return repaired
+        return repaired, n_fix
+
+    def _compute_assignment_cost(self, assignments: list[dict[str, Any]]) -> float:
+        """计算 assignments 的代价值（从 cost_matrix 直接求和）。
+
+        不经过 fitness_evaluator，仅用于修复前后 cost 对比。
+        """
+        total = 0.0
+        for a in assignments:
+            uav = a.get("uav", 0)
+            targets = a.get("targets", [])
+            if not targets:
+                continue
+            for t in targets:
+                if 0 <= uav < self._cm.shape[0] and 0 <= t < self._cm.shape[1]:
+                    total += float(self._cm[uav, t])
+        return total
 
     # ── 转换逻辑 ──────────────────────────────────────────────
 
@@ -474,23 +537,55 @@ class AssignmentConverter:
 
     def convert_batch(
         self, solutions: list[list[dict[str, Any]]]
-    ) -> list[Individual]:
+    ) -> tuple[list[Individual], dict[str, Any]]:
         """批量转换多个完整解为 Individuals。
 
         每个完整解是一个 assignment 字典列表（一个 LLM 响应中的所有 assignments）。
-        转换时会验证每个完整解的全局约束。
+        转换时会验证每个完整解的全局约束，并记录修复统计。
 
         Args:
             solutions: 完整解列表，每个元素是一组 assignment 字典。
 
         Returns:
-            成功转换的 Individual 列表。
+            (individuals, stats) 元组。
+            individuals: 成功转换的 Individual 列表。
+            stats: 转换统计字典，包含：
+                - n_raw_valid: LLM 原始输出直接可行的数量
+                - n_repaired: 经过修复才可行的数量
+                - n_failed: 无法转换的数量
+                - repair_distances: 每个修复解的修改距离列表
+                - raw_costs: 所有可行解的修复前代价值列表
+                - repaired_costs: 所有可行解的修复后代价值列表
         """
         individuals = []
+        n_raw_valid = 0
+        n_repaired = 0
+        n_failed = 0
+        repair_distances: list[int] = []
+        raw_costs: list[float] = []
+        repaired_costs: list[float] = []
+
         for sol_idx, solution in enumerate(solutions):
-            ind = self.convert(solution)
-            if ind is not None:
-                individuals.append(ind)
+            result = self.convert(solution)
+            if result.individual is not None:
+                individuals.append(result.individual)
+                raw_costs.append(result.raw_cost)
+                repaired_costs.append(result.repaired_cost)
+                if result.raw_valid:
+                    n_raw_valid += 1
+                elif result.repaired:
+                    n_repaired += 1
+                    repair_distances.append(result.repair_distance)
             else:
+                n_failed += 1
                 logger.debug("跳过无效完整解 #%d: %s", sol_idx, solution)
-        return individuals
+
+        stats = {
+            "n_raw_valid": n_raw_valid,
+            "n_repaired": n_repaired,
+            "n_failed": n_failed,
+            "repair_distances": repair_distances,
+            "raw_costs": raw_costs,
+            "repaired_costs": repaired_costs,
+        }
+        return individuals, stats

@@ -443,7 +443,30 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
         # ---- 转换 assignments → Individuals ----
         converter = AssignmentConverter(cost_matrix, n_uavs, n_targets)
-        candidates = converter.convert_batch(candidate_solutions)
+        candidates, convert_stats = converter.convert_batch(candidate_solutions)
+
+        # 记录 LLM 种群初始化质量统计
+        n_total = len(candidate_solutions)
+        n_raw = convert_stats["n_raw_valid"]
+        n_rep = convert_stats["n_repaired"]
+        n_fail = convert_stats["n_failed"]
+        dists = convert_stats["repair_distances"]
+        raw_costs = convert_stats["raw_costs"]
+        rep_costs = convert_stats["repaired_costs"]
+        avg_dist = float(np.mean(dists)) if dists else 0.0
+        avg_raw = float(np.mean(raw_costs)) if raw_costs else float("inf")
+        avg_rep = float(np.mean(rep_costs)) if rep_costs else float("inf")
+        logger.info(
+            "[PopInit] LLM %d 解: %d 直接可行, %d 修复, %d 失败 "
+            "| 平均修复距离=%.1f | 平均 cost: 原始=%.1f 修复后=%.1f",
+            n_total, n_raw, n_rep, n_fail, avg_dist, avg_raw, avg_rep,
+        )
+        if cfg.verbose:
+            print(
+                f"  [LLM PopInit] {n_total} solutions: "
+                f"{n_raw} raw valid, {n_rep} repaired (avg dist={avg_dist:.1f}), "
+                f"{n_fail} failed"
+            )
 
         if not candidates:
             logger.info("[PopInit] 所有 assignments 转换失败，fallback 到标准 DMDE 初始化")
