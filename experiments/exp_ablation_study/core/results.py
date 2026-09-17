@@ -17,7 +17,7 @@ def save_results(results: list[dict], output_dir: Path) -> Path:
     """
     out = output_dir / "results" / "ablation_results.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     return out
 
@@ -35,7 +35,7 @@ def load_results(scenario_dir: Path, config_dir: str) -> list[dict]:
     path = scenario_dir / config_dir / "results" / "ablation_results.json"
     if not path.exists():
         return []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

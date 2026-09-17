@@ -579,14 +579,14 @@ def main():
 
     # ── 保存 Markdown ──
     md_out = FIGURES_DIR / "summary_table.md"
-    with open(md_out, "w") as f:
+    with open(md_out, "w", encoding="utf-8") as f:
         f.write("## 消融实验结果\n\n")
         f.write(md_table)
         f.write(f"\n\n{llm_summary}\n")
 
     # ── CSV ──
     csv_out = FIGURES_DIR / "summary_table.csv"
-    with open(csv_out, "w") as f:
+    with open(csv_out, "w", encoding="utf-8") as f:
         f.write("scenario,config,best,mean,std,median,total_time,dmde_time,llm_time,"
                 "llm_init_time,llm_cr_time,llm_calls\n")
         for s_key in SCENARIOS:
