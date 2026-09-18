@@ -249,36 +249,45 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 current_fitness = best_individual.fitness
                 current_diversity = compute_diversity(population)
 
-                # Δf_t: 当前 stage 的 fitness 变化（%）
-                if stage_fitness > 0 and np.isfinite(stage_fitness):
-                    delta_fitness = (stage_fitness - current_fitness) / stage_fitness * 100.0
-                else:
-                    delta_fitness = 0.0
-                # ΔD_t: 当前 stage 的多样性变化
-                delta_diversity = current_diversity - stage_diversity
+                # 第一次 LLM 调用：无上次决策，delta 标记为 None
+                is_first_call = llm_cr is None
 
-                # Δf_{t-1}, ΔD_{t-1}: 上个 stage 的变化
-                if len(stage_history) >= 1:
-                    prev = stage_history[-1]
-                    prev_delta_fitness = prev.get("delta_fitness", 0.0)
-                    prev_delta_diversity = prev.get("delta_diversity", 0.0)
+                if is_first_call:
+                    delta_fitness = None
+                    delta_diversity = None
+                    prev_delta_fitness = None
+                    prev_delta_diversity = None
                 else:
-                    prev_delta_fitness = 0.0
-                    prev_delta_diversity = 0.0
+                    # Δf_t: 当前 stage 的 fitness 变化（%）
+                    if stage_fitness > 0 and np.isfinite(stage_fitness):
+                        delta_fitness = (stage_fitness - current_fitness) / stage_fitness * 100.0
+                    else:
+                        delta_fitness = 0.0
+                    # ΔD_t: 当前 stage 的多样性变化
+                    delta_diversity = current_diversity - stage_diversity
+
+                    # Δf_{t-1}, ΔD_{t-1}: 上个 stage 的变化
+                    if len(stage_history) >= 1:
+                        prev = stage_history[-1]
+                        prev_delta_fitness = prev.get("delta_fitness")
+                        prev_delta_diversity = prev.get("delta_diversity")
+                    else:
+                        prev_delta_fitness = None
+                        prev_delta_diversity = None
 
                 # 注入 Δ 信号到 state
-                state.delta_fitness = round(delta_fitness, 4)
-                state.delta_diversity = round(delta_diversity, 4)
-                state.prev_delta_fitness = round(prev_delta_fitness, 4)
-                state.prev_delta_diversity = round(prev_delta_diversity, 4)
-                state.prev_action = llm_cr
+                state.delta_fitness = round(delta_fitness, 4) if delta_fitness is not None else None
+                state.delta_diversity = round(delta_diversity, 4) if delta_diversity is not None else None
+                state.prev_delta_fitness = round(prev_delta_fitness, 4) if prev_delta_fitness is not None else None
+                state.prev_delta_diversity = round(prev_delta_diversity, 4) if prev_delta_diversity is not None else None
+                state.prev_action = llm_cr  # None on first call
                 state.stage_history = stage_history[-5:]  # 最近 5 个 stage
 
                 # 旧版反馈字段保留兼容
                 state.extra["previous_llm_cr"] = llm_cr
                 state.extra["previous_interval_gens"] = gen - llm_cr_prev_gen
-                state.extra["fitness_change_since_last"] = llm_cr_prev_fitness - current_fitness
-                state.extra["diversity_change_since_last"] = current_diversity - llm_cr_prev_diversity
+                state.extra["fitness_change_since_last"] = None if is_first_call else llm_cr_prev_fitness - current_fitness
+                state.extra["diversity_change_since_last"] = None if is_first_call else current_diversity - llm_cr_prev_diversity
 
                 decision = sc_module.inject(state)
                 self._record_decision(gen, "search_controller", decision, state)
@@ -286,15 +295,16 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 if decision and "cr" in decision:
                     new_cr = decision["cr"]
                     # 记录 stage 结束时的快照到 stage_history
+                    # CR 记录 actual_cr（产生 outcome 的 CR），不是 new_cr（刚选的 CR）
                     stage_history.append({
                         "stage": len(stage_history) + 1,
                         "gen_start": llm_cr_prev_gen,
                         "gen_end": gen,
-                        "cr": new_cr,
+                        "cr": round(actual_cr, 4),
                         "best_fitness": round(current_fitness, 2),
-                        "delta_fitness": round(delta_fitness, 4),
+                        "delta_fitness": round(delta_fitness, 4) if delta_fitness is not None else None,
                         "diversity": round(current_diversity, 4),
-                        "delta_diversity": round(delta_diversity, 4),
+                        "delta_diversity": round(delta_diversity, 4) if delta_diversity is not None else None,
                     })
                     # 更新 stage 起始快照
                     stage_fitness = current_fitness

@@ -42,23 +42,24 @@ class LLMSearchControllerModule(BaseLLMModule):
         return "before_mutation"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
-        # ---- State: Δ 趋势信号 ----
+        # ---- State: S_t = [D_t, Δf_t, S_t_stag, ΔD_t, CR_{t-1}, Δf_{t-1}, ΔD_{t-1}] ----
         features = {
             "generation": state.generation,
             "max_generations": state.max_generations,
-            "temperature": round(state.temperature, 4),
             "model_type": state.model_type,
-            # 当前水平
-            "best_fitness": round(state.best_fitness, 2),
+            # D_t: 当前多样性水平（绝对值，因为 ΔD_t 单独不足以定位）
             "diversity": round(state.diversity, 4),
-            "stagnation_count": state.stagnation_count,
-            "feasible_ratio": round(state.feasible_ratio, 4),
-            # Δ 趋势信号
+            # Δf_t: 当前 stage 的 fitness 变化趋势
             "delta_fitness_pct": state.delta_fitness,
+            # S_t_stag: 连续未改善代数
+            "stagnation_count": state.stagnation_count,
+            # ΔD_t: 当前 stage 的多样性变化趋势
             "delta_diversity": state.delta_diversity,
-            # 上次决策及效果
+            # CR_{t-1}: 上次 LLM 选择的 CR
             "prev_action_cr": state.prev_action,
+            # Δf_{t-1}: 上次决策的 fitness 效果
             "prev_delta_fitness_pct": state.prev_delta_fitness,
+            # ΔD_{t-1}: 上次决策对多样性的影响
             "prev_delta_diversity": state.prev_delta_diversity,
         }
 
@@ -78,27 +79,23 @@ class LLMSearchControllerModule(BaseLLMModule):
 
         # ---- Action-Outcome 反馈 ----
         feedback = ""
-        if state.prev_action is not None:
-            fitness_desc = (
-                "improved" if state.delta_fitness > 0.1
-                else "stagnated" if abs(state.delta_fitness) <= 0.1
-                else "degraded"
+        if state.prev_action is None:
+            # 第一次调用：无上次决策
+            feedback = (
+                f"\n\n## Last Decision Feedback\n"
+                f"First decision: no previous LLM action/outcome available.\n"
+                f"No prior CR context to evaluate. Choose CR based on current state."
             )
-            div_desc = (
-                "increased" if state.prev_delta_diversity > 0.001
-                else "stable" if abs(state.prev_delta_diversity) <= 0.001
-                else "decreased"
-            )
-            # 从 stage_history 取上次决策的代数
+        elif state.delta_fitness is not None and state.prev_delta_diversity is not None:
+            # 后续调用：中性事实描述（不预设因果、不给建议）
             prev_gen_str = ""
             if stage_hist:
                 prev_gen_str = f" at gen {stage_hist[-1].get('gen_end', '?')}"
             feedback = (
                 f"\n\n## Last Decision Feedback\n"
-                f"You chose CR={state.prev_action:.1f}{prev_gen_str}\n"
-                f"Outcome: fitness {fitness_desc} ({state.delta_fitness:+.2f}%), "
-                f"diversity {div_desc} ({state.prev_delta_diversity:+.4f})\n"
-                f"Interpretation: {'Exploration was effective — consider maintaining or increasing CR.' if state.delta_fitness > 0.1 and state.prev_delta_diversity > 0 else 'Exploitation paid off — consider maintaining low CR.' if state.delta_fitness > 0.1 else 'Current strategy stalled — try a different CR to shift the balance.'}"
+                f"Under CR={state.prev_action:.1f}{prev_gen_str}, "
+                f"the observed stage outcome was "
+                f"Δf={state.delta_fitness:+.2f}%, ΔD={state.prev_delta_diversity:+.4f}."
             )
 
         user = get_prompt(
