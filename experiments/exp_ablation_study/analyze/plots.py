@@ -14,7 +14,12 @@ except ImportError:
     HAS_MPL = False
 
 from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, CONFIG_COLORS, SCENARIO_LABELS
-from .stats import extract_convergence_curves, extract_cr_histories, compute_convergence_stats
+from .stats import (
+    extract_convergence_curves,
+    extract_cr_histories,
+    compute_convergence_stats,
+    curve_gens,
+)
 
 
 def plot_convergence_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
@@ -30,7 +35,9 @@ def plot_convergence_comparison(all_stats: dict, scenario_key: str, figures_dir:
         conv = compute_convergence_stats(curves)
         if not conv:
             continue
-        x = np.arange(conv["length"])
+        # 用真实代数做横轴：A0 逐代(0..1000)，LLM 配置每 10 代(0,10,...,1000)。
+        # 若误用 np.arange(len) 会把 LLM 曲线横向压缩 10 倍。
+        x = np.array(conv["gens"])
         mean = np.array(conv["mean"])
         std = np.array(conv["std"])
         color = CONFIG_COLORS[config_key]
@@ -55,14 +62,22 @@ def plot_cr_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
     for config_key in ["A0", "A1", "A3"]:
         stats = all_stats.get(f"{scenario_key}_{config_key}", {})
         raw = stats.get("_raw", [])
-        histories = extract_cr_histories(raw)
-        if not histories:
+        if not raw:
             continue
-        min_len = min(len(h) for h in histories)
-        arr = np.array([h[:min_len] for h in histories])
+        # cr_history[i] 与 generation_records[i]['gen'] 对齐；逐代/每 10 代粒度不同，
+        # 必须用真实代数做横轴，否则 LLM 曲线会被横向压缩 10 倍。
+        series = []
+        for r in raw:
+            cr = r.get("cr_history", [])
+            if cr:
+                series.append((curve_gens(r)[: len(cr)], list(cr)))
+        if not series:
+            continue
+        min_len = min(len(c) for _, c in series)
+        arr = np.array([c[:min_len] for _, c in series])
         mean = arr.mean(axis=0)
         std = arr.std(axis=0)
-        x = np.arange(min_len)
+        x = np.array(series[0][0][:min_len])
         color = CONFIG_COLORS[config_key]
         ax.plot(x, mean, label=CONFIG_LABELS[config_key], color=color, linewidth=1.5)
         ax.fill_between(x, mean - std, mean + std, alpha=0.15, color=color)

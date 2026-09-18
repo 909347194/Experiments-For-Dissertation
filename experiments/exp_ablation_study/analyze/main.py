@@ -131,9 +131,9 @@ def main():
     # ═══════════════════════════════════════════════════════════
     tex_content = (
         r"% 消融实验结果表格 — 自动生成" "\n"
-        r"% 编译: pdflatex ablation_tables.tex" "\n"
+        r"% 编译: xelatex ablation_tables.tex   (pdflatex 无法渲染中文)" "\n"
         r"\documentclass{article}" "\n"
-        r"\usepackage[utf8]{inputenc}" "\n"
+        r"\usepackage[UTF8]{ctex}" "\n"
         r"\usepackage{booktabs}" "\n"
         r"\usepackage{amsmath}" "\n"
         r"\usepackage[margin=1in]{geometry}" "\n"

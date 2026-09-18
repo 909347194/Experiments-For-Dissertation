@@ -251,7 +251,7 @@ def generate_latex_convergence_speed_table(conv_gens: dict, thresholds: list[flo
         thresholds = [0.90, 0.95, 0.99]
     from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
     cols = "l" + "l" + "c" * len(thresholds)
-    th_headers = " & ".join(f"达到{int(t*100)}\\%\\改进" for t in thresholds)
+    th_headers = " & ".join(f"达到 {int(t*100)}\\% 改进" for t in thresholds)
     lines = [
         r"\begin{table}[htbp]", r"\centering",
         r"\caption{收敛速度对比：达到 X\% 改进所需的代数（cost 场景下取中位数）}",

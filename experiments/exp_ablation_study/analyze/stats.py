@@ -65,12 +65,28 @@ def p_mark(p: float) -> str:
 
 # ── 收敛曲线分析 ──────────────────────────────────────────
 
-def extract_convergence_curves(results: list[dict]) -> list[list[float]]:
+def curve_gens(run: dict) -> list[int]:
+    """返回某 run 收敛曲线的**真实代数轴**（与 ``convergence_curve`` 等长）。
+
+    ``convergence_curve[i]`` 与 ``generation_records[i]['gen']`` 一一对应。
+    记录粒度因配置而异：A0（DMDE）逐代记录 → 1001 点；LLM 配置每
+    ``max(1, max_generations // 100)`` 代记录一次 → 约 101 点。
+    因此**绝不能用采样下标充当横轴**（否则 LLM 曲线会被横向压缩/拉伸）。
+    """
+    curve = run.get("convergence_curve", [])
+    recs = run.get("generation_records", [])
+    if recs and len(recs) == len(curve):
+        return [int(x.get("gen", i)) for i, x in enumerate(recs)]
+    return list(range(len(curve)))
+
+
+def extract_convergence_curves(results: list[dict]) -> list[tuple[list[int], list[float]]]:
+    """返回 ``[(gens, curve), ...]``，``gens`` 为该 run 的真实代数轴。"""
     curves = []
     for r in results:
         curve = r.get("convergence_curve", [])
         if curve:
-            curves.append(curve)
+            curves.append((curve_gens(r), list(curve)))
     return curves
 
 
@@ -83,12 +99,23 @@ def extract_cr_histories(results: list[dict]) -> list[list[float]]:
     return histories
 
 
-def compute_convergence_stats(curves: list[list[float]]) -> dict:
+def compute_convergence_stats(curves: list[tuple[list[int], list[float]]]) -> dict:
+    """对同一配置的多 run 曲线求逐代均值/标准差。
+
+    Args:
+        curves: ``extract_convergence_curves`` 的输出，即 ``[(gens, curve), ...]``。
+            同一配置内各 run 的采样粒度一致（同为逐代或同为每 10 代）。
+
+    Returns:
+        含 ``gens``（真实代数轴）的统计字典；``gens`` 与 ``mean`` 等长。
+    """
     if not curves:
         return {}
-    min_len = min(len(c) for c in curves)
-    arr = np.array([c[:min_len] for c in curves])
+    min_len = min(len(c) for _, c in curves)
+    arr = np.array([c[:min_len] for _, c in curves])
+    gens = [int(g) for g in curves[0][0][:min_len]]
     return {
+        "gens": gens,
         "mean": arr.mean(axis=0).tolist(),
         "std": arr.std(axis=0).tolist(),
         "min": arr.min(axis=0).tolist(),
@@ -186,6 +213,7 @@ def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) ->
                 curve = r.get("convergence_curve", [])
                 if len(curve) < 2:
                     continue
+                gens = curve_gens(r)
                 initial_best = curve[0]
                 final_best = curve[-1]
                 improvement = initial_best - final_best
@@ -198,10 +226,10 @@ def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) ->
                 for t in thresholds:
                     # 目标：fitness 已下降到 initial - t*improvement
                     target = final_best + improvement * (1 - t)
-                    gen = len(curve) - 1  # 默认最后一代
+                    gen = gens[-1]  # 默认最后一代
                     for i, v in enumerate(curve):
                         if v <= target:
-                            gen = i
+                            gen = gens[i]  # 用**真实代数**，不是采样下标
                             break
                     gen_at[t].append(gen)
             # 取中位数（忽略 -1 卡点）
@@ -210,6 +238,25 @@ def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) ->
                 for t, gens in gen_at.items()
             }
     return result
+
+
+def initial_pop_value(run: dict):
+    """取某 run 初始种群（gen 0）的**种群平均** fitness。
+
+    注意：必须用 ``generation_records`` 中 gen==0 的 ``fitness_mean``，
+    而**不能**用 ``convergence_curve[0]``——后者是初始种群的**最优**个体，
+    会被随机初始化个体主导（PopInit 只注入少数 LLM 解，几乎不会改变最优值），
+    因此无法反映 PopInit 注入解的质量。
+    仅当缺失逐代记录时才退回 ``convergence_curve[0]``。
+    """
+    recs = run.get("generation_records", [])
+    for x in recs:
+        if x.get("gen") == 0:
+            v = x.get("fitness_mean")
+            if v is not None:
+                return float(v)
+    curve = run.get("convergence_curve", [])
+    return float(curve[0]) if curve else None
 
 
 def extract_initial_pop_fitness(all_stats: dict) -> dict:
@@ -230,13 +277,13 @@ def extract_initial_pop_fitness(all_stats: dict) -> dict:
             init_fitnesses = []
             n_infeasible = 0
             for r in raw:
-                curve = r.get("convergence_curve", [])
-                if curve:
-                    v = curve[0]
-                    if np.isfinite(v):
-                        init_fitnesses.append(v)
-                    else:
-                        n_infeasible += 1
+                v = initial_pop_value(r)
+                if v is None:
+                    continue
+                if np.isfinite(v):
+                    init_fitnesses.append(v)
+                else:
+                    n_infeasible += 1
             if init_fitnesses:
                 arr = np.array(init_fitnesses)
                 result[f"{s_key}_{c_key}"] = {

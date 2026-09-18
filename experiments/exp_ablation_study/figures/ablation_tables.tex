@@ -1,7 +1,7 @@
 % 消融实验结果表格 — 自动生成
-% 编译: pdflatex ablation_tables.tex
+% 编译: xelatex ablation_tables.tex   (pdflatex 无法渲染中文)
 \documentclass{article}
-\usepackage[utf8]{inputenc}
+\usepackage[UTF8]{ctex}
 \usepackage{booktabs}
 \usepackage{amsmath}
 \usepackage[margin=1in]{geometry}
@@ -17,7 +17,15 @@
 \toprule
 场景 & 配置 & Best & Mean $\pm$ Std & Median \\
 \midrule
-balanced ($N=M=10$) & +PopInit & 325672.23 & 325672.23 $\pm$ 0.00 & 325672.23 \\
+balanced ($N=M=10$) & Vanilla DMDE & 325847.82 & 325847.82 $\pm$ 0.00 & 325847.82 \\
+ & +CR Control & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
+ & +PopInit & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
+ & Full LLM-DMDE & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
+\midrule
+srp ($N=10, M=20$) & Vanilla DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+ & +CR Control & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+ & +PopInit & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+ & Full LLM-DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -30,8 +38,15 @@ balanced ($N=M=10$) & +PopInit & 325672.23 & 325672.23 $\pm$ 0.00 & 325672.23 \\
 \toprule
 场景 & 配置 & 总耗时(s) & DMDE(s) & LLM总耗时(s) & LLM Init(s) & LLM CR(s) \\
 \midrule
-balanced ($N=M=10$) & +PopInit & 125.5 & 81.0 & 44.5 & 44.5 & --- \\
+balanced ($N=M=10$) & Vanilla DMDE & 21.6 & 21.6 & --- & --- & --- \\
+ & +CR Control & 73.1 & 15.6 & 57.5 & --- & 57.5 \\
+ & +PopInit & 69.7 & 22.1 & 47.6 & 47.6 & --- \\
+ & Full LLM-DMDE & 115.2 & 16.2 & 98.9 & 43.3 & 55.6 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 19.9 & 19.9 & --- & --- & --- \\
+ & +CR Control & 63.5 & 13.2 & 50.3 & --- & 50.3 \\
+ & +PopInit & 85.4 & 20.0 & 65.4 & 65.4 & --- \\
+ & Full LLM-DMDE & 130.9 & 13.3 & 117.6 & 64.6 & 53.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -62,6 +77,8 @@ srp ($N=10, M=20$) & --- & --- & --- \\
 \toprule
 场景 & $\Delta A_1$ (CR) & $\Delta A_2$ (PopInit) & $\Delta A_3$ (Full) & $\Delta A_1 + \Delta A_2$ & 协同比 & 结论 \\
 \midrule
+$S1$ & +175.59 & +175.59 & +175.59 & +351.18 & 0.500 & 存在冗余 \\
+$S2$ & +0.00 & +0.00 & +0.00 & +0.00 & n/a & 无显著差异 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -74,10 +91,17 @@ srp ($N=10, M=20$) & --- & --- & --- \\
 \label{tab:convergence_speed}
 \begin{tabular}{llccc}
 \toprule
-场景 & 配置 & 达到90\%\改进 & 达到95\%\改进 & 达到99\%\改进 \\
+场景 & 配置 & 达到 90\% 改进 & 达到 95\% 改进 & 达到 99\% 改进 \\
 \midrule
-balanced ($N=M=10$) & +PopInit & 2 & 2 & 18 \\
+balanced ($N=M=10$) & Vanilla DMDE & 280 & 280 & 280 \\
+ & +CR Control & 140 & 140 & 140 \\
+ & +PopInit & 210 & 210 & 210 \\
+ & Full LLM-DMDE & 90 & 150 & 420 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & --- & --- & --- \\
+ & +CR Control & --- & --- & --- \\
+ & +PopInit & --- & --- & --- \\
+ & Full LLM-DMDE & --- & --- & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -92,8 +116,13 @@ balanced ($N=M=10$) & +PopInit & 2 & 2 & 18 \\
 \toprule
 场景 & 配置 & 初始 Mean $\pm$ Std & 初始 Median \\
 \midrule
-balanced ($N=M=10$) & +PopInit & 361831.27 $\pm$ 0.00 & 361831.27 \\
+balanced ($N=M=10$) & Vanilla DMDE & 455901.54 $\pm$ 0.00 & 455901.54 \\
+ & +PopInit & 450225.41 $\pm$ 0.00 & 450225.41 \\
+ & Full LLM-DMDE & 453090.87 $\pm$ 0.00 & 453090.87 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 872616.02 $\pm$ 0.00 & 872616.02 \\
+ & +PopInit & 872616.02 $\pm$ 0.00 & 872616.02 \\
+ & Full LLM-DMDE & 872616.02 $\pm$ 0.00 & 872616.02 \\
 \bottomrule
 \end{tabular}
 \end{table}
