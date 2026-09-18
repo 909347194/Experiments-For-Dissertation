@@ -45,7 +45,9 @@ class _PerturbRng:
 class SRPPerturbationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.n_uavs = 1
-        self.cost_matrix = np.arange(16, dtype=float).reshape(4, 4)
+        # 布局约定：行 0..n_uavs-1 = C_UT，行 n_uavs..n_uavs+n_targets-1 = C_TT。
+        # 4 个 target → 需要 5 行。
+        self.cost_matrix = np.arange(20, dtype=float).reshape(5, 4)
 
     def _genes(self) -> list[Gene]:
         return [
