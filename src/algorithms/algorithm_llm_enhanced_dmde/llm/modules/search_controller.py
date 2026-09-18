@@ -69,11 +69,13 @@ class LLMSearchControllerModule(BaseLLMModule):
         if stage_hist:
             lines = ["Stage | CR | Best Fitness | Δf(%) | Diversity | ΔD"]
             for s in stage_hist[-5:]:
+                df = f"{s['delta_fitness']:+6.2f}%" if s['delta_fitness'] is not None else "    N/A"
+                dd = f"{s['delta_diversity']:+.4f}" if s['delta_diversity'] is not None else "    N/A"
                 lines.append(
                     f"{s['stage']:5d} | {s['cr']:.1f} | "
                     f"{s['best_fitness']:12.1f} | "
-                    f"{s['delta_fitness']:+6.2f}% | "
-                    f"{s['diversity']:.4f} | {s['delta_diversity']:+.4f}"
+                    f"{df} | "
+                    f"{s['diversity']:.4f} | {dd}"
                 )
             trajectory_text = "\n".join(lines)
 
@@ -86,16 +88,13 @@ class LLMSearchControllerModule(BaseLLMModule):
                 f"First decision: no previous LLM action/outcome available.\n"
                 f"No prior CR context to evaluate. Choose CR based on current state."
             )
-        elif state.delta_fitness is not None and state.prev_delta_diversity is not None:
+        elif state.delta_fitness is not None and state.delta_diversity is not None:
             # 后续调用：中性事实描述（不预设因果、不给建议）
-            prev_gen_str = ""
-            if stage_hist:
-                prev_gen_str = f" at gen {stage_hist[-1].get('gen_end', '?')}"
             feedback = (
                 f"\n\n## Last Decision Feedback\n"
-                f"Under CR={state.prev_action:.1f}{prev_gen_str}, "
+                f"Under CR={state.prev_action:.1f}, "
                 f"the observed stage outcome was "
-                f"Δf={state.delta_fitness:+.2f}%, ΔD={state.prev_delta_diversity:+.4f}."
+                f"Δf={state.delta_fitness:+.2f}%, ΔD={state.delta_diversity:+.4f}."
             )
 
         user = get_prompt(
