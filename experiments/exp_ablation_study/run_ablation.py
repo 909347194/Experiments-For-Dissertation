@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from analyze.main import main as analyze_main
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 # SCRIPT_DIR = <repo>/experiments/exp_ablation_study → 仓库根目录是 parents[1]
@@ -73,3 +74,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    analyze_main()  # 运行 analyze.py 生成对比图表

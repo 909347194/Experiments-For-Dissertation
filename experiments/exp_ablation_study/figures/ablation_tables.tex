@@ -17,15 +17,15 @@
 \toprule
 场景 & 配置 & Best & Mean $\pm$ Std & Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 325847.82 & 325847.82 $\pm$ 0.00 & 325847.82 \\
- & +CR Control & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
- & +PopInit & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
- & Full LLM-DMDE & \textbf{325672.23} & \textbf{325672.23} $\pm$ 0.00 & \textbf{325672.23} \\
+balanced ($N=M=10$) & Vanilla DMDE & \textbf{325672.23} & \textbf{325730.76} $\pm$ 101.38 & \textbf{325672.23} \\
+ & +CR Control & \textbf{325672.23} & 325789.29 $\pm$ 101.38 & 325847.82 \\
+ & +PopInit & \textbf{325672.23} & 325761.63 $\pm$ 154.85 & \textbf{325672.23} \\
+ & Full LLM-DMDE & \textbf{325672.23} & \textbf{325730.76} $\pm$ 101.38 & \textbf{325672.23} \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
- & +CR Control & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
- & +PopInit & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
- & Full LLM-DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm$ 0.00 & \textbf{689102.82} \\
+srp ($N=10, M=20$) & Vanilla DMDE & \textbf{669221.05} & \textbf{682078.75} $\pm$ 11150.99 & \textbf{687912.37} \\
+ & +CR Control & \textbf{669221.05} & \textbf{682078.75} $\pm$ 11150.99 & \textbf{687912.37} \\
+ & +PopInit & \textbf{669221.05} & \textbf{682078.75} $\pm$ 11150.99 & \textbf{687912.37} \\
+ & Full LLM-DMDE & \textbf{669221.05} & \textbf{682078.75} $\pm$ 11150.99 & \textbf{687912.37} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -38,15 +38,15 @@ srp ($N=10, M=20$) & Vanilla DMDE & \textbf{689102.82} & \textbf{689102.82} $\pm
 \toprule
 场景 & 配置 & 总耗时(s) & DMDE(s) & LLM总耗时(s) & LLM Init(s) & LLM CR(s) \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 21.6 & 21.6 & --- & --- & --- \\
- & +CR Control & 73.1 & 15.6 & 57.5 & --- & 57.5 \\
- & +PopInit & 69.7 & 22.1 & 47.6 & 47.6 & --- \\
- & Full LLM-DMDE & 115.2 & 16.2 & 98.9 & 43.3 & 55.6 \\
+balanced ($N=M=10$) & Vanilla DMDE & 59.2 & 59.2 & --- & --- & --- \\
+ & +CR Control & 96.8 & 41.6 & 55.2 & --- & 55.2 \\
+ & +PopInit & 99.4 & 59.1 & 40.2 & 40.2 & --- \\
+ & Full LLM-DMDE & 166.6 & 41.2 & 125.4 & 60.4 & 65.1 \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & 19.9 & 19.9 & --- & --- & --- \\
- & +CR Control & 63.5 & 13.2 & 50.3 & --- & 50.3 \\
- & +PopInit & 85.4 & 20.0 & 65.4 & 65.4 & --- \\
- & Full LLM-DMDE & 130.9 & 13.3 & 117.6 & 64.6 & 53.0 \\
+srp ($N=10, M=20$) & Vanilla DMDE & 48.0 & 48.0 & --- & --- & --- \\
+ & +CR Control & 100.3 & 32.2 & 68.1 & --- & 68.1 \\
+ & +PopInit & 120.5 & 48.2 & 72.3 & 72.3 & --- \\
+ & Full LLM-DMDE & 171.2 & 32.5 & 138.7 & 66.6 & 72.1 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -77,7 +77,7 @@ srp ($N=10, M=20$) & --- & --- & --- \\
 \toprule
 场景 & $\Delta A_1$ (CR) & $\Delta A_2$ (PopInit) & $\Delta A_3$ (Full) & $\Delta A_1 + \Delta A_2$ & 协同比 & 结论 \\
 \midrule
-$S1$ & +175.59 & +175.59 & +175.59 & +351.18 & 0.500 & 存在冗余 \\
+$S1$ & -58.53 & -30.87 & +0.00 & -89.40 & -0.000 & 存在冗余 \\
 $S2$ & +0.00 & +0.00 & +0.00 & +0.00 & n/a & 无显著差异 \\
 \bottomrule
 \end{tabular}
@@ -93,10 +93,10 @@ $S2$ & +0.00 & +0.00 & +0.00 & +0.00 & n/a & 无显著差异 \\
 \toprule
 场景 & 配置 & 达到 90\% 改进 & 达到 95\% 改进 & 达到 99\% 改进 \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 280 & 280 & 280 \\
- & +CR Control & 140 & 140 & 140 \\
- & +PopInit & 210 & 210 & 210 \\
- & Full LLM-DMDE & 90 & 150 & 420 \\
+balanced ($N=M=10$) & Vanilla DMDE & 152 & 152 & 240 \\
+ & +CR Control & 70 & 140 & 140 \\
+ & +PopInit & 220 & 230 & 270 \\
+ & Full LLM-DMDE & 100 & 270 & 460 \\
 \midrule
 srp ($N=10, M=20$) & Vanilla DMDE & --- & --- & --- \\
  & +CR Control & --- & --- & --- \\
@@ -116,13 +116,13 @@ srp ($N=10, M=20$) & Vanilla DMDE & --- & --- & --- \\
 \toprule
 场景 & 配置 & 初始 Mean $\pm$ Std & 初始 Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & 455901.54 $\pm$ 0.00 & 455901.54 \\
- & +PopInit & 450225.41 $\pm$ 0.00 & 450225.41 \\
- & Full LLM-DMDE & 453090.87 $\pm$ 0.00 & 453090.87 \\
+balanced ($N=M=10$) & Vanilla DMDE & 465205.83 $\pm$ 8362.75 & 467620.05 \\
+ & +PopInit & 456937.94 $\pm$ 7779.32 & 459584.54 \\
+ & Full LLM-DMDE & 455851.13 $\pm$ 5175.79 & 457157.33 \\
 \midrule
-srp ($N=10, M=20$) & Vanilla DMDE & 872616.02 $\pm$ 0.00 & 872616.02 \\
- & +PopInit & 872616.02 $\pm$ 0.00 & 872616.02 \\
- & Full LLM-DMDE & 872616.02 $\pm$ 0.00 & 872616.02 \\
+srp ($N=10, M=20$) & Vanilla DMDE & 859931.52 $\pm$ 19609.41 & 869832.94 \\
+ & +PopInit & 859931.52 $\pm$ 19609.41 & 869832.94 \\
+ & Full LLM-DMDE & 859931.52 $\pm$ 19609.41 & 869832.94 \\
 \bottomrule
 \end{tabular}
 \end{table}
