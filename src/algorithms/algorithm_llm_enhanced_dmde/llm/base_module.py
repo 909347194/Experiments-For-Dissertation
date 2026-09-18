@@ -161,6 +161,14 @@ class ModuleState:
     feasible_ratio: float = 0.0
     violation_mean: float = 0.0
     violation_max: float = 0.0
+    # Δ 趋势信号（闭环控制用）
+    delta_fitness: float = 0.0       # Δf_t: 当前 stage 的 fitness 变化（%）
+    delta_diversity: float = 0.0     # ΔD_t: 当前 stage 的多样性变化
+    prev_delta_fitness: float = 0.0  # Δf_{t-1}: 上个 stage 的 fitness 变化
+    prev_delta_diversity: float = 0.0  # ΔD_{t-1}: 上个 stage 的多样性变化
+    prev_action: float | None = None  # CR_{t-1}: 上次 LLM 选择的 CR
+    # Stage 级轨迹历史（最近 N 个 stage 的汇总）
+    stage_history: list[dict[str, Any]] | None = None
     # DE 参数（当前值，模块可以读取或修改）
     cr: float = 0.5
     f_scale: float = 0.5

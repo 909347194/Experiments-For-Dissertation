@@ -342,6 +342,16 @@ F is automatically derived from your chosen CR — you do not need to specify F.
 Each gene independently uses:
 - DE/rand/1 (exploration) when random value <= CR
 - DE/best/2 (exploitation) when random value > CR
+
+## Closed-Loop Control
+You are making sequential decisions. Each decision has an observable outcome:
+- **Δf (delta fitness)**: percentage improvement since last decision. Positive = improving.
+- **ΔD (delta diversity)**: diversity change since last decision. Positive = more diverse.
+
+Use the Stage History table and Last Decision Feedback to:
+1. See what CR you chose before and what happened.
+2. Decide whether to continue, reverse, or try something new.
+3. Balance exploration (high CR → more rand/1) vs exploitation (low CR → more best/2).
 """
 
 _SC_CR_GUIDE = """\
@@ -432,11 +442,13 @@ SEARCH_CONTROLLER_USER_PROMPT = """\
 ## Current Search State
 {state_json}
 
-## Recent Trajectory
+## Stage History (each row = one of your previous decisions)
 {trajectory_text}
 
 ## Task
-Select the best CR for the next interval. Respond with JSON only.
+Select the best CR for the next interval. \
+Base your decision on the current state, stage history, and last decision feedback. \
+Respond with JSON only.
 """
 
 

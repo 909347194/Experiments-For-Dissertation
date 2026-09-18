@@ -218,6 +218,12 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         llm_cr_prev_diversity = 0.0                     # 上次 LLM CR 决定时的 diversity
         llm_cr_prev_gen = 0                             # 上次 LLM CR 决定时的代数
 
+        # Stage 级历史记录（闭环控制用）
+        # 每次 LLM 调用 = 一个 stage，记录 stage 结束时的 fitness/diversity/CR
+        stage_history: list[dict] = []
+        stage_fitness = best_individual.fitness   # 当前 stage 起始 fitness
+        stage_diversity = compute_diversity(population)  # 当前 stage 起始 diversity
+
         t_start = time.time()
 
         # ---- Step 2: DMDE 进化迭代 ----
@@ -239,20 +245,64 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 )
                 state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
 
-                # 注入上次 LLM CR 决策的反馈（闭环控制）
+                # ---- Δ 趋势信号（闭环控制核心） ----
+                current_fitness = best_individual.fitness
+                current_diversity = compute_diversity(population)
+
+                # Δf_t: 当前 stage 的 fitness 变化（%）
+                if stage_fitness > 0 and np.isfinite(stage_fitness):
+                    delta_fitness = (stage_fitness - current_fitness) / stage_fitness * 100.0
+                else:
+                    delta_fitness = 0.0
+                # ΔD_t: 当前 stage 的多样性变化
+                delta_diversity = current_diversity - stage_diversity
+
+                # Δf_{t-1}, ΔD_{t-1}: 上个 stage 的变化
+                if len(stage_history) >= 1:
+                    prev = stage_history[-1]
+                    prev_delta_fitness = prev.get("delta_fitness", 0.0)
+                    prev_delta_diversity = prev.get("delta_diversity", 0.0)
+                else:
+                    prev_delta_fitness = 0.0
+                    prev_delta_diversity = 0.0
+
+                # 注入 Δ 信号到 state
+                state.delta_fitness = round(delta_fitness, 4)
+                state.delta_diversity = round(delta_diversity, 4)
+                state.prev_delta_fitness = round(prev_delta_fitness, 4)
+                state.prev_delta_diversity = round(prev_delta_diversity, 4)
+                state.prev_action = llm_cr
+                state.stage_history = stage_history[-5:]  # 最近 5 个 stage
+
+                # 旧版反馈字段保留兼容
                 state.extra["previous_llm_cr"] = llm_cr
                 state.extra["previous_interval_gens"] = gen - llm_cr_prev_gen
-                state.extra["fitness_change_since_last"] = llm_cr_prev_fitness - best_individual.fitness
-                state.extra["diversity_change_since_last"] = compute_diversity(population) - llm_cr_prev_diversity
+                state.extra["fitness_change_since_last"] = llm_cr_prev_fitness - current_fitness
+                state.extra["diversity_change_since_last"] = current_diversity - llm_cr_prev_diversity
 
                 decision = sc_module.inject(state)
                 self._record_decision(gen, "search_controller", decision, state)
 
                 if decision and "cr" in decision:
-                    llm_cr = decision["cr"]
-                    # 记录本次决策时的状态快照，供下次反馈
-                    llm_cr_prev_fitness = best_individual.fitness
-                    llm_cr_prev_diversity = compute_diversity(population)
+                    new_cr = decision["cr"]
+                    # 记录 stage 结束时的快照到 stage_history
+                    stage_history.append({
+                        "stage": len(stage_history) + 1,
+                        "gen_start": llm_cr_prev_gen,
+                        "gen_end": gen,
+                        "cr": new_cr,
+                        "best_fitness": round(current_fitness, 2),
+                        "delta_fitness": round(delta_fitness, 4),
+                        "diversity": round(current_diversity, 4),
+                        "delta_diversity": round(delta_diversity, 4),
+                    })
+                    # 更新 stage 起始快照
+                    stage_fitness = current_fitness
+                    stage_diversity = current_diversity
+                    # 更新 LLM 决策缓存
+                    llm_cr = new_cr
+                    llm_cr_prev_fitness = current_fitness
+                    llm_cr_prev_diversity = current_diversity
                     llm_cr_prev_gen = gen
 
             # CR 来源：LLM 决定 or 公式 3-9（与纯 DMDE 一致）
