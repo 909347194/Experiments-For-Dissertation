@@ -1,0 +1,22 @@
+%==============================================================================
+%  摘要（Abstract）
+%  要求：单段、无公式、无引用、无脚注；Elsevier 建议 150--250 词
+%  注意：中文只能出现在注释里，不能出现在正文/\todo{} 中（pdflatex 无法渲染中文）
+%==============================================================================
+
+Differential evolution (DE) is widely adopted for multi-UAV cooperative path
+planning, yet its performance hinges on two decisions that are usually fixed by
+hand: how the initial population is seeded, and how the crossover rate is set
+along the search. This paper proposes an LLM-enhanced DE framework that
+delegates these two decisions to a large language model (LLM) without changing
+the underlying evolutionary operators. The LLM first repairs and injects a small
+number of feasible solutions into the initial population, and then re-tunes the
+crossover rate at fixed intervals using feedback on fitness improvement and
+population diversity. We evaluate the framework on two scenarios -- a balanced
+assignment task and a scarce-resource task -- against a vanilla DE baseline and
+against its two components in isolation.
+\todo{add one sentence of the key quantitative finding}.
+The results indicate that \todo{main finding}, while the computational overhead
+introduced by the LLM is reported separately. The proposed framework offers a
+practical route to reuse pretrained language models as plug-in controllers for
+evolutionary optimizers.

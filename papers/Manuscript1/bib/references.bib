@@ -1,0 +1,116 @@
+%==============================================================================
+%  参考文献库（BibTeX）
+%
+%  维护规则：
+%    1. 只从权威来源导出（DBLP / Google Scholar / 期刊官网 "Export citation"），
+%       不要手敲卷期页码，避免出现无法核对的条目。
+%    2. key 命名建议：第一作者姓氏+年份+关键词，如 storn1997de、liu2024eoh；
+%       全文引用时沿用同一 key。
+%    3. 新增条目后运行 make 会自动跑 BibTeX；未被引用的条目不会出现在 PDF 中。
+%    4. 投稿前用 make check 检查未定义引用与重复 key。
+%==============================================================================
+
+%------------------------------------------------------------------------------
+%  进化计算基础文献（已核对）
+%------------------------------------------------------------------------------
+
+@article{storn1997de,
+  author  = {Storn, Rainer and Price, Kenneth},
+  title   = {Differential Evolution -- A Simple and Efficient Heuristic for
+             Global Optimization over Continuous Spaces},
+  journal = {Journal of Global Optimization},
+  volume  = {11},
+  number  = {4},
+  pages   = {341--359},
+  year    = {1997},
+  doi     = {10.1023/A:1008202821328}
+}
+
+@article{das2011de,
+  author  = {Das, Swagatam and Suganthan, Ponnuthurai Nagaratnam},
+  title   = {Differential Evolution: A Survey of the State-of-the-Art},
+  journal = {IEEE Transactions on Evolutionary Computation},
+  volume  = {15},
+  number  = {1},
+  pages   = {4--31},
+  year    = {2011},
+  doi     = {10.1109/TEVC.2010.2059031}
+}
+
+@article{brest2006self,
+  author  = {Brest, Janez and Greiner, Sao and Boskovic, Borko and
+             Mernik, Marjan and Zumer, Viljem},
+  title   = {Self-Adapting Control Parameters in Differential Evolution:
+             A Comparative Study on Numerical Benchmark Problems},
+  journal = {IEEE Transactions on Evolutionary Computation},
+  volume  = {10},
+  number  = {6},
+  pages   = {646--657},
+  year    = {2006},
+  doi     = {10.1109/TEVC.2006.872133}
+}
+
+@article{zhang2009jade,
+  author  = {Zhang, Jingqiao and Sanderson, Arthur C.},
+  title   = {{JADE}: Adaptive Differential Evolution with Optional External
+             Archive},
+  journal = {IEEE Transactions on Evolutionary Computation},
+  volume  = {13},
+  number  = {5},
+  pages   = {945--958},
+  year    = {2009},
+  doi     = {10.1109/TEVC.2009.2014613}
+}
+
+%------------------------------------------------------------------------------
+%  LLM 用于优化 / 自动算法设计（**卷期与 DOI 待核对**）
+%  导出建议：DBLP 搜索标题 -> "Export" -> BibTeX，替换下面条目即可
+%------------------------------------------------------------------------------
+
+@misc{yang2023opro,
+  author       = {Yang, Chengrun and Wang, Xuezhi and Lu, Yifeng and Liu, Hanxiao
+                  and Le, Quoc V. and Zhou, Denny and Chen, Xinyun},
+  title        = {Large Language Models as Optimizers},
+  howpublished = {arXiv preprint},
+  note         = {TODO: verify the arXiv identifier and final venue},
+  year         = {2023}
+}
+
+@misc{romera2024funsearch,
+  author       = {Romera-Paredes, Bernardino and others},
+  title        = {Mathematical Discoveries from Program Search with Large
+                  Language Models},
+  howpublished = {Nature},
+  note         = {TODO: verify volume, pages and DOI},
+  year         = {2024}
+}
+
+@misc{liu2024eoh,
+  author       = {Liu, Fei and Tong, Xialiang and Yuan, Mingxuan and Lin, Xi and
+                  Luo, Fu and Wang, Zhenkun and Lu, Zhichao and Zhang, Qingfu},
+  title        = {Evolution of Heuristics: Towards Efficient Automatic Algorithm
+                  Design Using Large Language Model},
+  howpublished = {Proc. of ICML},
+  note         = {TODO: verify the proceedings page numbers},
+  year         = {2024}
+}
+
+@misc{liu2023llmevo,
+  author       = {Liu, Shengcai and Chen, Caishun and Qu, Xinghua and Tang, Ke
+                  and Ong, Yew-Soon},
+  title        = {Large Language Models as Evolutionary Optimizers},
+  howpublished = {arXiv preprint},
+  note         = {TODO: verify the arXiv identifier and final venue},
+  year         = {2023}
+}
+
+%------------------------------------------------------------------------------
+%  领域文献：多无人机协同路径规划 / 雷达威胁规避（**待补**）
+%  这部分必须来自你自己读过的论文，避免引用二手转述
+%------------------------------------------------------------------------------
+
+%   新增条目请从 DBLP / 期刊官网导出，键名形如 authorYYYYkeywords；
+%   article 必填 author/title/journal/year，再补 volume/number/pages/doi 中的可用项。
+%   如下是字段模板（去掉行首 % 并填入真实信息即可）：
+%     author  = {},  title = {},  journal = {},
+%     volume  = {},  number = {},  pages = {},  year = {},  doi = {}

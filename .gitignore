@@ -75,3 +75,6 @@ htmlcov/
 
 # Data symlinks (actual data in exp_dmde)
 experiments/exp_ablation_study/*/data
+
+# Manuscript1 实验同步产物（由 make sync 重新生成）
+papers/Manuscript1/tables/imported/

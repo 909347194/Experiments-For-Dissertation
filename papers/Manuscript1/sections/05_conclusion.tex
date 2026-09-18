@@ -1,0 +1,23 @@
+%==============================================================================
+%  5. Conclusion
+%==============================================================================
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented an LLM-enhanced differential evolution framework for
+multi-UAV cooperative path planning in which a pretrained language model acts as
+a plug-in controller for population initialization and crossover-rate
+adaptation, leaving the evolutionary operators unchanged. The framework was
+evaluated through an ablation study on a balanced and a scarce-resource scenario.
+% 待补：一句话概括最重要的结论
+\todo{summarise the single most important conclusion in one sentence.}
+
+The study also exposes a limitation that we consider practically important: the
+benefit of LLM-driven seeding depends on whether the generated candidates can be
+repaired to feasibility, which does not hold in tightly constrained scenarios.
+Future work will therefore target constraint-aware prompting and a repair
+mechanism that is informed by the constraint structure rather than by
+duplicate elimination alone. % 待补：其它未来工作方向（多目标扩展、算子层面的 LLM 参与）
+\todo{add further directions, e.g. multi-objective extensions and LLM
+      involvement at the operator level.}

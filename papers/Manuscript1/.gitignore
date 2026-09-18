@@ -1,0 +1,27 @@
+# ── LaTeX 中间产物与产物（统一由 latexmk 放进 build/）──────────────
+build/
+
+# 万一有人直接跑了 pdflatex / xelatex / bibtex，兜底忽略这些散落文件
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.spl
+*.synctex.gz
+*.bcf
+*.run.xml
+*.nav
+*.snm
+*.vrb
+
+# 编辑器 / 同步文件
+.texpadtmp/
+*.texpad.loc
+.vscode/settings.json
+__latexindent_temp.*

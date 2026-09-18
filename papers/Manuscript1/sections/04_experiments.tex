@@ -1,0 +1,104 @@
+%==============================================================================
+%  4. Experimental Results and Discussion
+%==============================================================================
+
+\section{Experimental Results and Discussion}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+\label{subsec:setup}
+
+\textbf{Scenarios.} Two scenarios are constructed over a DEM of the Chengguan
+district of Lhasa ($91.02^{\circ}$--$91.28^{\circ}$E,
+$29.52^{\circ}$--$29.73^{\circ}$N), with two radar threat fields of radius
+\SI{5000}{m} and \SI{6000}{m}. The \emph{balanced} scenario has
+$\Np = \Mt = 10$, so every UAV can be assigned a distinct target; the
+\emph{scarce-resource} scenario has $\Np = 10$ and $\Mt = 20$, which tightens the
+assignment constraints considerably.
+
+\textbf{Baseline and variants.} Four configurations are compared:
+a vanilla \dmde{} baseline (A0), \popinit{} only (A2, ``+PopInit''),
+\crctrl{} only (A1, ``+CR Control''), and the full framework (A3,
+``Full \llmdmde{}'').
+
+\textbf{Parameters.} Population size $\NP = 50$; maximum generations
+$\Gmax = 1000$; scaling factor $\Ffactor = 0.5$;
+\todo{verify the baseline values of \Ffactor{} and \CR{}};
+30 independent runs per configuration with seeds $42$--$71$. The LLM is
+Qwen3-14B served by SiliconFlow with thinking disabled, temperature $0.7$;
+\popinit{} injects $\rho = 10\%$ of the population using a top-$k = 3$
+preference list, and \crctrl{} is queried every $I = 50$ generations.
+
+\textbf{Metrics.} Solution quality (best, mean $\pm$ standard deviation and
+median of the final cost), convergence speed (generations needed to reach $90\%$,
+$95\%$ and $99\%$ of the total improvement), and wall-clock cost decomposed into
+the DMDE loop and LLM calls.
+
+% 待补：硬件环境（CPU 型号/内存）、软件版本与代码可获取性说明
+\todo{report the hardware (CPU, memory), software versions and how to obtain
+      the code.}
+
+\subsection{Comparison with Existing Methods}
+\label{subsec:comparison}
+
+% 这一节与 4.3 的边界：4.2 与外部方法/基线整体对比，4.3 做内部消融
+
+% 待补：填入与基线方法的整体对比结果与讨论。若暂时只做内部消融，
+% 可把本节与 4.3 合并，并在 README 中同步更新章节编号
+\todo{insert the comparison against external baselines and its discussion;
+      if only the internal ablation is available, merge this subsection
+      into 4.3 and update the section numbering in README.md.}
+
+\subsection{Ablation Study}
+\label{subsec:ablation}
+
+\tabref{tab:ablation_results} reports the solution quality of the four
+configurations on both scenarios, and \figref{fig:convergence} shows the
+corresponding convergence curves.
+
+% --- 表格：从 experiments/ 同步而来（见 tables/README.md）---
+% \input{tables/ablation_solution_quality}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Solution quality over 30 runs. Best values are shown in bold where a
+           tie occurs.}
+  \label{tab:ablation_results}
+  \begin{tabular}{llcccc}
+    \toprule
+    Scenario & Configuration & Best & Mean $\pm$ Std & Median \\
+    \midrule
+    balanced & Vanilla \dmde{}   & \dots & \dots & \dots \\
+             & + \crctrl{}       & \dots & \dots & \dots \\
+             & + \popinit{}      & \dots & \dots & \dots \\
+             & Full \llmdmde{}   & \dots & \dots & \dots \\
+    \midrule
+    scarce   & Vanilla \dmde{}   & \dots & \dots & \dots \\
+             & + \crctrl{}       & \dots & \dots & \dots \\
+             & + \popinit{}      & \dots & \dots & \dots \\
+             & Full \llmdmde{}   & \dots & \dots & \dots \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  % \includegraphics[width=0.8\linewidth]{convergence_S1.pdf}
+  \fbox{\parbox[c][3.5cm][c]{0.8\linewidth}{\centering TODO: convergence curves}}
+  \caption{Mean convergence curves on the balanced scenario (shaded band:
+           $\pm$ one standard deviation over 30 runs).}
+  \label{fig:convergence}
+\end{figure}
+
+% 待补：讨论要点——\popinit{} 在 balanced 场景有效、在 scarce 场景因约束修复失败
+% 而退化为基线；\crctrl{} 的 CR 轨迹与收益；以及显著性检验结论
+\todo{discuss: \popinit{} helps on the balanced scenario but degenerates to the
+      baseline on the scarce-resource scenario because repair fails; the \CR{}
+      trajectory and gain of \crctrl{}; and the significance-test outcome.}
+
+\subsection{Scalability Analysis}
+\label{subsec:scalability}
+
+% 待补：随 N/M 增长时的解质量与 LLM 调用开销趋势，说明可扩展性与预算增长关系
+\todo{report how solution quality and LLM query overhead scale with $\Np$ and
+      $\Mt$, and whether the query budget grows linearly or sub-linearly.}

@@ -1,0 +1,78 @@
+%==============================================================================
+%  Manuscript 1 — LLM-Enhanced DMDE
+%
+%  本文件是**主控文件**，只负责“装配”：导言区 + 章节顺序 + 参考文献。
+%  正文内容一律写在 sections/ 下，不要在本文件里写正文。
+%
+%  构建（在本目录执行）：
+%      latexmk -pdf main        # 推荐：自动多轮编译 + BibTeX
+%      make                     # 等价封装（见 Makefile）
+%      make clean               # 清理中间产物
+%  产物路径：build/main.pdf
+%
+%  目标期刊：Elsevier（进化计算 / 智能优化 / 无人系统方向）
+%  章节安排见 README.md
+%==============================================================================
+
+\documentclass[preprint,12pt]{elsarticle}
+% 返修稿需要行号时改用：
+%   \documentclass[review,12pt]{elsarticle}
+%   并在 config/packages.tex 里取消 \linenumbers 的注释
+
+\input{config/packages}   % 宏包集中管理 —— 新增宏包只改这一个文件
+\input{config/commands}   % 自定义命令与数学符号
+
+\begin{document}
+
+%------------------------------------------------------------------------------
+%  前置部分：标题 / 作者 / 单位 / 摘要 / 关键词
+%------------------------------------------------------------------------------
+\begin{frontmatter}
+  \input{config/metadata}          % \title \author \address
+  \begin{abstract}
+    \input{sections/00_abstract}   % 摘要正文（纯文本，不放公式与引用）
+  \end{abstract}
+  \begin{keyword}
+    LLM-enhanced optimization \sep differential evolution \sep
+    multi-UAV cooperative path planning \sep adaptive crossover rate \sep
+    population initialization
+  \end{keyword}
+\end{frontmatter}
+
+%------------------------------------------------------------------------------
+%  正文：5 个主要章节
+%------------------------------------------------------------------------------
+\input{sections/01_introduction}          % 1. Introduction
+\input{sections/02_problem_formulation}   % 2. Problem Formulation and DMDE
+\input{sections/03_proposed_method}       % 3. Proposed LLM-Enhanced DMDE
+\input{sections/04_experiments}           % 4. Experimental Results and Discussion
+\input{sections/05_conclusion}            % 5. Conclusion
+
+%------------------------------------------------------------------------------
+%  附录（默认关闭，需要时取消注释）
+%------------------------------------------------------------------------------
+% \appendix
+% \input{sections/06_appendix}
+
+%------------------------------------------------------------------------------
+%  致谢 / 基金资助
+%------------------------------------------------------------------------------
+\section*{Acknowledgements}
+% TODO: 填写基金项目编号与致谢对象
+This work was supported by \dots
+
+%------------------------------------------------------------------------------
+%  投稿必需件（Elsevier）
+%  也可单独导出为独立文件上传 Editorial Manager，此处保留在正文中方便审阅
+%------------------------------------------------------------------------------
+\input{frontmatter/declaration_of_interest}
+\input{frontmatter/credit_author_statement}
+\input{frontmatter/data_availability}
+
+%------------------------------------------------------------------------------
+%  参考文献（BibTeX）
+%------------------------------------------------------------------------------
+\bibliographystyle{elsarticle-num}
+\bibliography{bib/references}
+
+\end{document}

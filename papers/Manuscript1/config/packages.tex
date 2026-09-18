@@ -1,0 +1,35 @@
+%==============================================================================
+%  宏包集中管理
+%  —— 新增宏包请写在这里；main.tex 与各 section 文件都不要直接 \usepackage
+%==============================================================================
+
+% --- 数学 ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{bm}
+
+% --- 图表 ---
+\usepackage{graphicx}
+\usepackage{booktabs}     % 三线表
+\usepackage{multirow}
+\usepackage{subcaption}   % 子图（subfigure 已被废弃）
+
+% --- 算法伪代码 ---
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% --- 颜色与超链接 ---
+\usepackage{xcolor}
+\usepackage{url}
+% elsarticle 自带 hyperref 请在类选项中开启；如需手动控制再放开下面两行
+% \usepackage[hidelinks]{hyperref}
+
+% --- 单位（可选，写实验参数时很省事）---
+\usepackage{siunitx}
+\sisetup{detect-all, group-separator={,}}
+
+% --- 图片搜索路径：\includegraphics{xxx} 会自动去 figures/ 下找 ---
+\graphicspath{{figures/}}
+
+% --- 返修稿行号（配合 \documentclass[review]{elsarticle} 使用）---
+% \linenumbers

@@ -1,0 +1,54 @@
+%==============================================================================
+%  1. Introduction
+%  写法约定：正文英文、注释中文；中文不得进入正文或 \todo{}（pdflatex 不支持）
+%==============================================================================
+
+\section{Introduction}
+\label{sec:intro}
+
+% 段落规划（可删）：
+%   P1 应用背景与工程动机
+%   P2 现有方法及其局限（DMDE 的 CR 固定、初始化随机）
+%   P3 LLM 用于优化的相关进展，指出 gap
+%   P4 本文贡献（bullet 列表）
+%   P5 论文结构
+
+Multi-UAV cooperative path planning requires a set of trajectories that
+simultaneously avoids terrain obstacles and radar threat fields while satisfying
+kinematic constraints and mission-level task assignment.
+\todo{state the essential difficulty: coupled constraints, non-convexity,
+expensive evaluation}.
+Differential evolution (DE) \citep{storn1997de} has become a popular solver for
+such continuous optimization problems owing to its simple structure and strong
+robustness.
+
+\todo{Paragraph 2: present the DMDE formulation and explain why two fixed
+hyper-parameters -- a fully random initial population and a constant crossover
+rate \CR{} -- limit solution quality and convergence speed.}
+
+\todo{Paragraph 3: review representative work on using LLMs for optimization
+(hyper-parameter control, operator design, heuristic generation) and state the
+gap: most approaches treat the LLM as a one-shot generator and lack a closed
+loop that feeds the outcome of the previous decision back to the model.}
+
+The main contributions of this work are summarised as follows.
+
+\begin{itemize}
+  \item We propose an \llmdmde{} framework that delegates population seeding and
+        crossover-rate control to an LLM while leaving the evolutionary
+        operators untouched, so it can be plugged into existing DE
+        implementations.
+  \item We design \popinit{}, in which LLM-generated candidates are repaired to
+        feasibility and de-duplicated before injection, preserving the
+        feasibility assumption of DMDE.
+  \item We design \crctrl{}, in which the LLM is queried at fixed intervals and
+        receives explicit feedback on the previously chosen \CR{} together with
+        its fitness and diversity consequences, forming a closed decision loop.
+  \item We conduct an ablation study across two scenarios and report solution
+        quality, convergence speed and computational overhead.
+\end{itemize}
+
+The remainder of this paper is organised as follows. \secref{sec:problem}
+presents the problem formulation and the \dmde{} baseline; \secref{sec:method}
+describes the proposed framework; \secref{sec:experiments} reports and
+discusses the experimental results; \secref{sec:conclusion} concludes the paper.

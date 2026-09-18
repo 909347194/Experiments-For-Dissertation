@@ -1,0 +1,29 @@
+#===============================================================================
+#  latexmk 配置 —— 所有编译产物统一放进 build/，源码目录保持干净
+#
+#  不要直接运行 pdflatex main.tex（会把 .aux/.log 撒在当前目录），
+#  请用 latexmk -pdf main 或 make。
+#===============================================================================
+
+# 输出目录：所有中间文件与 PDF 都写到 build/
+$out_dir = 'build';
+
+# 用 pdflatex 生成 PDF（Elsevier 投稿首选引擎）
+$pdf_mode = 1;
+
+$pdflatex = 'pdflatex -interaction=nonstopmode -synctex=1 %O %S';
+
+# BibTeX 相关文件（.bib）搜索路径：把本目录一并加入，
+# 否则在 build/ 下调用 bibtex 时找不到 bib/references.bib
+$bibtex_use = 2;
+$bibtex_fudge = 1;
+set_tex_cmds();
+
+# 让 bibtex 从 build/ 出发仍能解析 bib/references.bib
+$ENV{'BIBINPUTS'} = './/:' . ($ENV{'BIBINPUTS'} // '');
+
+# 需要清理的中间文件后缀
+$clean_ext = 'bbl blg spl synctex.gz run.xml out';
+
+# 编译失败时不要无限循环
+$max_repeat = 5;

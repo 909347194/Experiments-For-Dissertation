@@ -1,0 +1,56 @@
+%==============================================================================
+%  2. Problem Formulation and DMDE
+%==============================================================================
+
+\section{Problem Formulation and DMDE}
+\label{sec:problem}
+
+\subsection{Multi-UAV Cooperative Path Planning}
+\label{subsec:problem-def}
+
+% 建议内容：决策变量定义 -> 代价函数 -> 约束 -> 与已有模型的关系
+% 状态空间：每架无人机的路径表示为若干航路点（经度/纬度/高度）
+
+Consider a fleet of \Np{} unmanned aerial vehicles that must be routed from a
+common start region to \Mt{} targets over a terrain represented by a digital
+elevation model (DEM). Each path is encoded as a sequence of waypoints whose
+coordinates are the decision variables of the problem. The cost of a candidate
+solution aggregates three terms:
+
+\begin{equation}
+  J(\vx) = w_{1} J_{\mathrm{terrain}}(\vx)
+         + w_{2} J_{\mathrm{threat}}(\vx)
+         + w_{3} J_{\mathrm{length}}(\vx),
+  \label{eq:cost}
+\end{equation}
+
+where $J_{\mathrm{terrain}}$ penalises violations of the minimum safe clearance
+above the terrain, $J_{\mathrm{threat}}$ quantifies exposure to radar threat
+fields, and $J_{\mathrm{length}}$ measures the total flight distance.
+% 待补：约束条件（高度上下界、最小离地间隙、单机航程、目标分配唯一性）
+\todo{state the constraints: altitude bounds, minimum clearance, flight range
+      and one-to-one target assignment.}
+
+\subsection{Differential Evolution Baseline (DMDE)}
+\label{subsec:dmde}
+
+DE maintains a population of $\NP$ candidate solutions and iteratively applies
+mutation, crossover and selection \citep{storn1997de}. The variant used as our
+baseline is referred to as \dmde{}; its mutation uses the current-to-best
+strategy with scaling factor \Ffactor{} and crossover probability \CR{}:
+
+\begin{equation}
+  \bm{v}_{i} = \bm{x}_{i} + \Ffactor\,(\bm{x}_{\mathrm{best}} - \bm{x}_{i})
+             + \Ffactor\,(\bm{x}_{r_{1}} - \bm{x}_{r_{2}}),
+  \label{eq:mutation}
+\end{equation}
+
+where $\bm{x}_{r_{1}}$ and $\bm{x}_{r_{2}}$ are randomly selected distinct
+individuals. Two hyper-parameters remain fixed throughout the search: the
+initial population is drawn uniformly at random, and \CR{} is held constant.
+% 待补：说明这两个固定设定为何在本文场景下不够好（可行解比例低、探索-开发失衡）
+\todo{explain why these two fixed settings are inadequate here: too few
+      feasible solutions and a poor exploration--exploitation balance.}
+
+% 表格占位：基线参数可在此以表格形式给出（可选）
+% \input{tables/dmde_parameters}

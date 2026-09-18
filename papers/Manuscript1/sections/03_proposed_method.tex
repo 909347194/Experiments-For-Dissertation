@@ -1,0 +1,93 @@
+%==============================================================================
+%  3. Proposed LLM-Enhanced DMDE
+%==============================================================================
+
+\section{Proposed LLM-Enhanced DMDE}
+\label{sec:method}
+
+\subsection{Overall Framework}
+\label{subsec:framework}
+
+% 建议配一张总体框架图：figures/fig_framework.pdf
+\begin{figure}[htbp]
+  \centering
+  % \includegraphics[width=0.9\linewidth]{fig_framework.pdf}
+  \fbox{\parbox[c][4cm][c]{0.9\linewidth}{\centering TODO: framework figure \\
+    \small (the LLM acts as an external controller, decoupled from the DE loop)}}
+  \caption{Overall architecture of the proposed \llmdmde{} framework. The LLM
+           interacts with the evolutionary loop through two modules, while the
+           mutation, crossover and selection operators remain unchanged.}
+  \label{fig:framework}
+\end{figure}
+
+As shown in \figref{fig:framework}, the framework keeps the DE main loop intact
+and attaches two LLM-driven modules to it. \popinit{} is invoked once, before
+generation~0, to seed the population; \crctrl{} is invoked every $I$ generations
+to re-tune \CR{}. Both modules share the same LLM client and the same
+constraint-repair utility, so a candidate produced by the LLM is only accepted
+after being repaired to feasibility.
+
+% 待补：说明 LLM 调用预算（interval=50、种群注入比例 10\%）、失败回退策略
+% （调用失败或输出不可解析时退回默认行为），以及为什么这样设计是可复现的
+\todo{report the query budget ($I = 50$, injection ratio $10\%$), the fallback
+      strategy when a call fails or returns unparsable output, and why the
+      design is reproducible.}
+
+\subsection{LLM-Guided Population Initialization}
+\label{subsec:popinit}
+
+\popinit{} asks the LLM for a small number of high-quality candidate solutions
+and injects them into an otherwise random initial population. The proportion of
+injected individuals is controlled by a ratio parameter
+$\rho \in (0, 1)$, so the method reduces to vanilla DMDE as $\rho \to 0$.
+
+\begin{algorithm}[htbp]
+  \caption{\popinit{}}
+  \label{alg:popinit}
+  \begin{algorithmic}[1]
+    \State \textbf{Input:} scenario description, population size $\NP$,
+           injection ratio $\rho$, preference list of top-$k$ candidates
+    \State \textbf{Output:} initial population $P_{0}$
+    \State $P_{0} \gets$ uniformly sampled random individuals
+    \State $S \gets$ LLM(scenario description, preference list)
+    \State $S' \gets$ \textsc{RepairAndDeduplicate}$(S)$
+    \State replace $\lceil \rho \NP \rceil$ random individuals of $P_{0}$ with
+           $S'$
+    \State \Return $P_{0}$
+  \end{algorithmic}
+\end{algorithm}
+
+A candidate is discarded when it cannot be repaired to feasibility, in which
+case the corresponding slot keeps its randomly sampled individual. This guard is
+essential: in the scarce-resource scenario almost none of the LLM outputs
+survive repair, so \popinit{} has to degrade gracefully rather than inject
+infeasible solutions. % 待补：结合实验数据说明两个场景下修复成功率的差异
+\todo{quantify the repair success rate in the two scenarios.}
+
+\subsection{LLM-Guided Adaptive Crossover Rate Control}
+\label{subsec:crctrl}
+
+\crctrl{} re-tunes \CR{} every $I$ generations. Unlike a one-shot prompt, the
+controller is fed back the outcome of its previous decision: the \CR{} value in
+force, the number of generations elapsed, the relative fitness change, and the
+change in population diversity. The decision loop is therefore closed, and the
+prompt exposes the \CR{} actually used in each recent generation.
+
+\begin{algorithm}[htbp]
+  \caption{\crctrl{}}
+  \label{alg:crctrl}
+  \begin{algorithmic}[1]
+    \State \textbf{Input:} current generation $g$, interval $I$,
+           fitness and diversity statistics of the last interval
+    \State \textbf{Output:} crossover rate for the next interval
+    \State \textbf{if} $g \bmod I \neq 0$ \textbf{then} keep current \CR{}
+    \State build prompt: recent trajectory (with per-generation \CR{}),
+           previous \CR{} decision, fitness/diversity response
+    \State $\CR^{\star} \gets$ LLM(prompt)
+    \State \Return clip($\CR^{\star}$, $\CR_{\min}$, $\CR_{\max}$)
+  \end{algorithmic}
+\end{algorithm}
+
+% 待补：说明取值范围的裁剪策略与默认回退值，并给出 prompt 模板的要点
+\todo{state the clipping range, the default fallback value, and the key points
+      of the prompt template.}
