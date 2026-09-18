@@ -351,6 +351,14 @@ def _inverse_phi_srp(
     # ── 第二阶段：巡游顺序（Target → Target）──
     remaining_targets = [t for t in range(n_targets) if t not in assigned_targets]
 
+    # 各 UAV 路线段当前最后一个基因在 genes 中的下标。
+    # 巡游基因必须插入到所属 UAV 路线段的末尾（与 PopulationEncoder 的
+    # 交错式基因顺序保持一致），而不是追加到全局列表末尾：
+    # Individual.assignment 按「最近一个 uav_id>=0 的基因」归属巡游目标，
+    # 追加到末尾会把所有巡游目标错误地挂到最后一架 UAV 上，
+    # 导致子代 fitness 系统性劣于父代、进化零接受（S2 停滞的根因）。
+    uav_end_index: dict[int, int] = {i: i for i in range(len(genes))}
+
     # 先用贪心构建初始巡游顺序
     for tgt in remaining_targets:
         best_uav = -1
@@ -364,7 +372,14 @@ def _inverse_phi_srp(
         if best_uav >= 0:
             prev_tgt = uav_first_target[best_uav]
             cost = float(cm_work[n_uavs + prev_tgt, tgt])
-            genes.append(Gene(uav_id=-1, target_id=tgt, cost=cost))
+            # 插入到 best_uav 路线段的末尾
+            insert_at = uav_end_index[best_uav] + 1
+            genes.insert(insert_at, Gene(uav_id=-1, target_id=tgt, cost=cost))
+            # 后移受插入影响的各 UAV 段结束下标
+            for u, end in uav_end_index.items():
+                if end >= insert_at:
+                    uav_end_index[u] = end + 1
+            uav_end_index[best_uav] = insert_at
             uav_first_target[best_uav] = tgt
 
     # ── 第三阶段：巡游扰动 ──

@@ -289,8 +289,8 @@ class AssignmentConverter:
         """
         mt = self.model_type
         if mt == "srp":
-            # SRP 的约束更复杂，暂不修复
-            return None, 0
+            # SRP：target 去重 + 缺失 target 插入 + UAV 覆盖补齐
+            return self._repair_srp(assignments)
 
         if len(assignments) != self._n:
             return None, 0
@@ -364,6 +364,148 @@ class AssignmentConverter:
             [repaired[i]["targets"][0] for i in duplicated_uavs],
         )
         return repaired, n_fix
+
+    def _repair_srp(
+        self, assignments: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]] | None, int]:
+        """修复 srp (N<M) 解的约束违反（LLM 常见错误）。
+
+        SRP 约束（规则 3.3）：
+        - 每个 target 恰好出现一次（T 不重复、全覆盖）
+        - 每个 UAV 至少服务一个 target
+
+        修复策略（贪心，保持 LLM 解的结构尽量不动）：
+        1. 归一化：过滤非法 uav/target，合并同一 UAV 的多条 assignment
+        2. 全局 target 去重：重复出现的 target 只保留首次（重复即删除）
+        3. 缺失 target 插入：对每个缺失 target，在所有巡游的所有位置中
+           选增量代价最小的 (uav, position) 插入
+        4. UAV 覆盖补齐：空巡游的 UAV 从最长巡游"偷"一个代价最小的 target
+
+        代价矩阵布局约定（与 encoder/inverse_mapper 一致）：
+        - cm[u, t]        = C_UT[u][t]  (u < N)
+        - cm[N + t1, t2]  = C_TT[t1][t2]
+
+        Args:
+            assignments: 原始 assignment 字典列表。
+
+        Returns:
+            (repaired, distance) 元组。repaired 为 None 表示无法修复。
+        """
+        n, m = self._n, self._m
+        distance = 0
+
+        # ---- 1. 归一化 & 合并同一 UAV 的多条 assignment ----
+        tours: dict[int, list[int]] = {}
+        order: list[int] = []
+        for a in assignments:
+            uav = a.get("uav") if isinstance(a, dict) else None
+            try:
+                uav = int(uav)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                distance += 1
+                continue
+            if not (0 <= uav < n):
+                distance += 1
+                continue
+            tgts = a.get("targets", [])
+            if not isinstance(tgts, list):
+                tgts = []
+            if uav not in tours:
+                tours[uav] = []
+                order.append(uav)
+            for t in tgts:
+                try:
+                    t = int(t)
+                except (TypeError, ValueError):
+                    distance += 1
+                    continue
+                if not (0 <= t < m):
+                    distance += 1
+                    continue
+                tours[uav].append(t)
+
+        if not tours:
+            return None, 0
+
+        # ---- 2. 全局 target 去重（保留首次出现） ----
+        seen: set[int] = set()
+        for uav in order:
+            kept = []
+            for t in tours[uav]:
+                if t in seen:
+                    distance += 1  # 删除一个重复 target
+                else:
+                    seen.add(t)
+                    kept.append(t)
+            tours[uav] = kept
+
+        # ---- 3. 补齐缺失 UAV（先建空巡游，后续步骤填充） ----
+        for u in range(n):
+            if u not in tours:
+                tours[u] = []
+                order.append(u)
+
+        def tt(t1: int, t2: int) -> float:
+            return float(self._cm[n + t1, t2])
+
+        # ---- 4. 缺失 target 插入（最小增量代价贪心） ----
+        for t in sorted(set(range(m)) - seen):
+            best: tuple[float, int, int] | None = None  # (added, uav, pos)
+            for u in order:
+                tour = tours[u]
+                if not tour:
+                    # 空巡游：t 作为该 UAV 的首目标
+                    added = float(self._cm[u, t])
+                    if best is None or added < best[0]:
+                        best = (added, u, 0)
+                    continue
+                # 位置 0：t 成为首目标，原首目标退化为巡游基因
+                added0 = (
+                    float(self._cm[u, t]) + tt(t, tour[0])
+                    - float(self._cm[u, tour[0]])
+                )
+                if best is None or added0 < best[0]:
+                    best = (added0, u, 0)
+                # 位置 k：插入 prev 与 next 之间（k = len 表示追加到末尾）
+                for k in range(1, len(tour) + 1):
+                    prev = tour[k - 1]
+                    if k < len(tour):
+                        nxt = tour[k]
+                        added = tt(prev, t) + tt(t, nxt) - tt(prev, nxt)
+                    else:
+                        added = tt(prev, t)
+                    if best is None or added < best[0]:
+                        best = (added, u, k)
+            if best is None:
+                return None, distance
+            _, u, k = best
+            tours[u].insert(k, t)
+            distance += 1
+
+        # ---- 5. UAV 覆盖补齐：空巡游从其他巡游"偷"一个 target ----
+        for u in list(order):
+            if tours[u]:
+                continue
+            donors = [d for d in order if len(tours[d]) >= 2]
+            if not donors:
+                return None, distance  # 无法保证每个 UAV 至少一个 target
+            # 选 (donor, target) 最小化 C_UT[u, t]
+            _, d, t = min(
+                ((float(self._cm[u, t]), d, t)
+                 for d in donors for t in tours[d]),
+                key=lambda x: x[0],
+            )
+            tours[d].remove(t)
+            tours[u].append(t)
+            distance += 1
+
+        repaired = [{"uav": u, "targets": list(tours[u])} for u in order]
+        logger.debug(
+            "srp 修复完成 (distance=%d): %s",
+            distance,
+            {u: tours[u] for u in order},
+        )
+        return repaired, distance
 
     def _compute_assignment_cost(self, assignments: list[dict[str, Any]]) -> float:
         """计算 assignments 的代价值（从 cost_matrix 直接求和）。
