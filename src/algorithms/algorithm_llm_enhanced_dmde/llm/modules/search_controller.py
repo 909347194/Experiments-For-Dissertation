@@ -62,26 +62,44 @@ class LLMSearchControllerModule(BaseLLMModule):
             "current_f": round(state.f_scale, 4),
         }
 
-        # 轨迹摘要
+        # 轨迹摘要（含每代 CR 值）
         trajectory_text = "No trajectory data yet."
         if state.trajectory_recent:
             lines = []
             for e in state.trajectory_recent[-5:]:
                 line = (
                     f"  gen={e.generation}: fitness={e.fitness_best:.1f}, "
-                    f"div={e.diversity:.3f}, stag={e.stagnation_count}"
+                    f"div={e.diversity:.3f}, stag={e.stagnation_count}, "
+                    f"cr={e.cr:.4f}"
                 )
                 if e.llm_module:
-                    line += f", last_decision={e.llm_module}"
+                    line += f", llm_decision={e.llm_module}"
                 lines.append(line)
             trajectory_text = "\n".join(lines)
 
-        # 使用统一的 user prompt 模板
+        # LLM 上次 CR 决策的反馈（闭环控制）
+        prev_cr = state.extra.get("previous_llm_cr")
+        fitness_change = state.extra.get("fitness_change_since_last")
+        diversity_change = state.extra.get("diversity_change_since_last")
+        interval_gens = state.extra.get("previous_interval_gens")
+        if prev_cr is not None:
+            feedback = (
+                f"\n\n## Last LLM Decision Feedback\n"
+                f"Previous CR chosen: {prev_cr}\n"
+                f"Interval: {interval_gens} generations\n"
+                f"Fitness change: {fitness_change:+.1f} "
+                f"({'improved' if fitness_change > 0 else 'stagnated' if abs(fitness_change) < 0.01 else 'degraded'})\n"
+                f"Diversity change: {diversity_change:+.4f}"
+            )
+        else:
+            feedback = ""
+
+        # 使用统一的 user prompt 模板（含历史反馈）
         user = get_prompt(
             "search_controller",
             prompt_type="user",
             state_json=json.dumps(features, indent=2),
-            trajectory_text=trajectory_text,
+            trajectory_text=trajectory_text + feedback,
         )
 
         # 场景化 system prompt：根据 model_type 只加载对应场景的 CR 调控建议
