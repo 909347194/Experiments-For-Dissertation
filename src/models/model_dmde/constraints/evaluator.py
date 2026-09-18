@@ -182,10 +182,10 @@ class FitnessEvaluator:
         # ---- 协同约束违背 ----
         seq_violation = check_sequence_constraint(assignment, self._targets) if self._enable_seq else 0.0
         window_violation = check_time_window_constraint(
-            assignment, self._uavs, self._targets, cost_matrix
+            assignment, self._uavs, self._targets, cost_matrix, n_uavs=n_uavs
         ) if self._enable_window else 0.0
         sync_violation = check_sync_constraint(
-            assignment, self._uavs, cost_matrix
+            assignment, self._uavs, cost_matrix, n_uavs=n_uavs
         ) if self._enable_sync else 0.0
 
         # ---- 综合适应度（公式 2-14）----

@@ -97,36 +97,58 @@ class LLMPopulationInitModule(BaseLLMModule):
         k_max = state.extra.get("k_max", self._config.get("llm_init_k_max", 10))
         k = min(k_max, max(k_min, math.ceil(alpha * pop_size)))
 
-        # ── 代价矩阵原始数据（小规模时附带） ────────────────────────
+        # ── 代价矩阵原始数据 ────────────────────────────────────
+        # 策略：C_UT 始终包含（N×M 通常可控）；
+        #       C_TT 超阈值时回退为稀疏 TopK 邻接表示。
         _MAX_MATRIX_ELEMENTS = self._config.get("max_matrix_elements", 500)
+        _SPARSE_C_TT_TOP_K = self._config.get("sparse_ctt_top_k", 5)
         cm_data = None
         c_tt_data = None
+        c_tt_sparse = None
         if cm is not None:
             rows, cols = cm.shape
             ut_rows = min(n_uavs, rows)
             ut_cols = min(n_targets, cols)
-            total_elements = ut_rows * ut_cols
+
+            # C_UT: 始终包含（N×M 通常 ≤ 300）
+            cm_data = [
+                [round(float(cm[i, j]), 2) for j in range(ut_cols)]
+                for i in range(ut_rows)
+            ]
+
+            # C_TT: 仅 SRP 场景
             if model_type == "srp" and rows > n_uavs:
                 tt_size = min(n_targets, rows - n_uavs)
-                total_elements += tt_size * tt_size
+                total_elements = ut_rows * ut_cols + tt_size * tt_size
 
-            if total_elements <= _MAX_MATRIX_ELEMENTS:
-                cm_data = [
-                    [round(float(cm[i, j]), 2) for j in range(ut_cols)]
-                    for i in range(ut_rows)
-                ]
-                if model_type == "srp" and rows > n_uavs:
-                    tt_size = min(n_targets, rows - n_uavs)
+                if total_elements <= _MAX_MATRIX_ELEMENTS:
+                    # 小规模：完整 C_TT
                     c_tt_data = [
                         [round(float(cm[n_uavs + i, j]), 2) for j in range(tt_size)]
                         for i in range(tt_size)
                     ]
-            else:
-                logger.info(
-                    "[population_init] 矩阵元素总数 %d 超过阈值 %d，"
-                    "跳过原始矩阵，仅发送 global_summary + local_preferences",
-                    total_elements, _MAX_MATRIX_ELEMENTS,
-                )
+                else:
+                    # 大规模：稀疏 TopK 邻接（每目标保留 top-K 最近邻）
+                    c_tt_sparse = []
+                    for i in range(tt_size):
+                        row_costs = []
+                        for j in range(tt_size):
+                            if i == j:
+                                continue
+                            row_costs.append((j, round(float(cm[n_uavs + i, j]), 2)))
+                        row_costs.sort(key=lambda x: x[1])
+                        c_tt_sparse.append({
+                            "from_target": i,
+                            "top_next": [
+                                {"target": t, "cost": c}
+                                for t, c in row_costs[:_SPARSE_C_TT_TOP_K]
+                            ],
+                        })
+                    logger.info(
+                        "[population_init] SRP C_TT %d×%d 超阈值 %d，"
+                        "回退为稀疏 Top%d 邻接表示",
+                        tt_size, tt_size, _MAX_MATRIX_ELEMENTS, _SPARSE_C_TT_TOP_K,
+                    )
 
         s_problem = {
             "problem_structure": {
@@ -141,8 +163,9 @@ class LLMPopulationInitModule(BaseLLMModule):
             "cost_matrix": {
                 "C_UT": cm_data,
                 "C_TT": c_tt_data,
-                "note": "Only included when N*M is small enough. "
-                        "Otherwise rely on global_summary + local_preferences.",
+                "C_TT_sparse": c_tt_sparse,
+                "note": "C_UT always included. C_TT: full when small enough, "
+                        "sparse TopK adjacency otherwise.",
             },
             "constraints": constraints_desc,
             "objectives": {

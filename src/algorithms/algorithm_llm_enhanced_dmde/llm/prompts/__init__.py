@@ -48,32 +48,28 @@ Respond with a JSON object only (no markdown):
 
 _REASONING_GUIDE = """\
 ## Reasoning (in the "thought" field)
-When constructing candidate solutions, consider (MAX 2 sentences):
-1. Difficult or highly constrained targets (few feasible UAVs).
-2. Contested targets and UAV-target cost compatibility.
-3. Assignment feasibility, coverage, and cost compatibility.
-4. For SRP: visiting order and transition costs.
-Use these factors as guidance — organize your reasoning as you see fit.
+Before generating solutions, reason through the problem structure:
+1. Which targets are **difficult** (few feasible UAVs)? Assign these first.
+2. Which targets are **contested** (many UAVs prefer them)? Decide allocation early.
+3. What is the approximate cost lower bound? Use it to gauge solution quality.
+4. For SRP: how should targets be partitioned among UAVs, and what tour order minimizes transition costs?
 """
 
 _OUTPUT_VALIDATION = """\
 ## Output Validation
 - Each solution must contain exactly N assignments (one per UAV).
 - UAV IDs must be in [0, N-1], target IDs in [0, M-1].
-- For balanced/overloaded: each "targets" list has exactly 1 element.
-- For srp: each "targets" list has >= 1 elements, no duplicate targets across solutions.
 - **VERIFICATION STEP**: Before outputting, for each solution check:
-  1. Count total targets — must equal M.
-  2. Check no target appears twice.
+  1. Count total targets — must equal M (balanced/overloaded: each target ≥ 1 time; SRP: exactly 1 time).
+  2. Check constraint compliance for the specific model type.
   3. Check all targets in [0, M-1] are covered.
   If any check fails, fix the solution before outputting.
 - Invalid outputs will be rejected. Double-check before responding.
 
-## CRITICAL: Keep Response Concise
-- "thought": 1-2 sentences MAX. Do NOT explain every assignment.
-- "reasoning": 1 sentence MAX.
-- Keep the response concise and avoid unnecessary explanation.
-- Output ONLY the JSON object. No preamble, no extra text.
+## Output Quality
+- Focus on generating HIGH-QUALITY solutions with low total cost.
+- The "thought" field should explain your construction strategy.
+- Output ONLY the JSON object. No markdown fences, no preamble.
 """
 
 
@@ -91,7 +87,7 @@ evolutionary algorithm's internal encoding, so you only need to produce \
 
 {_json_format}
 {{
-    "thought": "<brief reasoning: difficult targets, contested targets, assignment strategy>",
+    "thought": "<your construction strategy>",
     "solutions": [
         {{
             "assignments": [
@@ -110,25 +106,36 @@ Each "solution" is a **complete one-to-one assignment** covering ALL N UAVs.
 - Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once, each target appears exactly once.
 - Each "targets" list has exactly 1 element.
-- This is a **permutation problem**: find the best UAV→Target matching.
-- **CRITICAL**: The set of all target IDs in a solution must be exactly [0, 1, ..., M-1]. \
-  No target may appear twice. No target may be missing. \
-  Before outputting, VERIFY each solution is a valid permutation.
+- The set of all target IDs in a solution must be exactly [0, 1, ..., M-1].
 
 {_reasoning}
+
+## Construction Strategy
+Use the following two-phase approach to generate high-quality, diverse solutions:
+
+### Phase 1: Greedy Baseline (solution 1)
+1. Identify **contested targets** (preferred by many UAVs). For each, assign the \
+   lowest-cost UAV. If a UAV is already taken, use the next cheapest.
+2. For remaining unassigned UAVs, greedily assign to the cheapest available target.
+3. Compute total cost = sum(C_UT[uav][target]). This is your quality reference.
+
+### Phase 2: Perturbations (solutions 2-K)
+Generate variants by perturbing the baseline:
+- **Swap**: exchange 2-3 UAV-target pairs and check if cost improves.
+- **Contested reassignment**: pick one contested target, assign to a different UAV.
+- **Greedy restart**: start the greedy construction from a different contested target.
+
 {_validation}
-{_guidelines}
+
+## Guidelines
+- Minimize total assignment cost = sum of C_UT[uav][target] for all assignments.
+- Use TopKTargets_per_UAV and TopKUAVs_per_target to identify low-cost pairings.
+- Pay attention to contested_targets — assigning them optimally is often the key differentiator.
+- If a target has only 1-2 feasible UAVs (difficult_targets), lock those assignments early.
 """.format(
     _json_format=_JSON_FORMAT_COMMON,
     _reasoning=_REASONING_GUIDE,
     _validation=_OUTPUT_VALIDATION,
-    _guidelines="""\
-## Guidelines
-- Focus on minimizing total assignment cost.
-- Use TopKTargets_per_UAV and TopKUAVs_per_target to identify low-cost assignments.
-- Pay attention to contested_targets and difficult_targets — \
-these are often the key differentiators between good and poor solutions.
-""",
 )
 
 _POP_INIT_OVERLOADED = """\
@@ -141,7 +148,7 @@ evolutionary algorithm's internal encoding, so you only need to produce \
 
 {_json_format}
 {{
-    "thought": "<brief reasoning: target coverage, cost-optimal UAV assignments>",
+    "thought": "<your construction strategy>",
     "solutions": [
         {{
             "assignments": [
@@ -162,25 +169,32 @@ Each "solution" is a **complete assignment** covering ALL N UAVs.
 - Each target **must appear at least once** across all assignments.
 - Each "targets" list has exactly 1 element.
 - Multiple UAVs may be assigned to the same target.
-- **CRITICAL**: Before outputting, VERIFY every target in [0, M-1] appears \
-  at least once across all assignments.
 
 {_reasoning}
+
+## Construction Strategy
+### Phase 1: Coverage-First Baseline (solution 1)
+1. Identify **difficult targets** (few feasible UAVs). Assign their best UAV first.
+2. For each remaining uncovered target, assign the cheapest available UAV.
+3. Distribute remaining surplus UAVs to their lowest-cost targets.
+4. Compute total cost = sum(C_UT[uav][target]). This is your quality reference.
+
+### Phase 2: Perturbations (solutions 2-K)
+- **Surplus redistribution**: move 1-2 surplus UAVs to different targets.
+- **Coverage swap**: swap assignments between two UAVs, maintain coverage.
+- **Greedy restart**: prioritize a different target for the initial assignment.
+
 {_validation}
-{_guidelines}
+
+## Guidelines
+- Minimize total assignment cost.
+- **Critical**: ensure every target is covered by at least one UAV.
+- Use TopKUAVs_per_target to find the best UAV for each target.
+- Use TopKTargets_per_UAV to distribute surplus UAVs to low-cost targets.
 """.format(
     _json_format=_JSON_FORMAT_COMMON,
     _reasoning=_REASONING_GUIDE,
     _validation=_OUTPUT_VALIDATION,
-    _guidelines="""\
-## Guidelines
-- Focus on minimizing total assignment cost.
-- **Critical**: ensure every target is covered by at least one UAV.
-- Use TopKUAVs_per_target to find the best UAV for each target.
-- Use TopKTargets_per_UAV to distribute surplus UAVs to low-cost targets.
-- Pay attention to difficult_targets (few feasible UAVs) — \
-these are often the key differentiators between good and poor solutions.
-""",
 )
 
 _POP_INIT_SRP = """\
@@ -193,7 +207,7 @@ produce **discrete assignments**.
 
 {_json_format}
 {{
-    "thought": "<brief reasoning: target distribution among UAVs, tour ordering and transition costs>",
+    "thought": "<your construction strategy>",
     "solutions": [
         {{
             "assignments": [
@@ -212,32 +226,40 @@ Each "solution" is a **complete assignment** covering ALL N UAVs and ALL M targe
 - Each UAV appears exactly once.
 - Each target appears exactly once across all assignments.
 - "targets" list length >= 1, and the **order represents the tour sequence**.
-- Tour costs include both UAV→first_target (C_UT) and target→target transitions (C_TT).
-- **CRITICAL**: Before outputting, VERIFY every target in [0, M-1] appears \
-  exactly once across all UAVs' target lists. No duplicates, no missing targets.
+- Tour cost = C_UT[uav][first_target] + sum(C_TT[prev][next]) for transitions.
 
 {_reasoning}
 
-For SRP specifically:
-1. Divide targets among UAVs (each UAV gets at least 1 target).
-2. For each UAV's target list, consider the visiting order and transition costs (C_TT).
-3. Use TopKNextTargets_per_target to identify efficient transitions.
+## Construction Strategy
+### Phase 1: Partition + Nearest-Neighbor Tour (solution 1)
+1. **Partition** targets among UAVs:
+   - Identify difficult targets (few feasible UAVs), assign to their best UAV.
+   - Group remaining targets by spatial proximity (use TopKTargets_per_UAV as anchor).
+   - Each UAV should get roughly M/N targets.
+2. **Order** each UAV's tour:
+   - Start with the target that has lowest C_UT[uav][target].
+   - Use nearest-neighbor: from current target, go to the closest unvisited target \
+     (use C_TT or C_TT_sparse TopK adjacency).
+3. Compute total cost = C_UT[uav][first] + sum(C_TT transitions).
+
+### Phase 2: Tour Perturbations (solutions 2-K)
+- **2-opt swap**: reverse a segment within one UAV's tour.
+- **Target reassignment**: move one target from a heavily-loaded UAV to a lighter one.
+- **Different starting target**: re-run nearest-neighbor from a different first target.
+- **Partition variation**: try a different initial grouping of targets.
 
 {_validation}
-{_guidelines}
+
+## Guidelines
+- Minimize total cost = C_UT (UAV→first target) + C_TT (target→target transitions).
+- Use TopKTargets_per_UAV to identify low-cost initial targets for each UAV.
+- Use TopKNextTargets_per_target (or C_TT_sparse.top_next) to find efficient transitions.
+- Avoid long tours for a single UAV when targets are geographically spread out.
+- If C_TT is provided as C_TT_sparse (top-K adjacency), use it to guide tour ordering.
 """.format(
     _json_format=_JSON_FORMAT_COMMON,
     _reasoning=_REASONING_GUIDE,
     _validation=_OUTPUT_VALIDATION,
-    _guidelines="""\
-## Guidelines
-- Minimize total cost = sum of C_UT (UAV→first target) + C_TT (target→target transitions).
-- Use TopKTargets_per_UAV to identify low-cost initial targets for each UAV.
-- Use TopKNextTargets_per_target to explore efficient tour sequences.
-- Pay attention to difficult_targets (few feasible UAVs) — \
-these are often the key differentiators between good and poor solutions.
-- Avoid creating long tours for a single UAV when targets are geographically spread out.
-""",
 )
 
 # 通用回退（包含所有场景规则，用于 model_type 未知时）
@@ -250,7 +272,7 @@ internal encoding, so you only need to produce **discrete assignments**.
 
 {_json_format}
 {{
-    "thought": "<brief reasoning: difficult targets, contested targets, assignment strategy>",
+    "thought": "<your construction strategy>",
     "solutions": [
         {{
             "assignments": [
@@ -271,30 +293,31 @@ Each "solution" is a **complete assignment plan** covering ALL N UAVs.
 - Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once, each target appears exactly once.
 - Each "targets" list has exactly 1 element.
-- Example: {{"assignments": [{{"uav": 0, "targets": [2]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
 
 ### overloaded (N > M, UAVs outnumber targets)
 - Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once.
 - Each target must appear at least once across all assignments.
 - Each "targets" list has exactly 1 element.
-- Example: {{"assignments": [{{"uav": 0, "targets": [1]}}, {{"uav": 1, "targets": [0]}}, {{"uav": 2, "targets": [1]}}]}}
 
 ### srp (N < M, UAVs visit multiple targets in sequence)
 - Each solution has exactly N assignments (one per UAV).
 - Each UAV appears exactly once.
 - Each target appears exactly once across all assignments.
 - "targets" list length >= 1, and the order represents the **tour sequence**.
-- Example: {{"assignments": [{{"uav": 0, "targets": [3, 1, 4]}}, {{"uav": 1, "targets": [2, 0]}}]}}
 
 {_reasoning}
 {_validation}
-{_guidelines}
+
+## Guidelines
+- Focus on minimizing total cost while respecting constraints.
+- Use the preference summary to identify low-cost assignments.
+- For contested targets, assign to the best UAV first.
+- For SRP, use nearest-neighbor ordering guided by C_TT transition costs.
 """.format(
     _json_format=_JSON_FORMAT_COMMON,
     _reasoning=_REASONING_GUIDE,
     _validation=_OUTPUT_VALIDATION,
-    _guidelines="## Guidelines\n- Focus on minimizing total cost while respecting constraints.\n- Use the preference summary to identify low-cost assignments.\n",
 )
 
 # Scene → Prompt 映射
@@ -318,10 +341,10 @@ Generate exactly {k} complete assignment solutions. \
 Each solution must cover ALL {n_uavs} UAVs and satisfy all \
 constraints for the '{model_type}' model type.
 
-IMPORTANT CONSTRAINTS:
-- "thought": MAX 2 sentences. State strategy only, do NOT explain each assignment.
-- "reasoning": MAX 1 sentence.
-- Output ONLY the JSON object. No markdown, no preamble, no extra text.
+QUALITY PRIORITY:
+- Use the cost matrix (C_UT, C_TT) and preference data to construct LOW-COST solutions.
+- Think through your construction strategy in the "thought" field.
+- Output ONLY the JSON object. No markdown fences, no preamble.
 """
 
 

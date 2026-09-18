@@ -87,16 +87,21 @@ def check_time_window_constraint(
     uavs: list[UAV],
     targets: list[Target],
     cost_matrix: np.ndarray,
+    n_uavs: int | None = None,
 ) -> float:
     """检查时间窗约束（公式 2-10）。
 
     检查目标是否在其规定的时间窗内被执行。
+
+    对于 SRP 模型（assignment 中有重复 uav_id），
+    按 UAV 分组计算累积到达时间，巡游基因使用 C_TT 代价。
 
     Args:
         assignment: 分配方案。
         uavs: UAV 列表。
         targets: 目标列表。
         cost_matrix: 代价矩阵。
+        n_uavs: UAV 数量（SRP 模型必须，用于区分 C_UT / C_TT）。
 
     Returns:
         违背量。0 表示满足约束。
@@ -105,24 +110,59 @@ def check_time_window_constraint(
     uav_map = {u.id: u for u in uavs}
     target_map = {t.id: t for t in targets}
 
-    for uav_id, target_id in assignment:
-        tgt = target_map.get(target_id)
-        if tgt is None or tgt.time_window is None:
-            continue
+    # 检测 SRP：assignment 中有重复 uav_id
+    uav_ids_in_assignment = [a[0] for a in assignment]
+    is_srp = n_uavs is not None and len(uav_ids_in_assignment) > len(set(uav_ids_in_assignment))
 
-        uav = uav_map.get(uav_id)
-        if uav is None:
-            continue
+    if is_srp:
+        # SRP 模型：按 UAV 分组，计算累积到达时间
+        routes: dict[int, list[int]] = {}
+        for uav_id, target_id in assignment:
+            routes.setdefault(uav_id, []).append(target_id)
 
-        # 估算到达时间
-        dist = cost_matrix[uav_id, target_id] / tgt.weight  # 还原距离
-        arrival_time = uav.estimate_time(dist)
+        for uav_id, tgt_list in routes.items():
+            uav = uav_map.get(uav_id)
+            if uav is None:
+                continue
 
-        t_start, t_end = tgt.time_window
-        if arrival_time < t_start:
-            violation += t_start - arrival_time
-        elif arrival_time > t_end:
-            violation += arrival_time - t_end
+            cumulative_dist = 0.0
+            for seq, tgt_id in enumerate(tgt_list):
+                tgt = target_map.get(tgt_id)
+                if tgt is None:
+                    continue
+
+                if seq == 0:
+                    cumulative_dist += cost_matrix[uav_id, tgt_id]
+                else:
+                    prev_tgt = tgt_list[seq - 1]
+                    cumulative_dist += cost_matrix[n_uavs + prev_tgt, tgt_id]
+
+                if tgt.time_window is not None:
+                    arrival_time = uav.estimate_time(cumulative_dist)
+                    t_start, t_end = tgt.time_window
+                    if arrival_time < t_start:
+                        violation += t_start - arrival_time
+                    elif arrival_time > t_end:
+                        violation += arrival_time - t_end
+    else:
+        # 非 SRP 模型：原有逻辑
+        for uav_id, target_id in assignment:
+            tgt = target_map.get(target_id)
+            if tgt is None or tgt.time_window is None:
+                continue
+
+            uav = uav_map.get(uav_id)
+            if uav is None:
+                continue
+
+            dist = cost_matrix[uav_id, target_id] / tgt.weight
+            arrival_time = uav.estimate_time(dist)
+
+            t_start, t_end = tgt.time_window
+            if arrival_time < t_start:
+                violation += t_start - arrival_time
+            elif arrival_time > t_end:
+                violation += arrival_time - t_end
 
     return violation
 
@@ -131,21 +171,29 @@ def check_sync_constraint(
     assignment: list[tuple[int, int]],
     uavs: list[UAV],
     cost_matrix: np.ndarray,
+    n_uavs: int | None = None,
 ) -> float:
     """检查同时到达约束（公式 2-19 ~ 2-22）。
 
     检查执行同一目标的多架 UAV 是否能同时到达。
 
+    对于 SRP 模型，使用累积路径距离计算到达时间。
+
     Args:
         assignment: 分配方案。
         uavs: UAV 列表。
         cost_matrix: 代价矩阵。
+        n_uavs: UAV 数量（SRP 模型必须）。
 
     Returns:
         违背量。0 表示满足约束。
     """
     violation = 0.0
     uav_map = {u.id: u for u in uavs}
+
+    # 检测 SRP
+    uav_ids_in_assignment = [a[0] for a in assignment]
+    is_srp = n_uavs is not None and len(uav_ids_in_assignment) > len(set(uav_ids_in_assignment))
 
     # 按目标分组
     target_uavs: dict[int, list[int]] = {}
@@ -162,18 +210,49 @@ def check_sync_constraint(
             uav = uav_map.get(uav_id)
             if uav is None or uav_id >= cost_matrix.shape[0]:
                 continue
-            dist = cost_matrix[uav_id, target_id]
-            t_min = uav.estimate_time(dist, use_min_speed=False)  # 最快
-            t_max = uav.estimate_time(dist, use_min_speed=True)   # 最慢
+
+            if is_srp:
+                # SRP: 累积路径距离
+                dist = _compute_cumulative_dist_to_target(
+                    assignment, uav_id, target_id, cost_matrix, n_uavs
+                )
+            else:
+                dist = cost_matrix[uav_id, target_id]
+
+            t_min = uav.estimate_time(dist, use_min_speed=False)
+            t_max = uav.estimate_time(dist, use_min_speed=True)
             time_ranges.append((t_min, t_max))
 
         if not time_ranges:
             continue
 
-        # 检查时间窗口是否有交集
         latest_min = max(t[0] for t in time_ranges)
         earliest_max = min(t[1] for t in time_ranges)
         if latest_min > earliest_max:
             violation += latest_min - earliest_max
 
     return violation
+
+
+def _compute_cumulative_dist_to_target(
+    assignment: list[tuple[int, int]],
+    uav_id: int,
+    target_id: int,
+    cost_matrix: np.ndarray,
+    n_uavs: int,
+) -> float:
+    """计算 SRP 模型下 UAV 到达指定目标的累积路径距离。
+
+    遍历该 UAV 的巡游序列，累加 C_UT（首目标）和 C_TT（转移），
+    直到遇到 target_id。
+    """
+    route = [t for u, t in assignment if u == uav_id]
+    cumulative = 0.0
+    for seq, tgt in enumerate(route):
+        if seq == 0:
+            cumulative += cost_matrix[uav_id, tgt]
+        else:
+            cumulative += cost_matrix[n_uavs + route[seq - 1], tgt]
+        if tgt == target_id:
+            return cumulative
+    return cumulative
