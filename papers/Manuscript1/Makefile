@@ -19,8 +19,13 @@
 MAIN    := main
 BUILD   := build
 LATEXMK := latexmk
-# 可用 PYTHON=/path/to/python3 make check 覆盖（多版本/虚拟环境下有用）
-PYTHON  ?= python3
+# 自动挑选一个能用的 python3（pyenv shim 在 .python-version 指向
+# 未安装的版本时会失败；这里按顺序测试，挑首个 --version 成功的）
+# 优先级：用户通过 make PYTHON=... 显式传入 > 常见绝对路径 > 系统 PATH
+override PYTHON := $(or $(PYTHON),$(firstword \
+  $(foreach p,/usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3 \
+            $(shell command -v python3 2>/dev/null), \
+    $(shell $(p) --version >/dev/null 2>&1 && echo $(p)))))
 
 .PHONY: all pdf watch clean distclean check highlights sync
 
