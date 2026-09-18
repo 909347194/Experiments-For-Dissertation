@@ -21,7 +21,7 @@ from ..prompts import get_prompt
 logger = logging.getLogger(__name__)
 
 # 预定义 CR 候选值
-CR_CHOICES = [0.1, 0.3, 0.5, 0.7, 0.9]
+CR_CHOICES = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
 
 
 class LLMSearchControllerModule(BaseLLMModule):
@@ -42,59 +42,62 @@ class LLMSearchControllerModule(BaseLLMModule):
         return "before_mutation"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
+        # ---- State: S_t = [D_t, Δf_t, S_t_stag, ΔD_t, CR_{t-1}, Δf_{t-1}, ΔD_{t-1}] ----
         features = {
             "generation": state.generation,
             "max_generations": state.max_generations,
-            "temperature": round(state.temperature, 4),
             "model_type": state.model_type,
-            "n_uavs": state.n_uavs,
-            "n_targets": state.n_targets,
-            "best_fitness": state.best_fitness,
-            "mean_fitness": state.mean_fitness,
+            # D_t: 当前多样性水平（绝对值，因为 ΔD_t 单独不足以定位）
             "diversity": round(state.diversity, 4),
-            "gene_variance": round(state.gene_variance, 2),
-            "convergence_speed": f"{state.convergence_speed:.6f}",
+            # Δf_t: 当前 stage 的 fitness 变化趋势
+            "delta_fitness_pct": state.delta_fitness,
+            # S_t_stag: 连续未改善代数
             "stagnation_count": state.stagnation_count,
-            "feasible_ratio": round(state.feasible_ratio, 4),
-            "violation_mean": round(state.violation_mean, 6),
-            "violation_max": round(state.violation_max, 6),
-            "current_cr": round(state.cr, 4),
-            "current_f": round(state.f_scale, 4),
+            # ΔD_t: 当前 stage 的多样性变化趋势
+            "delta_diversity": state.delta_diversity,
+            # CR_{t-1}: 上次 LLM 选择的 CR
+            "prev_action_cr": state.prev_action,
+            # Δf_{t-1}: 上次决策的 fitness 效果
+            "prev_delta_fitness_pct": state.prev_delta_fitness,
+            # ΔD_{t-1}: 上次决策对多样性的影响
+            "prev_delta_diversity": state.prev_delta_diversity,
         }
 
-        # 轨迹摘要（含每代 CR 值）
-        trajectory_text = "No trajectory data yet."
-        if state.trajectory_recent:
-            lines = []
-            for e in state.trajectory_recent[-5:]:
-                line = (
-                    f"  gen={e.generation}: fitness={e.fitness_best:.1f}, "
-                    f"div={e.diversity:.3f}, stag={e.stagnation_count}, "
-                    f"cr={e.cr:.4f}"
+        # ---- Stage 级轨迹表格（最近 5 个 stage） ----
+        trajectory_text = "No stage history yet (first decision)."
+        stage_hist = state.stage_history
+        if stage_hist:
+            lines = ["Stage | CR | Best Fitness | Δf(%) | Diversity | ΔD"]
+            for s in stage_hist[-5:]:
+                lines.append(
+                    f"{s['stage']:5d} | {s['cr']:.1f} | "
+                    f"{s['best_fitness']:12.1f} | "
+                    f"{s['delta_fitness']:+6.2f}% | "
+                    f"{s['diversity']:.4f} | {s['delta_diversity']:+.4f}"
                 )
-                if e.llm_module:
-                    line += f", llm_decision={e.llm_module}"
-                lines.append(line)
             trajectory_text = "\n".join(lines)
 
-        # LLM 上次 CR 决策的反馈（闭环控制）
-        prev_cr = state.extra.get("previous_llm_cr")
-        fitness_change = state.extra.get("fitness_change_since_last")
-        diversity_change = state.extra.get("diversity_change_since_last")
-        interval_gens = state.extra.get("previous_interval_gens")
-        if prev_cr is not None:
+        # ---- Action-Outcome 反馈 ----
+        feedback = ""
+        if state.prev_action is None:
+            # 第一次调用：无上次决策
             feedback = (
-                f"\n\n## Last LLM Decision Feedback\n"
-                f"Previous CR chosen: {prev_cr}\n"
-                f"Interval: {interval_gens} generations\n"
-                f"Fitness change: {fitness_change:+.1f} "
-                f"({'improved' if fitness_change > 0 else 'stagnated' if abs(fitness_change) < 0.01 else 'degraded'})\n"
-                f"Diversity change: {diversity_change:+.4f}"
+                f"\n\n## Last Decision Feedback\n"
+                f"First decision: no previous LLM action/outcome available.\n"
+                f"No prior CR context to evaluate. Choose CR based on current state."
             )
-        else:
-            feedback = ""
+        elif state.delta_fitness is not None and state.prev_delta_diversity is not None:
+            # 后续调用：中性事实描述（不预设因果、不给建议）
+            prev_gen_str = ""
+            if stage_hist:
+                prev_gen_str = f" at gen {stage_hist[-1].get('gen_end', '?')}"
+            feedback = (
+                f"\n\n## Last Decision Feedback\n"
+                f"Under CR={state.prev_action:.1f}{prev_gen_str}, "
+                f"the observed stage outcome was "
+                f"Δf={state.delta_fitness:+.2f}%, ΔD={state.prev_delta_diversity:+.4f}."
+            )
 
-        # 使用统一的 user prompt 模板（含历史反馈）
         user = get_prompt(
             "search_controller",
             prompt_type="user",
@@ -102,7 +105,6 @@ class LLMSearchControllerModule(BaseLLMModule):
             trajectory_text=trajectory_text + feedback,
         )
 
-        # 场景化 system prompt：根据 model_type 只加载对应场景的 CR 调控建议
         if self._system_prompt is None:
             self._system_prompt = get_prompt(
                 "search_controller",
