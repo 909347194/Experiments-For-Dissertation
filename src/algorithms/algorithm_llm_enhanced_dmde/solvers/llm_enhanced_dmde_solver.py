@@ -36,9 +36,12 @@ from ..operators.crossover import dynamic_crossover_rate
 from ..operators.scale_factor import dynamic_scale_factor_batch
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
-from ..features.population_features import compute_diversity, compute_gene_variance
+from ..features.population_features import (
+    compute_diversity, compute_gene_variance, compute_diversity_quantiles,
+)
 from ..features.convergence_features import compute_convergence_speed, detect_stagnation
 from ..features.constraint_features import compute_feasible_ratio, compute_violation_distribution
+from ..features.trigger import evaluate_trigger, stagnation_tier, DEFAULT_STAG_TIERS
 from ..trajectory.optimization_trajectory import OptimizationTrajectory, TrajectoryEntry
 from ..llm.base_module import BaseLLMModule, ModuleState
 from ..llm.llm_client import create_llm_client, create_llm_client_from_config
@@ -71,6 +74,21 @@ class LLMEnhancedDMDEConfig:
         modules: 各模块配置字典。
             格式: {"module_name": {"enabled": bool, "interval": int, ...}}
             可用模块名: "population_init", "search_controller"
+
+            search_controller v2 闭环控制配置（可选）:
+                trigger:
+                    mode: "event"        # 事件触发（缺省 = 旧版固定 interval）
+                    first_call: 50       # 首次决策最早代数
+                    min_interval: 20     # 两次决策最小间隔（防抖）
+                    max_interval: 100    # 最大间隔（fallback 定时器）
+                    df_threshold: 0.05   # Δf 事件阈值（%）
+                    dd_threshold: 0.02   # ΔD 事件阈值（噪声参考量级）
+                    stag_tiers: [5, 10, 20, 40, 80, 160]  # 停滞跨档事件边界
+                shadow:
+                    enabled: true         # 影子对照种群（固定 CR 归因基线）
+                    cr: 0.5              # 影子种群固定 CR
+                actions:
+                    restart_choices: [0.0, 0.1, 0.2, 0.3]  # 重启比例候选值
 
         # 轨迹
         save_trajectory: 是否保存轨迹到 extra。
@@ -217,12 +235,47 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         llm_cr_prev_fitness = best_individual.fitness  # 上次 LLM CR 决定时的 best fitness
         llm_cr_prev_diversity = 0.0                     # 上次 LLM CR 决定时的 diversity
         llm_cr_prev_gen = 0                             # 上次 LLM CR 决定时的代数
+        llm_restart_prev = 0.0                          # 上次决策的重启比例
 
         # Stage 级历史记录（闭环控制用）
         # 每次 LLM 调用 = 一个 stage，记录 stage 结束时的 fitness/diversity/CR
         stage_history: list[dict] = []
         stage_fitness = best_individual.fitness   # 当前 stage 起始 fitness
         stage_diversity = compute_diversity(population)  # 当前 stage 起始 diversity
+
+        # Stage 级过程统计（可观测性：携带 stage 内搜索动态）
+        stage_accepted = 0        # stage 内被贪婪选择接受的子代数
+        stage_offspring = 0       # stage 内产生的子代总数
+        stage_improvements = 0    # stage 内 best 被刷新的次数
+        stage_best_curve: list[float] = []  # stage 内逐代 best fitness
+        last_improve_gen = 0      # 上次 best 改进发生的代数
+        tier_at_decision = 0      # 上次决策时的停滞档位
+
+        # ---- v2 闭环控制配置（从 search_controller 模块配置读取） ----
+        sc_cfg = (cfg.modules or {}).get("search_controller", {}) or {}
+        trigger_cfg = sc_cfg.get("trigger", {}) or {}
+        event_mode = trigger_cfg.get("mode") == "event"
+        tc = {
+            "first_call": int(trigger_cfg.get("first_call", 50)),
+            "min_interval": int(trigger_cfg.get("min_interval", 20)),
+            "max_interval": int(trigger_cfg.get("max_interval", 100)),
+            "df_threshold": float(trigger_cfg.get("df_threshold", 0.05)),
+            "dd_threshold": float(trigger_cfg.get("dd_threshold", 0.02)),
+            "tiers": trigger_cfg.get("stag_tiers", DEFAULT_STAG_TIERS),
+        }
+        shadow_cfg = sc_cfg.get("shadow", {}) or {}
+        shadow_enabled = bool(shadow_cfg.get("enabled", False))
+        shadow_cr = float(shadow_cfg.get("cr", 0.5))
+
+        # 影子对照种群：固定 CR，从每个 stage 起点与主种群同源演化，
+        # 为 LLM 的 CR 决策提供"如果不调整会怎样"的归因基线。
+        # 使用独立 rng 流，不干扰主搜索的随机数序列。
+        rng_shadow = np.random.default_rng((cfg.seed if cfg.seed is not None else 0) + 123456)
+        shadow_pop: list[Individual] | None = None
+        shadow_best_fitness = float("inf")
+        shadow_best_idx = 0
+        restart_counter = 0        # 已执行的重启次数（用于派生可复现随机种子）
+        restart_encoder = None     # 惰性创建的重启个体生成器
 
         t_start = time.time()
 
@@ -231,7 +284,39 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
             # ---- [Hook: before_mutation] 统一搜索控制器 ----
             sc_module = self._get_module("search_controller")
-            if sc_module and sc_module.enabled and gen % sc_module.interval == 0:
+            fire_decision = False
+            trigger_reason = ""
+            if sc_module and sc_module.enabled:
+                if event_mode:
+                    # 事件触发：只在搜索状态发生值得注意的变化时咨询 LLM
+                    # 前馈补偿：上次决策执行了 restart 时，屏蔽 diversity_move 事件
+                    # （restart 注入随机个体必然移动 diversity，那是执行器自身的
+                    #  效应，不应回灌触发器形成 restart → ΔD 事件 → 决策的自锁）
+                    div_now = compute_diversity(population)
+                    stag_now = detect_stagnation(cost_history)
+                    fire_decision, trigger_reason = evaluate_trigger(
+                        gens_since_decision=gen - llm_cr_prev_gen,
+                        is_first_call=llm_cr is None,
+                        best_fitness_now=best_individual.fitness,
+                        stage_start_fitness=stage_fitness,
+                        diversity_now=div_now,
+                        stage_start_diversity=stage_diversity,
+                        stagnation_now=stag_now,
+                        tier_at_last_decision=tier_at_decision,
+                        tiers=tc["tiers"],
+                        first_call=tc["first_call"],
+                        min_interval=tc["min_interval"],
+                        max_interval=tc["max_interval"],
+                        df_threshold=tc["df_threshold"],
+                        dd_threshold=tc["dd_threshold"],
+                        diversity_event_enabled=(llm_restart_prev <= 0),
+                    )
+                else:
+                    # 旧模式：固定 interval（向后兼容）
+                    fire_decision = gen % sc_module.interval == 0
+                    trigger_reason = f"fixed_interval: {sc_module.interval}"
+
+            if fire_decision:
                 # 使用 LLM 的实际决策值（如有），否则用公式 3-9
                 actual_cr = llm_cr if llm_cr is not None else dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
                 # 计算实际的 F 值（取种群平均值作为代表值）
@@ -283,6 +368,32 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 state.prev_action = llm_cr  # None on first call
                 state.stage_history = stage_history[-5:]  # 最近 5 个 stage
 
+                # ---- 可观测性扩展：stage 级过程统计 ----
+                state.stage_length = gen - llm_cr_prev_gen
+                state.acceptance_rate = (
+                    stage_accepted / stage_offspring if stage_offspring > 0 else None
+                )
+                state.improvements_in_stage = stage_improvements
+                state.gens_since_last_improvement = gen - last_improve_gen
+                state.stagnation_raw = detect_stagnation(cost_history)
+                state.diversity_p25, state.diversity_p75 = compute_diversity_quantiles(population)
+                state.stage_best_curve = self._downsample_curve(stage_best_curve, max_points=12)
+                state.trigger_reason = trigger_reason
+                state.prev_action_restart = llm_restart_prev
+
+                # ---- 影子对照（可归因）：同一 stage 窗口内固定 CR 的基线 ----
+                if shadow_pop is not None:
+                    state.shadow_cr = shadow_cr
+                    if stage_fitness > 0 and np.isfinite(stage_fitness):
+                        state.shadow_delta_fitness = (
+                            stage_fitness - shadow_best_fitness
+                        ) / stage_fitness * 100.0
+                    else:
+                        state.shadow_delta_fitness = 0.0
+                    state.shadow_delta_diversity = (
+                        compute_diversity(shadow_pop) - stage_diversity
+                    )
+
                 # 旧版反馈字段保留兼容
                 state.extra["previous_llm_cr"] = llm_cr
                 state.extra["previous_interval_gens"] = gen - llm_cr_prev_gen
@@ -294,26 +405,74 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
 
                 if decision and "cr" in decision:
                     new_cr = decision["cr"]
+                    shadow_df_val = state.shadow_delta_fitness
+                    shadow_dd_val = state.shadow_delta_diversity
                     # 记录 stage 结束时的快照到 stage_history
                     # CR 记录 actual_cr（产生 outcome 的 CR），不是 new_cr（刚选的 CR）
                     stage_history.append({
                         "stage": len(stage_history) + 1,
                         "gen_start": llm_cr_prev_gen,
                         "gen_end": gen,
+                        "stage_length": gen - llm_cr_prev_gen,
                         "cr": round(actual_cr, 4),
+                        "restart_fraction": round(llm_restart_prev, 2),
                         "best_fitness": round(current_fitness, 2),
                         "delta_fitness": round(delta_fitness, 4) if delta_fitness is not None else None,
                         "diversity": round(current_diversity, 4),
                         "delta_diversity": round(delta_diversity, 4) if delta_diversity is not None else None,
+                        "shadow_delta_fitness": (
+                            round(shadow_df_val, 4) if shadow_df_val is not None else None
+                        ),
+                        "shadow_delta_diversity": (
+                            round(shadow_dd_val, 4) if shadow_dd_val is not None else None
+                        ),
+                        "acceptance_rate": (
+                            round(state.acceptance_rate, 4)
+                            if state.acceptance_rate is not None else None
+                        ),
+                        "trigger_reason": trigger_reason,
                     })
-                    # 更新 stage 起始快照
+
+                    # ---- 应用 restart_fraction（能控性：收敛后的有效动作） ----
+                    new_restart = float(decision.get("restart_fraction", 0.0) or 0.0)
+                    if new_restart > 0:
+                        if restart_encoder is None:
+                            restart_encoder = PopulationEncoder(cost_matrix, n_uavs, n_targets)
+                        restart_counter += 1
+                        population, best_individual, best_idx = self._apply_restart(
+                            population, best_individual, best_idx,
+                            new_restart, restart_encoder, restart_counter,
+                            fitness_evaluator, cost_matrix, n_uavs, cfg,
+                        )
+                        if cfg.verbose:
+                            print(
+                                f"  [SearchController @ gen {gen}] restart applied: "
+                                f"{new_restart:.0%} of worst individuals replaced"
+                            )
+
+                    # 更新 stage 起始快照（重启之后，使下一 stage 的 Δ 反映新策略起点）
+                    current_fitness = best_individual.fitness
+                    current_diversity = compute_diversity(population)
                     stage_fitness = current_fitness
                     stage_diversity = current_diversity
+                    stage_accepted = 0
+                    stage_offspring = 0
+                    stage_improvements = 0
+                    stage_best_curve = []
+                    tier_at_decision = stagnation_tier(state.stagnation_raw, tc["tiers"])
                     # 更新 LLM 决策缓存
                     llm_cr = new_cr
+                    llm_restart_prev = new_restart
                     llm_cr_prev_fitness = current_fitness
                     llm_cr_prev_diversity = current_diversity
                     llm_cr_prev_gen = gen
+
+                    # ---- 影子种群重置为当前主种群（下一 stage 的对照起点） ----
+                    if shadow_enabled:
+                        shadow_pop = [ind.copy() for ind in population]
+                        shadow_fitness_arr = [ind.fitness for ind in shadow_pop]
+                        shadow_best_idx = int(np.argmin(shadow_fitness_arr))
+                        shadow_best_fitness = shadow_pop[shadow_best_idx].fitness
 
             # CR 来源：LLM 决定 or 公式 3-9（与纯 DMDE 一致）
             if llm_cr is not None:
@@ -345,9 +504,13 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 child.fitness = self._evaluate(child, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
                 if child.fitness < population[i].fitness:
                     population[i] = child
+                    stage_accepted += 1
                     if child.fitness < best_individual.fitness:
                         best_individual = child.copy()
                         best_idx = i
+                        stage_improvements += 1
+                        last_improve_gen = gen
+            stage_offspring += cfg.pop_size
 
             # GMR 灭绝判断
             if should_extinct(cr, cfg.delta, rng):
@@ -365,7 +528,50 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                             population[i], fitness_evaluator, cost_matrix, n_uavs=n_uavs,
                         )
 
+            # ---- 影子对照种群进化（固定 CR，stage 级归因基线） ----
+            # 与主种群同一 stage 起点、同一算子链，唯一差异是 CR 固定，
+            # 因此下一决策点的主/影子 Δf 之差可归因于 LLM 的 CR 选择。
+            if shadow_pop is not None:
+                sc_cost_vectors = np.array([ind.cost_vector for ind in shadow_pop])
+                sf_values = dynamic_scale_factor_batch(shadow_cr, cfg.pop_size, rng_shadow)
+                sc_trial = mutate_population(
+                    sc_cost_vectors, shadow_best_idx, gen, cfg.max_generations, cfg.zeta,
+                    rng_shadow, cr=shadow_cr, f_scale=sf_values,
+                )
+                for i in range(cfg.pop_size):
+                    sc_child = inverse_phi(
+                        sc_trial[i], cost_matrix, n_uavs, n_targets, model_type,
+                        rng=rng_shadow, temperature=temperature,
+                    )
+                    sc_child.fitness = self._evaluate(
+                        sc_child, fitness_evaluator, cost_matrix, n_uavs=n_uavs,
+                    )
+                    if sc_child.fitness < shadow_pop[i].fitness:
+                        shadow_pop[i] = sc_child
+                        if sc_child.fitness < shadow_best_fitness:
+                            shadow_best_fitness = sc_child.fitness
+                            shadow_best_idx = i
+                if should_extinct(shadow_cr, cfg.delta, rng_shadow):
+                    sc_fitness_arr = np.array([ind.fitness for ind in shadow_pop])
+                    sc_new_cv, sc_survived = apply_extinction(
+                        sc_fitness_arr, sc_cost_vectors, shadow_best_idx,
+                        cost_matrix, n_uavs, n_targets, model_type, rng=rng_shadow,
+                    )
+                    for i in range(cfg.pop_size):
+                        if i not in sc_survived:
+                            shadow_pop[i] = inverse_phi(
+                                sc_new_cv[i], cost_matrix, n_uavs, n_targets, model_type,
+                                rng=rng_shadow,
+                            )
+                            shadow_pop[i].fitness = self._evaluate(
+                                shadow_pop[i], fitness_evaluator, cost_matrix, n_uavs=n_uavs,
+                            )
+                    sc_fits = [ind.fitness for ind in shadow_pop]
+                    shadow_best_idx = int(np.argmin(sc_fits))
+                    shadow_best_fitness = sc_fits[shadow_best_idx]
+
             cost_history.append(best_individual.fitness)
+            stage_best_curve.append(best_individual.fitness)
 
             # 记录常规轨迹点
             if cfg.save_trajectory and gen % max(1, cfg.max_generations // 100) == 0:
@@ -705,6 +911,68 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 convergence_speed=state.convergence_speed,
                 stagnation_count=state.stagnation_count,
             )
+
+    @staticmethod
+    def _downsample_curve(curve: list[float], max_points: int = 12) -> list[list[float]]:
+        """将 stage 内逐代 best 曲线降采样为 [gen_offset, Δ%] 点列。
+
+        Δ% 相对 stage 起点归一化，避免在 prompt 中塞入大数值绝对 fitness，
+        同时保留 stage 内的收敛动态（何时改进、改进多少）。
+        """
+        if not curve:
+            return []
+        n = len(curve)
+        if n <= max_points:
+            idx = list(range(n))
+        else:
+            idx = [int(i) for i in np.linspace(0, n - 1, max_points)]
+        start = curve[0]
+        pts = []
+        for i in idx:
+            if abs(start) > 1e-12:
+                delta_pct = round((start - curve[i]) / abs(start) * 100.0, 3)
+            else:
+                delta_pct = 0.0
+            pts.append([i + 1, delta_pct])
+        return pts
+
+    def _apply_restart(
+        self, population, best_individual, best_idx,
+        restart_fraction: float, encoder, restart_counter: int,
+        fitness_evaluator, cost_matrix, n_uavs, cfg,
+    ):
+        """执行 LLM 决策的重启动作：用新鲜随机个体替换最差比例的个体。
+
+        种子由 (cfg.seed, restart_counter) 派生，保证同 seed 可复现、
+        不同次重启产生不同个体。best 个体不受影响（只替换最差端）。
+
+        Returns:
+            (population, best_individual, best_idx) 重启后的元组。
+        """
+        k = int(round(restart_fraction * len(population)))
+        if k <= 0:
+            return population, best_individual, best_idx
+
+        # encoder.generate(seed=None) 使用全局 numpy 随机流；
+        # 每次重启前播种派生种子 → 可复现且每次不同
+        np.random.seed((cfg.seed if cfg.seed is not None else 0) * 100003 + 17 * restart_counter)
+
+        fresh = encoder.generate(k)
+        worst_order = np.argsort([ind.fitness for ind in population])[::-1]
+
+        for j in range(k):
+            ind = fresh[j]
+            ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
+            pos = int(worst_order[j])
+            population[pos] = ind
+            if ind.fitness < best_individual.fitness:
+                best_individual = ind.copy()
+                best_idx = pos
+
+        # 保险：重算 best_idx（重启理论上只动最差端，但以防万一）
+        fits = [ind.fitness for ind in population]
+        best_idx = int(np.argmin(fits))
+        return population, best_individual, best_idx
 
     @staticmethod
     def _evaluate(individual, fitness_evaluator, cost_matrix, n_uavs=None):

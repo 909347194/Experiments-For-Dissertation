@@ -21,4 +21,18 @@ max_tokens_cap: 65536
 modules:
     search_controller:
         enabled: true
-        interval: 50
+        interval: 50          # 旧版固定间隔（event 模式下不生效，保留兼容）
+        # ---- v2 闭环控制（可观测 / 可归因 / 可触发 / 能控性） ----
+        trigger:
+            mode: event       # 事件触发替代固定 interval
+            first_call: 50    # 首次决策最早代数（保证有初始历史）
+            min_interval: 20  # 两次决策最小间隔（防抖）
+            max_interval: 100 # 最大间隔（fallback 定时器）
+            df_threshold: 0.05   # Δf 事件阈值（%）
+            dd_threshold: 0.02   # ΔD 事件阈值（噪声参考量级）
+            stag_tiers: [5, 10, 20, 40, 80, 160]  # 停滞跨档事件边界
+        shadow:
+            enabled: true     # 影子对照种群（固定 CR=0.5 归因基线）
+            cr: 0.5
+        actions:
+            restart_choices: [0.0, 0.1, 0.2, 0.3]  # 重启比例候选（收敛后的有效动作）

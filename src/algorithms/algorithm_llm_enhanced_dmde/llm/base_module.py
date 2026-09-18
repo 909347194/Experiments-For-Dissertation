@@ -167,6 +167,24 @@ class ModuleState:
     prev_delta_fitness: float = 0.0  # Δf_{t-1}: 上个 stage 的 fitness 变化
     prev_delta_diversity: float = 0.0  # ΔD_{t-1}: 上个 stage 的多样性变化
     prev_action: float | None = None  # CR_{t-1}: 上次 LLM 选择的 CR
+    # ---- 可观测性扩展（v2 闭环控制） ----
+    # stage 级过程统计（携带 stage 内搜索动态，而非只有两个聚合标量）
+    acceptance_rate: float | None = None       # stage 内子代接受率
+    improvements_in_stage: int = 0             # stage 内 best 被刷新的次数
+    gens_since_last_improvement: int = 0       # 距上次 best 改进的代数
+    stagnation_raw: int = 0                    # 真实停滞代数（未封顶）
+    diversity_p25: float = 0.0                 # 成对距离分布 p25（空间结构）
+    diversity_p75: float = 0.0                 # 成对距离分布 p75
+    stage_best_curve: list | None = None       # stage 内逐代 best（降采样）
+    stage_length: int = 0                      # 当前 stage 实际长度（代）
+    # ---- 事件触发 ----
+    trigger_reason: str = ""                   # 本次决策被触发的原因
+    # ---- 影子对照（可归因） ----
+    shadow_cr: float | None = None             # 影子种群固定 CR（None = 无影子）
+    shadow_delta_fitness: float | None = None  # 影子 stage Δf（%）
+    shadow_delta_diversity: float | None = None  # 影子 stage ΔD
+    # ---- 上次动作（含重启） ----
+    prev_action_restart: float = 0.0           # 上次决策的重启比例
     # Stage 级轨迹历史（最近 N 个 stage 的汇总）
     stage_history: list[dict[str, Any]] | None = None
     # DE 参数（当前值，模块可以读取或修改）
@@ -237,6 +255,11 @@ class BaseLLMModule(ABC):
     def interval(self) -> int:
         """触发间隔（代数）。1 = 每代触发。"""
         return self._config.get("interval", 1)
+
+    @property
+    def config(self) -> dict[str, Any]:
+        """模块配置（只读视图，供 solver 读取触发/影子等控制配置）。"""
+        return dict(self._config)
 
     @property
     def enabled(self) -> bool:

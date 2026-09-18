@@ -353,28 +353,53 @@ QUALITY PRIORITY:
 # =============================================================================
 
 _SC_BASE = """\
-You are an expert in Differential Evolution (DE) for combinatorial optimization \
-(UAV-target assignment with discrete mapping).
+You are an expert controller for a Differential Evolution (DE) solver on a \
+combinatorial optimization problem (UAV-target assignment with discrete mapping).
 
-Your task: Select the crossover rate (CR) from {cr_choices}.
+You make sequential control decisions. You are consulted only when the search \
+state changes (see trigger_reason) or when a fallback timer expires.
 
-The scaling factor F will be automatically computed from your chosen CR \
-F is automatically derived from your chosen CR — you do not need to specify F.
+## Actions You Control
+1. **CR** (crossover rate), one of {cr_choices}:
+   Each gene independently uses DE/rand/1 (exploration) when random <= CR,
+   else DE/best/2 (exploitation). F is derived from CR automatically — do not specify F.
+2. **restart_fraction**, one of {restart_choices}:
+   Replaces the worst fraction of the population with fresh random individuals.
+   This is your ONLY lever that works after the population has converged —
+   CR cannot help when no offspring is being accepted.
 
-## How CR Affects Search
-Each gene independently uses:
-- DE/rand/1 (exploration) when random value <= CR
-- DE/best/2 (exploitation) when random value > CR
+## Reference Magnitudes (read the evidence correctly)
+- |delta_fitness_pct| < 0.05%: effectively ZERO improvement.
+- |delta_diversity| < 0.02: NOISE — treat as "diversity unchanged".
+- stagnation_raw is the true number of consecutive non-improving generations \
+(uncapped). Values of several hundred mean genuine long-term convergence.
+- acceptance_rate is the fraction of offspring that survived selection this stage. \
+Low acceptance + zero df = the population is no longer producing better solutions.
 
-## Closed-Loop Control
-You are making sequential decisions. Each decision has an observable outcome:
-- **Δf (delta fitness)**: percentage improvement since last decision. Positive = improving.
-- **ΔD (delta diversity)**: diversity change since last decision. Positive = more diverse.
+## Decision Policy
+- If the state is effectively unchanged since your last decision (df and dD both \
+within the noise references above), the best action is usually to KEEP the current \
+CR unchanged. Being consulted does not oblige you to act.
+- Justify any change with the specific evidence (df, acceptance_rate, \
+stagnation_raw), not with generic exploration/exploitation heuristics.
+"""
 
-Use the Stage History table and Last Decision Feedback to:
-1. See what CR you chose before and what happened.
-2. Decide whether to continue, reverse, or try something new.
-3. Balance exploration (high CR → more rand/1) vs exploitation (low CR → more best/2).
+_SC_SHADOW = """\
+## Shadow Control (attribution reference)
+A shadow population, evolved from the SAME starting point as the main population \
+with FIXED CR={shadow_cr}, is run in parallel over the same stage window:
+- df (main, your CR) vs df_shadow (fixed CR) isolates the effect of YOUR CR choice.
+- df >> df_shadow: your CR is genuinely helping — consider keeping it.
+- df ~= df_shadow ~= 0: CR has no effect here (converged or insensitive) — \
+changing CR again will not help; consider restart_fraction or keep everything unchanged.
+- df < df_shadow: your CR hurt — change it.
+
+## Decision Policy
+- If the state is effectively unchanged since your last decision (df and dD both \
+within the noise references above) AND the shadow shows the same, the best action is \
+usually to KEEP the current CR unchanged. Being consulted does not oblige you to act.
+- Justify any change with the specific evidence (df vs df_shadow, acceptance_rate, \
+stagnation_raw), not with generic exploration/exploitation heuristics.
 """
 
 _SC_CR_GUIDE = """\
@@ -382,8 +407,8 @@ _SC_CR_GUIDE = """\
 The mechanism above means CR controls **how many genes** are replaced \
 by the rand/1 or best/2 donor (i.e., a gene-level selection probability), \
 not the exploration direction itself. Your CR choice should be based on the \
-**current optimization state** (diversity, stagnation, convergence speed, \
-trajectory trend), not a fixed rule for the scenario.
+**current optimization state** (diversity, stagnation, acceptance, \
+shadow contrast), not a fixed rule for the scenario.
 """
 
 _SC_FORMAT = """\
@@ -391,7 +416,8 @@ _SC_FORMAT = """\
 Respond with a JSON object only (no markdown):
 {{
     "cr": <one of {cr_choices}>,
-    "reasoning": "<brief explanation of your CR choice based on the current state>"
+    "restart_fraction": <one of {restart_choices}>,
+    "reasoning": "<brief, evidence-based justification referencing df vs df_shadow>"
 }}
 """
 
@@ -439,6 +465,8 @@ _SC_SCENE_MAP: dict[str, str] = {
 def get_search_controller_prompt(
     cr_choices: list[float] | None = None,
     model_type: str | None = None,
+    restart_choices: list[float] | None = None,
+    shadow_cr: float | None = None,
 ) -> str:
     """获取搜索控制器 system prompt。
 
@@ -446,13 +474,26 @@ def get_search_controller_prompt(
         cr_choices: CR 候选值列表
         model_type: 场景类型 ("balanced"/"overloaded"/"srp")，
                      非空时追加场景搜索特性描述（供 LLM 参考，非决策规则）
+        restart_choices: 重启比例候选值列表
+        shadow_cr: 影子对照种群使用的固定 CR（None = 无影子对照）
     """
     if cr_choices is None:
         cr_choices = [0.1, 0.3, 0.5, 0.7, 0.9]
+    if restart_choices is None:
+        restart_choices = [0.0, 0.1, 0.2, 0.3]
 
-    base = _SC_BASE.format(cr_choices=cr_choices)
+    base = _SC_BASE.format(
+        cr_choices=cr_choices,
+        restart_choices=restart_choices,
+    )
+    # 影子对照段：仅在 solver 实际启用影子种群时注入
+    if shadow_cr is not None:
+        base += _SC_SHADOW.format(shadow_cr=shadow_cr)
     scene_extra = _SC_SCENE_MAP.get(model_type, "") if model_type else ""
-    fmt = _SC_FORMAT.format(cr_choices=cr_choices)
+    fmt = _SC_FORMAT.format(
+        cr_choices=cr_choices,
+        restart_choices=restart_choices,
+    )
 
     return base + _SC_CR_GUIDE + scene_extra + fmt
 
@@ -469,8 +510,10 @@ SEARCH_CONTROLLER_USER_PROMPT = """\
 {trajectory_text}
 
 ## Task
-Select the best CR for the next interval. \
-Base your decision on the current state, stage history, and last decision feedback. \
+Decide CR and restart_fraction for the next stage. \
+Base your decision on the evidence: current state, stage history, \
+shadow contrast, and the trigger_reason (why you are being consulted now). \
+Keeping parameters unchanged is a valid decision when nothing meaningful changed. \
 Respond with JSON only.
 """
 

@@ -64,6 +64,48 @@ def compute_diversity(population: list) -> float:
     return float(avg_dist / max_dist)
 
 
+def compute_diversity_quantiles(
+    population: list,
+    q: tuple[float, float] = (0.25, 0.75),
+) -> tuple[float, float]:
+    """计算种群多样性分布的分位数。
+
+    与 compute_diversity 使用同一归一化（除以最大成对距离），
+    但返回成对距离分布的分位数而非均值，用于刻画种群空间结构：
+    p25 与 p75 越接近（且都低）→ 种群聚成一团；
+    p75 高而 p25 低 → 少数离群个体撑起多样性（假多样性）。
+
+    Args:
+        population: 种群个体列表。每个个体需有 cost_vector 属性。
+        q:          两个分位点。
+
+    Returns:
+        (p25, p75) 元组，均归一化到 [0, 1]。
+    """
+    if len(population) < 2:
+        return 0.0, 0.0
+
+    cost_vectors = np.array([ind.cost_vector for ind in population])
+    pop_size = cost_vectors.shape[0]
+    if pop_size < 2:
+        return 0.0, 0.0
+
+    dists: list[float] = []
+    max_dist = 0.0
+    for i in range(pop_size):
+        for j in range(i + 1, pop_size):
+            dist = float(np.linalg.norm(cost_vectors[i] - cost_vectors[j]))
+            dists.append(dist)
+            if dist > max_dist:
+                max_dist = dist
+
+    if not dists or max_dist < 1e-10:
+        return 0.0, 0.0
+
+    normalized = np.array(dists) / max_dist
+    return tuple(float(v) for v in np.quantile(normalized, q))
+
+
 def compute_gene_variance(cost_vectors: np.ndarray) -> float:
     """计算种群基因级方差。
 

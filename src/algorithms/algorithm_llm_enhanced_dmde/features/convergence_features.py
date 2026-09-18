@@ -60,7 +60,7 @@ def compute_convergence_speed(
 def detect_stagnation(
     cost_history: list[float],
     threshold: float = 1e-4,
-    patience: int = 10,
+    patience: int = 1_000_000,
 ) -> int:
     """检测停滞代数。
 
@@ -69,7 +69,9 @@ def detect_stagnation(
     Args:
         cost_history: 适应度历史列表。
         threshold:    改进阈值（相对改进量）。
-        patience:     最大回溯代数。
+        patience:     最大回溯代数（默认不设实际上限，
+                      返回真实停滞代数；旧版 cap=10 会使特征
+                      在长时间停滞时饱和失去信息量）。
 
     Returns:
         连续停滞代数。0 = 没有停滞。
