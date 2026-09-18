@@ -89,6 +89,14 @@ class LLMEnhancedDMDEConfig:
                     cr: 0.5              # 影子种群固定 CR
                 actions:
                     restart_choices: [0.0, 0.1, 0.2, 0.3]  # 重启比例候选值
+                freeze:
+                    enabled: true        # 无证据时冻结 CR（默认 False，向后兼容）
+                    df_noise: 0.05       # |df| 噪声阈值（%）
+                    shadow_contrast: 0.05  # |df - df_shadow| 无差异阈值（%）
+
+            v3 CR 动作空间：LLM 输出 {"cr_action": "hold"|"set", "cr": <值或 null>}。
+            hold 是默认路径，解析失败/字段缺失/格式非法一律回退 hold；
+            freeze 守卫触发时 solver 强制 hold（CR 通道本轮无信息）。
 
         # 轨迹
         save_trajectory: 是否保存轨迹到 extra。
@@ -267,6 +275,18 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         shadow_enabled = bool(shadow_cfg.get("enabled", False))
         shadow_cr = float(shadow_cfg.get("cr", 0.5))
 
+        # 无证据冻结守卫：本 stage 的 CR 通道若被判定为无信息（无改进且与
+        # 影子对照无差异），则冻结 CR，LLM 本轮只能决定 restart_fraction。
+        # 目的：不让控制器继续操作一个因果效应为零的通道（实测
+        # corr(CR_t, CR_{t-1}) = -0.967，即无条件翻转）。
+        freeze_cfg = sc_cfg.get("freeze", {}) or {}
+        freeze_enabled = bool(freeze_cfg.get("enabled", False))
+        freeze_df_noise = float(freeze_cfg.get("df_noise", tc["df_threshold"]))
+        freeze_contrast = float(freeze_cfg.get("shadow_contrast", 0.05))
+        # 上一轮执行了 restart 时，df vs df_shadow 被重启动作混淆（影子没有重启），
+        # 不能再作为 CR 的证据 → 冻结 CR。
+        freeze_on_confound = bool(freeze_cfg.get("confound", True))
+
         # 影子对照种群：固定 CR，从每个 stage 起点与主种群同源演化，
         # 为 LLM 的 CR 决策提供"如果不调整会怎样"的归因基线。
         # 使用独立 rng 流，不干扰主搜索的随机数序列。
@@ -394,6 +414,38 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                         compute_diversity(shadow_pop) - stage_diversity
                     )
 
+                # ---- 无证据守卫：判定 CR 通道本轮是否可操作 ----
+                cr_frozen = False
+                cr_frozen_reason = ""
+                if freeze_enabled and not is_first_call:
+                    df_abs = abs(delta_fitness) if delta_fitness is not None else 0.0
+                    contrast = None
+                    if delta_fitness is not None and state.shadow_delta_fitness is not None:
+                        contrast = abs(delta_fitness - state.shadow_delta_fitness)
+
+                    if freeze_on_confound and llm_restart_prev > 0:
+                        # 重启动作混淆了 CR 归因：本轮 df 的改善可能来自注入个体
+                        cr_frozen = True
+                        cr_frozen_reason = (
+                            f"restart_fraction={llm_restart_prev:.1f} applied last "
+                            f"stage: df vs df_shadow confounded (shadow gets no restart)"
+                        )
+                    elif df_abs < freeze_df_noise and (contrast is None or contrast < freeze_contrast):
+                        cr_frozen = True
+                        if contrast is None:
+                            cr_frozen_reason = (
+                                f"df={delta_fitness:+.2f}% within noise "
+                                f"(<{freeze_df_noise}%), no shadow baseline"
+                            )
+                        else:
+                            cr_frozen_reason = (
+                                f"df={delta_fitness:+.2f}% within noise "
+                                f"(<{freeze_df_noise}%) and |df-df_shadow|="
+                                f"{contrast:.2f}% (<{freeze_contrast}%)"
+                            )
+                state.cr_frozen = cr_frozen
+                state.cr_frozen_reason = cr_frozen_reason
+
                 # 旧版反馈字段保留兼容
                 state.extra["previous_llm_cr"] = llm_cr
                 state.extra["previous_interval_gens"] = gen - llm_cr_prev_gen
@@ -401,10 +453,30 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 state.extra["diversity_change_since_last"] = None if is_first_call else current_diversity - llm_cr_prev_diversity
 
                 decision = sc_module.inject(state)
-                self._record_decision(gen, "search_controller", decision, state)
 
-                if decision and "cr" in decision:
-                    new_cr = decision["cr"]
+                if decision:
+                    # ---- CR 动作解析：hold 为默认，set 才取值 ----
+                    cr_action = decision.get("cr_action", "hold")
+                    cr_requested = decision.get("cr")   # 模型原始请求（审计用）
+                    if cr_frozen:
+                        # 守卫强制保持：CR 通道本轮无信息，不采纳任何改动
+                        cr_action = "hold"
+                        decision["cr"] = None
+                    new_cr = decision.get("cr")
+                    if new_cr is None or not str(cr_action).startswith("set"):
+                        # hold（或无法解析）：保持当前 CR；首次则回退到 0.5
+                        new_cr = llm_cr if llm_cr is not None else 0.5
+
+                    # 记录生效后的决策（含守卫判定与模型原始请求），
+                    # 保证审计记录与实际执行一致 —— 否则冻结时日志仍显示模型的
+                    # 原始 set 值，会误导归因分析。
+                    decision["cr_action"] = cr_action
+                    decision["cr_requested"] = cr_requested
+                    decision["cr_effective"] = new_cr
+                    decision["cr_frozen"] = cr_frozen
+                    decision["cr_frozen_reason"] = cr_frozen_reason
+                    self._record_decision(gen, "search_controller", decision, state)
+
                     shadow_df_val = state.shadow_delta_fitness
                     shadow_dd_val = state.shadow_delta_diversity
                     # 记录 stage 结束时的快照到 stage_history
@@ -431,6 +503,13 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                             if state.acceptance_rate is not None else None
                         ),
                         "trigger_reason": trigger_reason,
+                        # v3：CR 动作是否被采纳、通道是否冻结
+                        "cr_action": cr_action,
+                        "cr_requested": (
+                            round(decision.get("cr"), 4)
+                            if decision.get("cr") is not None else None
+                        ),
+                        "cr_frozen": cr_frozen,
                     })
 
                     # ---- 应用 restart_fraction（能控性：收敛后的有效动作） ----

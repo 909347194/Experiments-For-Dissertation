@@ -88,6 +88,9 @@ class LLMSearchControllerModule(BaseLLMModule):
             "stage_best_curve": state.stage_best_curve,
             # 本次被触发的原因
             "trigger_reason": state.trigger_reason or None,
+            # CR 通道是否被冻结（无证据守卫）
+            "cr_frozen": state.cr_frozen,
+            "cr_frozen_reason": state.cr_frozen_reason or None,
         }
 
         # ---- 影子对照（可归因锚点） ----
@@ -184,6 +187,8 @@ class LLMSearchControllerModule(BaseLLMModule):
                 cr_choices=self._cr_choices,
                 restart_choices=self._restart_choices,
                 shadow_cr=state.shadow_cr,
+                cr_frozen=state.cr_frozen,
+                restart_confounded=(state.prev_action_restart or 0.0) > 0,
             )
 
         return [
@@ -192,30 +197,62 @@ class LLMSearchControllerModule(BaseLLMModule):
         ]
 
     def parse_response(self, llm_output: str) -> dict[str, Any]:
+        """解析 LLM 输出。
+
+        动作空间为两级：先决定 cr_action（hold / set），再决定具体 CR 值。
+        **默认路径是 hold** —— 解析失败、字段缺失或格式非法时一律返回 hold，
+        而不是返回一个新的 CR 值。这是修复"无条件翻转"的关键：
+        旧版 schema 强制模型每次输出一个 CR 数字，模型在证据无区分度时
+        退化为 CR_t = flip(CR_{t-1})（实测 corr = -0.967，翻转率 0.98）。
+        """
         json_str = self._extract_json(llm_output)
         if json_str is None:
-            return {
-                "cr": 0.5,
-                "restart_fraction": 0.0,
-                "reasoning": "Failed to parse LLM output, using defaults",
-            }
+            return self._hold_decision("Failed to parse LLM output, holding CR by default")
 
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError:
-            return {
-                "cr": 0.5,
-                "restart_fraction": 0.0,
-                "reasoning": "Invalid JSON from LLM, using defaults",
-            }
+            return self._hold_decision("Invalid JSON from LLM, holding CR by default")
 
-        # 验证 CR（钳位到最近的合法候选）
-        cr = data.get("cr", 0.5)
+        if not isinstance(data, dict):
+            return self._hold_decision("LLM output is not a JSON object, holding CR by default")
+
+        evidence_read = str(data.get("evidence_read", ""))[:500]
+
+        # ---- 第 1 级决策：是否改动 CR ----
+        raw_cr = data.get("cr", None)
+        cr_num = None
         try:
-            cr = float(cr)
+            cr_num = float(raw_cr)
         except (ValueError, TypeError):
-            cr = 0.5
-        cr = min(self._cr_choices, key=lambda c: abs(c - cr))
+            cr_num = None
+
+        if "cr_action" in data:
+            action = self._normalize_action(data.get("cr_action"))
+        elif cr_num is not None:
+            # 旧 schema（只给 cr、不给 cr_action）：视为隐式 set，保持向后兼容
+            action = "set_implicit"
+        else:
+            # 既没说要改、也没给值 → hold（本 bug 的核心修复路径）
+            return self._hold_decision(
+                "No cr_action and no usable cr in LLM output; holding CR by default",
+                evidence_read,
+            )
+
+        # ---- 第 2 级决策：具体 CR 值（仅 set 时有效） ----
+        cr = None
+        if action in ("set", "set_implicit"):
+            if cr_num is None:
+                # 声明要改却没给合法值 → 回退到 hold（不猜一个值）
+                return self._hold_decision(
+                    f"cr_action='set' but cr={raw_cr!r} is not a number; "
+                    f"holding CR by default", evidence_read,
+                )
+            cr = min(self._cr_choices, key=lambda c: abs(c - cr_num))
+
+        # 防御：cr_action=hold 时忽略模型可能仍填的 cr 值
+        if action == "hold":
+            cr = None
 
         # 验证 restart_fraction（钳位到最近的合法候选）
         rf = data.get("restart_fraction", 0.0)
@@ -226,19 +263,49 @@ class LLMSearchControllerModule(BaseLLMModule):
         rf = min(self._restart_choices, key=lambda r: abs(r - rf))
 
         return {
-            "cr": cr,
+            "cr_action": action,
+            "cr": cr,                      # None = 保持当前 CR
             "restart_fraction": rf,
+            "evidence_read": evidence_read,
             "reasoning": data.get("reasoning", ""),
+        }
+
+    @staticmethod
+    def _normalize_action(raw: Any) -> str:
+        """把模型对 cr_action 的各种说法归一化为 "hold" / "set"。
+
+        未知/缺失/非法一律归为 hold（保守默认）。
+        """
+        if raw is None:
+            return "hold"
+        s = str(raw).strip().lower().replace("-", "_").replace(" ", "_")
+        if s in {"set", "change", "adjust", "update", "modify", "true", "yes", "1"}:
+            return "set"
+        # hold / keep / unchanged / none / false / no / 0 / freeze ...
+        return "hold"
+
+    def _hold_decision(self, reason: str, evidence_read: str = "") -> dict[str, Any]:
+        """构造一个 hold 决策（兜底路径）。"""
+        return {
+            "cr_action": "hold",
+            "cr": None,
+            "restart_fraction": 0.0,
+            "evidence_read": evidence_read,
+            "reasoning": reason,
         }
 
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
         """将决策应用到搜索状态。
 
-        直接设置 state.cr（不是偏移量）。
+        cr_action == "hold"（或 decision["cr"] 为 None）时不改动 state.cr。
         F 不在此处计算，由求解器根据 LLM 的 CR 通过公式 3-11 计算。
         restart_fraction 通过 state.extra 传递给 solver 执行（替换最差个体）。
         """
-        state.cr = float(decision.get("cr", 0.5))
-        state.extra["llm_cr"] = decision.get("cr")
+        new_cr = decision.get("cr", None)
+        if new_cr is not None and decision.get("cr_action") == "set":
+            state.cr = float(new_cr)
+        # hold：保持 state.cr 不变
+        state.extra["llm_cr"] = new_cr
+        state.extra["llm_cr_action"] = decision.get("cr_action", "hold")
         state.extra["llm_restart_fraction"] = decision.get("restart_fraction", 0.0)
         return state

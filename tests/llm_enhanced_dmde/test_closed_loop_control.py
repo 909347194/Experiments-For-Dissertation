@@ -173,16 +173,25 @@ class TestSearchControllerParse:
         d = m.parse_response('{"cr": 0.65, "restart_fraction": 0.15, "reasoning": "r"}')
         assert d["cr"] == 0.6 or d["cr"] == 0.7  # 钳位到最近候选
         assert d["restart_fraction"] in (0.1, 0.2)
+        # 旧 schema 只给 cr → 隐式 set（向后兼容）
+        assert d["cr_action"] == "set_implicit"
 
     def test_parse_missing_restart_defaults_zero(self):
         m = self._make_module()
         d = m.parse_response('{"cr": 0.5, "reasoning": "keep"}')
         assert d["restart_fraction"] == 0.0
 
-    def test_parse_invalid_json(self):
+    def test_parse_invalid_json_defaults_to_hold(self):
+        """v3 契约：解析失败回退 hold（cr=None），不再默认给一个新 CR 值。
+
+        旧版回退 0.5 等于默认翻转 —— 那正是实测到的 corr(CR_t, CR_{t-1})=-0.967
+        无条件翻转缺陷的组成部分。
+        """
         m = self._make_module()
         d = m.parse_response("not json at all")
-        assert d["cr"] == 0.5 and d["restart_fraction"] == 0.0
+        assert d["cr_action"] == "hold"
+        assert d["cr"] is None
+        assert d["restart_fraction"] == 0.0
 
 
 # ── solver 辅助逻辑 ─────────────────────────────────────────

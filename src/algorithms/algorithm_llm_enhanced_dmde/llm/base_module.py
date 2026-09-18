@@ -185,6 +185,11 @@ class ModuleState:
     shadow_delta_diversity: float | None = None  # 影子 stage ΔD
     # ---- 上次动作（含重启） ----
     prev_action_restart: float = 0.0           # 上次决策的重启比例
+    # ---- CR 通道冻结（无证据守卫） ----
+    # True 时 solver 已判定本 stage 的 CR 通道无信息（df 与影子对照均无差异），
+    # CR 不允许被改动，LLM 只能决定 restart_fraction。
+    cr_frozen: bool = False
+    cr_frozen_reason: str = ""                 # 冻结判据的人类可读说明
     # Stage 级轨迹历史（最近 N 个 stage 的汇总）
     stage_history: list[dict[str, Any]] | None = None
     # DE 参数（当前值，模块可以读取或修改）

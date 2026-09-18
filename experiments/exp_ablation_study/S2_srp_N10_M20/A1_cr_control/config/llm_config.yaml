@@ -36,3 +36,13 @@ modules:
             cr: 0.5
         actions:
             restart_choices: [0.0, 0.1, 0.2, 0.3]  # 重启比例候选（收敛后的有效动作）
+        # ---- v3：CR 动作空间两级化 + 无证据冻结 ----
+        # 修复 v2 实测到的「无条件翻转」缺陷：corr(CR_t, CR_{t-1}) = -0.967，
+        # 翻转率 0.98，即 CR 值只由上一次的值取反决定，与全部证据无关。
+        # 根因是 schema 强制每次输出一个 CR 数字，模型没有「不改」的出口。
+        freeze:
+            enabled: true       # 证据不足时冻结 CR 通道（仅允许 restart）
+            df_noise: 0.05      # |df| 小于此值视为无改进（%，与 trigger 阈值一致）
+            shadow_contrast: 0.05  # |df - df_shadow| 小于此值视为与固定 CR 基线无差异
+            confound: true      # 上一轮执行过 restart 时冻结：df 与影子的对比被
+                                # 重启动作混淆（影子从不重启），不能作为 CR 的证据

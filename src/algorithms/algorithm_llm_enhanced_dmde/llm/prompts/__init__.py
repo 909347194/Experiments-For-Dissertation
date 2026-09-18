@@ -376,12 +376,23 @@ state changes (see trigger_reason) or when a fallback timer expires.
 - acceptance_rate is the fraction of offspring that survived selection this stage. \
 Low acceptance + zero df = the population is no longer producing better solutions.
 
+## Two Separate Decisions (never conflate them)
+1. **Should CR change at all?** — `cr_action`. The DEFAULT answer is `"hold"`.
+   Holding requires no justification; it is the resting state of the controller.
+2. **If and only if you answered "set", what value?** — `cr`, from {cr_choices}.
+
 ## Decision Policy
-- If the state is effectively unchanged since your last decision (df and dD both \
-within the noise references above), the best action is usually to KEEP the current \
-CR unchanged. Being consulted does not oblige you to act.
-- Justify any change with the specific evidence (df, acceptance_rate, \
-stagnation_raw), not with generic exploration/exploitation heuristics.
+- Hold is the default. You were possibly consulted by a fallback timer rather than
+  by a real event — being consulted is not evidence that CR should change.
+- Changing CR requires evidence that (a) appeared since your last decision AND
+  (b) distinguishes the candidate CR values from each other.
+- The following are NOT valid reasons to change CR, and must not appear in your reasoning:
+  * "I was consulted" / "it is time to act" / "the controller should respond".
+  * The current CR has been in place for several stages.
+  * A generic wish to explore more, exploit more, or "try something different".
+  * The state is unchanged — an unchanged state is evidence FOR holding.
+- If df and df_shadow are both within noise, the CR channel is currently
+  uninformative: hold CR and use restart_fraction if action is needed.
 """
 
 _SC_SHADOW = """\
@@ -389,17 +400,34 @@ _SC_SHADOW = """\
 A shadow population, evolved from the SAME starting point as the main population \
 with FIXED CR={shadow_cr}, is run in parallel over the same stage window:
 - df (main, your CR) vs df_shadow (fixed CR) isolates the effect of YOUR CR choice.
-- df >> df_shadow: your CR is genuinely helping — consider keeping it.
-- df ~= df_shadow ~= 0: CR has no effect here (converged or insensitive) — \
-changing CR again will not help; consider restart_fraction or keep everything unchanged.
-- df < df_shadow: your CR hurt — change it.
+- df >> df_shadow: your CR is genuinely helping — hold it.
+- df ~= df_shadow ~= 0: CR has no measurable effect here (converged or insensitive) — \
+changing CR will not help. Hold CR; use restart_fraction if action is needed.
+- df < df_shadow: your CR hurt — that IS evidence for changing it.
 
-## Decision Policy
-- If the state is effectively unchanged since your last decision (df and dD both \
-within the noise references above) AND the shadow shows the same, the best action is \
-usually to KEEP the current CR unchanged. Being consulted does not oblige you to act.
-- Justify any change with the specific evidence (df vs df_shadow, acceptance_rate, \
-stagnation_raw), not with generic exploration/exploitation heuristics.
+Note that df_shadow is what a FIXED CR achieves over the same window. When your
+CR choice produces the same outcome as the fixed-CR baseline, the CR channel carries
+no information this stage, and the correct report is `cr_action: "hold"`.
+"""
+
+_SC_CONFOUND = """\
+## CR Attribution Is CONFOUNDED This Round
+Your previous decision included restart_fraction > 0, which injected fresh random \
+individuals into the population. Any fitness change observed since then is therefore \
+NOT attributable to your CR — the injected individuals are the likely cause, and the \
+shadow population received no restart, so df vs df_shadow no longer isolates CR.
+Do not use df vs df_shadow as evidence for changing CR this round. If you see no \
+CR-specific evidence, report `cr_action: "hold"`.
+"""
+
+_SC_FROZEN = """\
+## CR Channel Is FROZEN This Round
+The solver measured that over the last stage your CR produced no improvement
+(|df| within noise) and no difference from the fixed-CR shadow \
+(|df - df_shadow| within noise). The CR channel is therefore currently
+uninformative, and CR is FROZEN — you must set `cr_action: "hold"`.
+Decide restart_fraction only. This is not a request to be passive: the restart
+channel is the one that is measurably affecting the search right now.
 """
 
 _SC_CR_GUIDE = """\
@@ -413,12 +441,22 @@ shadow contrast), not a fixed rule for the scenario.
 
 _SC_FORMAT = """\
 ## Decision Format
-Respond with a JSON object only (no markdown):
+Respond with a JSON object only (no markdown), filling the fields IN THIS ORDER —
+the order matters because you must commit to the evidence before naming an action:
 {{
-    "cr": <one of {cr_choices}>,
+    "evidence_read": "<one sentence: what df vs df_shadow and acceptance_rate actually say>",
+    "cr_action": "hold" | "set",
+    "cr": {cr_null_or_value},
     "restart_fraction": <one of {restart_choices}>,
-    "reasoning": "<brief, evidence-based justification referencing df vs df_shadow>"
+    "reasoning": "<one sentence. If cr_action is hold, state what is missing that would justify a change>"
 }}
+
+Rules for the fields:
+- `cr_action` must be "hold" unless the evidence specifically supports a different CR.
+- If `cr_action` is "hold", `cr` MUST be null. (null = keep the current CR.)
+- If `cr_action` is "set", `cr` must be one of {cr_choices}.
+- Do not alternate CR between decisions without evidence — a hold is not a failure
+  to act, it is the correct reading of an uninformative state.
 """
 
 _SC_BALANCED_EXTRA = """\
@@ -467,6 +505,8 @@ def get_search_controller_prompt(
     model_type: str | None = None,
     restart_choices: list[float] | None = None,
     shadow_cr: float | None = None,
+    cr_frozen: bool = False,
+    restart_confounded: bool = False,
 ) -> str:
     """获取搜索控制器 system prompt。
 
@@ -476,6 +516,8 @@ def get_search_controller_prompt(
                      非空时追加场景搜索特性描述（供 LLM 参考，非决策规则）
         restart_choices: 重启比例候选值列表
         shadow_cr: 影子对照种群使用的固定 CR（None = 无影子对照）
+        cr_frozen: CR 通道是否被冻结（无证据守卫触发）。
+                   True 时注入冻结段并把输出格式的 cr 固定为 null
     """
     if cr_choices is None:
         cr_choices = [0.1, 0.3, 0.5, 0.7, 0.9]
@@ -489,10 +531,19 @@ def get_search_controller_prompt(
     # 影子对照段：仅在 solver 实际启用影子种群时注入
     if shadow_cr is not None:
         base += _SC_SHADOW.format(shadow_cr=shadow_cr)
+    # 冻结段：CR 通道被判定为无信息时，明确禁止本轮改动 CR
+    if cr_frozen:
+        base += _SC_FROZEN
+    # 混淆段：上一轮执行了 restart，df vs df_shadow 不再能隔离 CR 的效应
+    if restart_confounded:
+        base += _SC_CONFOUND
     scene_extra = _SC_SCENE_MAP.get(model_type, "") if model_type else ""
     fmt = _SC_FORMAT.format(
         cr_choices=cr_choices,
         restart_choices=restart_choices,
+        cr_null_or_value="null (CR is FROZEN — you must hold)" if cr_frozen
+        else "null if cr_action is \"hold\", else one of {cr_choices}".format(
+            cr_choices=cr_choices),
     )
 
     return base + _SC_CR_GUIDE + scene_extra + fmt
@@ -511,10 +562,12 @@ SEARCH_CONTROLLER_USER_PROMPT = """\
 
 ## Task
 Decide CR and restart_fraction for the next stage. \
-Base your decision on the evidence: current state, stage history, \
-shadow contrast, and the trigger_reason (why you are being consulted now). \
-Keeping parameters unchanged is a valid decision when nothing meaningful changed. \
-Respond with JSON only.
+Answer the two questions in order: (1) should CR change at all — the default is \
+"hold"; (2) only if yes, what value. Then decide restart_fraction. \
+Use the evidence: current state, stage history, shadow contrast, and the \
+trigger_reason (why you are being consulted now). \
+Note that being consulted is not by itself evidence: the controller also consults \
+you on a fallback timer. Respond with JSON only.
 """
 
 
