@@ -1,9 +1,8 @@
-# A1: 仅启用 CR Control — SiliconFlow Xing4.0-29B
-
+# A1: 仅启用 CR Control — SiliconFlow
 provider: siliconflow
 model: Qwen/Qwen3.8-27B
 temperature: 0.7
-max_tokens: 32768
+max_tokens: 128768
 timeout: 180
 
 # 截断重试时 max_tokens 的上限
