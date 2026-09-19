@@ -1,7 +1,7 @@
 # A1: 仅启用 CR Control — SiliconFlow Xing4.0-29B
 
 provider: siliconflow
-model: XingChenAGI/Xing4.0-29B
+model: Qwen/Qwen3.8-27B
 temperature: 0.7
 max_tokens: 32768
 timeout: 180
