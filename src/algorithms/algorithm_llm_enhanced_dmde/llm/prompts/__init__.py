@@ -421,6 +421,13 @@ changes? The search may be exhausting what CR can influence.
   Consider restart_fraction if the search state needs intervention.
 - If the CR channel IS informative AND historical patterns suggest a direction → **set CR**.
 - If uncertain → **hold**. A wrong CR change can harm search; holding cannot.
+- **Uninformative history**: if all recent stages used the SAME CR value, you have \
+  no comparative data. The history table cannot tell you whether a different CR \
+  would help — because you never tried one. In this case, the absence of evidence \
+  is NOT evidence of absence. Consider whether the search state warrants \
+  an exploratory CR change to generate new evidence. \
+  Only do this when the search has stagnated AND restart_fraction has not \
+  produced improvement across multiple stages.
 
 ### restart_fraction Decision
 restart is appropriate when the CR channel is uninformative but the search \
