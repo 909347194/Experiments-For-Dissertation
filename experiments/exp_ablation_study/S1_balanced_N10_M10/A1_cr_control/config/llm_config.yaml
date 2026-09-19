@@ -2,11 +2,12 @@
 provider: siliconflow
 model: Qwen/Qwen3.8-27B
 temperature: 0.7
-max_tokens: 128768
+max_tokens: 8192
 timeout: 180
+enable_thinking: false
 
 # 截断重试时 max_tokens 的上限
-max_tokens_cap: 65536
+max_tokens_cap: 16384
 
 modules:
     search_controller:

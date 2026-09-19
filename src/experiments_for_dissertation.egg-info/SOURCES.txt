@@ -30,6 +30,7 @@ src/algorithms/algorithm_llm_enhanced_dmde/features/__init__.py
 src/algorithms/algorithm_llm_enhanced_dmde/features/constraint_features.py
 src/algorithms/algorithm_llm_enhanced_dmde/features/convergence_features.py
 src/algorithms/algorithm_llm_enhanced_dmde/features/population_features.py
+src/algorithms/algorithm_llm_enhanced_dmde/features/trigger.py
 src/algorithms/algorithm_llm_enhanced_dmde/llm/__init__.py
 src/algorithms/algorithm_llm_enhanced_dmde/llm/base_module.py
 src/algorithms/algorithm_llm_enhanced_dmde/llm/llm_client.py

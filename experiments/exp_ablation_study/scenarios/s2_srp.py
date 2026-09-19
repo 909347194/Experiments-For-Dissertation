@@ -13,9 +13,9 @@ import numpy as np
 S2_CONFIG = {
     "name": "S2_srp",
     "model_type": "srp",
-    "n_uavs": 10,
-    "n_targets": 20,
-    "label": r"srp ($N{=}10, M{=}20$)",
+    "n_uavs": 15,
+    "n_targets": 30,
+    "label": r"srp ($N{=}15, M{=}30$)",
 }
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "S2_srp_N10_M20" / "data"
@@ -31,6 +31,8 @@ _ALT_RANGE_TGT = (3680, 3800)
 _RADARS = [
     dict(x0=91.12, y0=29.66, z0=3700, radius=5000, penalty=15.0),
     dict(x0=91.22, y0=29.72, z0=4500, radius=6000, penalty=12.0),
+    dict(x0=91.08, y0=29.58, z0=3900, radius=4500, penalty=18.0),
+    dict(x0=91.18, y0=29.60, z0=4200, radius=5500, penalty=14.0),
 ]
 _ESTIMATOR_PARAMS = dict(min_clearance=50, max_clearance=300, num_samples=100)
 
@@ -74,21 +76,21 @@ def build_s2_cost_matrix_and_evaluator() -> Tuple[np.ndarray, object]:
     uav_positions = _generate_positions(n_uavs, seed=100, alt_range=_ALT_RANGE_UAV)
     uavs = []
     for i in range(n_uavs):
-        speed_lo = 0.20 + (i % 3) * 0.05
+        speed_lo = 0.15 + (i % 4) * 0.05
         uavs.append(UAV(
             id=i, start_pos=uav_positions[i],
-            speed_range=(round(speed_lo, 2), round(speed_lo + 0.30, 2)),
-            max_range=40000 + (i % 5) * 2000,
+            speed_range=(round(speed_lo, 2), round(speed_lo + 0.25, 2)),
+            max_range=30000 + (i % 6) * 3000,
         ))
 
     # Target: 20 个
     tgt_positions = _generate_positions(n_targets, seed=200, alt_range=_ALT_RANGE_TGT)
     targets = []
     for i in range(n_targets):
-        tw = (20000, 150000) if i % 4 == 0 else None
+        tw = (15000, 120000) if i % 3 == 0 else (25000, 180000) if i % 3 == 1 else None
         targets.append(Target(
             id=i, position=tgt_positions[i],
-            weight=round(0.5 + (i % 5) * 0.1, 2),
+            weight=round(0.3 + (i % 7) * 0.1, 2),
             time_window=tw,
         ))
 
