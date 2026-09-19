@@ -368,46 +368,103 @@ state changes (see trigger_reason) or when a fallback timer expires.
    This is your ONLY lever that works after the population has converged —
    CR cannot help when no offspring is being accepted.
 
-## Reference Magnitudes (read the evidence correctly)
+## Reference Magnitudes
 - |delta_fitness_pct| < 0.05%: effectively ZERO improvement.
 - |delta_diversity| < 0.02: NOISE — treat as "diversity unchanged".
-- stagnation_raw is the true number of consecutive non-improving generations \
-(uncapped). Values of several hundred mean genuine long-term convergence.
-- acceptance_rate is the fraction of offspring that survived selection this stage. \
-Low acceptance + zero df = the population is no longer producing better solutions.
+- stagnation_raw: true consecutive non-improving generations (uncapped). \
+Higher values = deeper convergence. Several hundred = genuine long-term stagnation.
+- acceptance_rate: fraction of offspring that survived selection. \
+Lower = population is harder to improve. Combined with stagnation_raw, \
+it diagnoses whether the search has converged or is still active.
+- gens_since_last_improvement: how long since the last best-fitness update. \
+A large value relative to stage_length confirms prolonged stagnation.
+- improvements_in_stage: how many times best was refreshed this stage. \
+Zero with high acceptance means offspring survive but never beat the best.
 
-## Two Separate Decisions (never conflate them)
-1. **Should CR change at all?** — `cr_action`. The DEFAULT answer is `"hold"`.
-   Holding requires no justification; it is the resting state of the controller.
-2. **If and only if you answered "set", what value?** — `cr`, from {cr_choices}.
+## Diagnostic Reasoning Chain
+Your decision must follow this sequence. Do NOT skip steps or jump to conclusions.
+
+### Step 1: Search State Diagnosis
+Synthesize ALL available signals into a coherent picture:
+- **Convergence**: acceptance_rate, stagnation_raw, gens_since_last_improvement.
+  Low acceptance + long stagnation = the population has converged.
+- **Diversity structure**: diversity, diversity_p25, diversity_p75, delta_diversity.
+  Is the population clustered? Are there outliers? Is diversity changing?
+- **Improvement trajectory**: delta_fitness_pct, improvements_in_stage, stage_best_curve.
+  Is the search still finding better solutions? Is improvement decelerating?
+- **Trigger context**: trigger_reason tells you why you were consulted. \
+  "stagnation_deepen" = the search is stuck. "fitness_move" = something just changed. \
+  "fallback_timer" = no event occurred, you may be consulted speculatively.
+- **Cross-check**: do these signals agree? Disagreement is itself informative — \
+  e.g., low acceptance + high diversity may indicate oscillation, not convergence. \
+  Check stage_best_curve for instability in such cases.
+
+### Step 2: CR Channel Diagnosis
+Evaluate whether the current CR is effective, using TWO sources:
+
+**A. Current stage evidence** (this stage's df, shadow, acceptance):
+- df vs df_shadow is the PRIMARY attribution signal. See Shadow Control section.
+- If acceptance_rate is very low, the population is not accepting offspring \
+regardless of CR — CR is not the bottleneck.
+
+**B. Historical trends** (stage_history table):
+- CR-response correlation: when CR changed across stages, did df change \
+consistently? If yes → CR is effective. If no → CR is insensitive.
+- Shadow tracking: does df consistently track df_shadow? If yes, your CR \
+choices are not adding value over the fixed-CR baseline.
+- Diminishing returns: are successive CR adjustments producing smaller df \
+changes? The search may be exhausting what CR can influence.
+- Look for consistent trends across 4-5 stages. Do NOT conclude from 2-3 data points.
+
+### Step 3: Decision
+- If the CR channel is uninformative (Step 2A + 2B both show no effect) → **hold CR**. \
+  Consider restart_fraction if the search state needs intervention.
+- If the CR channel IS informative AND historical patterns suggest a direction → **set CR**.
+- If uncertain → **hold**. A wrong CR change can harm search; holding cannot.
+
+### restart_fraction Decision
+restart is appropriate when the CR channel is uninformative but the search \
+still needs intervention — typically: low acceptance, high stagnation, and \
+CR changes that have not produced improvement across multiple stages. \
+Higher fractions are warranted when stagnation is deeper and longer. \
+If the search is still actively improving (high acceptance, negative df), \
+restart is premature — hold everything.
 
 ## Decision Policy
 - Hold is the default. You were possibly consulted by a fallback timer rather than
   by a real event — being consulted is not evidence that CR should change.
 - Changing CR requires evidence that (a) appeared since your last decision AND
   (b) distinguishes the candidate CR values from each other.
-- The following are NOT valid reasons to change CR, and must not appear in your reasoning:
+- The following are NOT valid reasons to change CR:
   * "I was consulted" / "it is time to act" / "the controller should respond".
   * The current CR has been in place for several stages.
   * A generic wish to explore more, exploit more, or "try something different".
   * The state is unchanged — an unchanged state is evidence FOR holding.
-- If df and df_shadow are both within noise, the CR channel is currently
-  uninformative: hold CR and use restart_fraction if action is needed.
 """
 
 _SC_SHADOW = """\
-## Shadow Control (attribution reference)
+## Shadow Control (CR Attribution)
 A shadow population, evolved from the SAME starting point as the main population \
-with FIXED CR={shadow_cr}, is run in parallel over the same stage window:
-- df (main, your CR) vs df_shadow (fixed CR) isolates the effect of YOUR CR choice.
-- df >> df_shadow: your CR is genuinely helping — hold it.
-- df ~= df_shadow ~= 0: CR has no measurable effect here (converged or insensitive) — \
-changing CR will not help. Hold CR; use restart_fraction if action is needed.
-- df < df_shadow: your CR hurt — that IS evidence for changing it.
+with FIXED CR={shadow_cr}, is run in parallel over the same stage window.
+The only difference between main and shadow is CR, so df - df_shadow =
+the effect attributable to your CR choice.
 
-Note that df_shadow is what a FIXED CR achieves over the same window. When your
-CR choice produces the same outcome as the fixed-CR baseline, the CR channel carries
-no information this stage, and the correct report is `cr_action: "hold"`.
+### Reading the Shadow Signal
+- **df significantly better than df_shadow**: your CR outperforms the fixed baseline. \
+  Hold — do not change what is working. (This does not guarantee your CR is optimal, \
+  but changing without further evidence is risky.)
+- **df ≈ df_shadow (both near zero)**: converged. Neither CR nor the baseline \
+  can improve fitness. CR is irrelevant — use restart_fraction.
+- **df ≈ df_shadow (both significantly negative)**: both CRs produce similar \
+  improvement. Your CR is not differentiating — the improvement comes from \
+  the search landscape, not your choice. Hold CR.
+- **df worse than df_shadow**: your CR is actively hurting. Strongest evidence \
+  for changing CR — move toward the shadow's value.
+
+### Shadow Across Stages
+If df tracks df_shadow across multiple stages, your CR choices are not adding \
+value over the fixed baseline. Reduce confidence in CR adjustments; rely more \
+on restart_fraction.
 """
 
 _SC_CONFOUND = """\
@@ -430,13 +487,28 @@ Decide restart_fraction only. This is not a request to be passive: the restart
 channel is the one that is measurably affecting the search right now.
 """
 
-_SC_CR_GUIDE = """\
+_SC_SIGNAL_GUIDE = """\
+## Signal Interpretation
 
-The mechanism above means CR controls **how many genes** are replaced \
-by the rand/1 or best/2 donor (i.e., a gene-level selection probability), \
-not the exploration direction itself. Your CR choice should be based on the \
-**current optimization state** (diversity, stagnation, acceptance, \
-shadow contrast), not a fixed rule for the scenario.
+### Stage Best Curve (stage_best_curve)
+A time series [gen_offset, delta_pct] within the current stage. \
+delta_pct = (stage_start_fitness - current_best) / stage_start_fitness * 100.
+- Steep initial drop → rapid early improvement (current dynamics are healthy).
+- Flat throughout → no improvement this stage.
+- Drop then plateau → improvement stalled mid-stage (possible local optimum).
+- Gradual steady decline → slow but consistent progress.
+The curve shape reflects search dynamics, not a specific CR value.
+
+### Stage History Table
+Each row is one of your previous decision stages. Read it for:
+- **CR-response**: did df change when CR changed across stages? \
+  Consistent correlation → CR is effective. No correlation → insensitive.
+- **Shadow tracking**: does df follow df_shadow? If always similar, \
+  your CR is not adding value over the fixed baseline.
+- **Diminishing returns**: are improvements shrinking stage over stage?
+- **Acceptance trend**: is acceptance_rate declining? \
+  Declining = the population is hardening against new solutions.
+Require 4-5 stages of consistent trend before drawing conclusions.
 """
 
 _SC_FORMAT = """\
@@ -444,7 +516,7 @@ _SC_FORMAT = """\
 Respond with a JSON object only (no markdown), filling the fields IN THIS ORDER —
 the order matters because you must commit to the evidence before naming an action:
 {{
-    "evidence_read": "<one sentence: what df vs df_shadow and acceptance_rate actually say>",
+    "evidence_read": "<state: ...> | <cr_effect: ...> | <history: ...>",
     "cr_action": "hold" | "set",
     "cr": {cr_null_or_value},
     "restart_fraction": <one of {restart_choices}>,
@@ -452,6 +524,12 @@ the order matters because you must commit to the evidence before naming an actio
 }}
 
 Rules for the fields:
+- `evidence_read` must summarize your diagnostic chain in three parts:
+  * state: what the search state is (converged / exploring / stagnating).
+  * cr_effect: whether the current CR is helping, hurting, or irrelevant
+    (based on df vs df_shadow and acceptance_rate).
+  * history: what the stage_history trend suggests about CR responsiveness.
+  If no stage history exists yet, write "history: first decision".
 - `cr_action` must be "hold" unless the evidence specifically supports a different CR.
 - If `cr_action` is "hold", `cr` MUST be null. (null = keep the current CR.)
 - If `cr_action` is "set", `cr` must be one of {cr_choices}.
@@ -546,7 +624,7 @@ def get_search_controller_prompt(
             cr_choices=cr_choices),
     )
 
-    return base + _SC_CR_GUIDE + scene_extra + fmt
+    return base + _SC_SIGNAL_GUIDE + scene_extra + fmt
 
 
 # =============================================================================
