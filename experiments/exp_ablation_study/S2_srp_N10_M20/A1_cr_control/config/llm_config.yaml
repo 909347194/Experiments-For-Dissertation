@@ -46,3 +46,4 @@ modules:
             shadow_contrast: 0.05  # |df - df_shadow| 小于此值视为与固定 CR 基线无差异
             confound: true      # 上一轮执行过 restart 时冻结：df 与影子的对比被
                                 # 重启动作混淆（影子从不重启），不能作为 CR 的证据
+            confound_decay_stages: 2  # restart 后连续 2 个 stage 未再重启，解除 confound 冻结

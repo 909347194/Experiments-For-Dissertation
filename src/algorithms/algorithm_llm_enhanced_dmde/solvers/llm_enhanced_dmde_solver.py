@@ -286,6 +286,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         # 上一轮执行了 restart 时，df vs df_shadow 被重启动作混淆（影子没有重启），
         # 不能再作为 CR 的证据 → 冻结 CR。
         freeze_on_confound = bool(freeze_cfg.get("confound", True))
+        # confound 衰减：restart 后连续 confound_decay_stages 个 stage 未再重启，
+        # 则认为 restart 的混淆效应已衰减，解除 confound 冻结。
+        # 解决死锁：restart 是 LLM 唯一活跃动作 → 每次 restart → 永久冻结。
+        confound_decay_stages = int(freeze_cfg.get("confound_decay_stages", 2))
 
         # 影子对照种群：固定 CR，从每个 stage 起点与主种群同源演化，
         # 为 LLM 的 CR 决策提供"如果不调整会怎样"的归因基线。
@@ -296,6 +300,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         shadow_best_idx = 0
         restart_counter = 0        # 已执行的重启次数（用于派生可复现随机种子）
         restart_encoder = None     # 惰性创建的重启个体生成器
+        stages_since_restart = 0   # 距上次 restart 的 stage 数（confound 衰减计数）
 
         t_start = time.time()
 
@@ -423,12 +428,15 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     if delta_fitness is not None and state.shadow_delta_fitness is not None:
                         contrast = abs(delta_fitness - state.shadow_delta_fitness)
 
-                    if freeze_on_confound and llm_restart_prev > 0:
+                    if freeze_on_confound and llm_restart_prev > 0 and stages_since_restart < confound_decay_stages:
                         # 重启动作混淆了 CR 归因：本轮 df 的改善可能来自注入个体
+                        # confound_decay_stages 后自动衰减，允许 LLM 重新操作 CR
                         cr_frozen = True
                         cr_frozen_reason = (
-                            f"restart_fraction={llm_restart_prev:.1f} applied last "
-                            f"stage: df vs df_shadow confounded (shadow gets no restart)"
+                            f"restart_fraction={llm_restart_prev:.1f} applied "
+                            f"{stages_since_restart} stage(s) ago (< decay "
+                            f"threshold {confound_decay_stages}): "
+                            f"df vs df_shadow confounded"
                         )
                     elif df_abs < freeze_df_noise and (contrast is None or contrast < freeze_contrast):
                         cr_frozen = True
@@ -523,11 +531,14 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                             new_restart, restart_encoder, restart_counter,
                             fitness_evaluator, cost_matrix, n_uavs, cfg,
                         )
+                        stages_since_restart = 0  # restart 执行，重置衰减计数
                         if cfg.verbose:
                             print(
                                 f"  [SearchController @ gen {gen}] restart applied: "
                                 f"{new_restart:.0%} of worst individuals replaced"
                             )
+                    else:
+                        stages_since_restart += 1  # 无 restart，衰减计数递增
 
                     # 更新 stage 起始快照（重启之后，使下一 stage 的 Δ 反映新策略起点）
                     current_fitness = best_individual.fitness
