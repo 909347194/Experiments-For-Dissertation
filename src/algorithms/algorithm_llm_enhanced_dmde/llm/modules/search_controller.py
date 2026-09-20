@@ -2,17 +2,22 @@
 """search_controller.py — LLM 搜索控制器模块
 
 职责：
-    在一次 LLM 调用中，独立决定 CR、F、GMR 和 restart_fraction。
-    CR、F、GMR 是解耦的独立参数，LLM 可以分别控制。
+    在一次 LLM 调用中，独立决定 CR、F 和 GMR。
+    三个参数完全解耦，LLM 可以分别控制。
 
-    v2 闭环控制改造（可观测 / 可归因 / 可触发 / 能控性）：
+    动作空间（解耦设计）：
+        cr_action: hold | set   → 是否改变 CR
+        cr:        离散候选值   → 具体 CR 值
+        f_action:  hold | set   → 是否改变 F
+        f:         离散候选值   → 具体 F 值
+        gmr_mode:  auto|on|off → 灭绝模式
+
+    v2 闭环控制改造（可观测 / 可归因 / 可触发）：
     - prompt 注入 stage 级过程统计（接受率、改进次数、停滞真实值、
       多样性分位数、stage 内 best 曲线），不再只喂两个聚合标量；
     - prompt 注入影子对照（固定参数的影子种群在同一 stage 的 Δf/ΔD），
       使 LLM 的动作效果可以与“什么都不调”的基线分离 —— 可归因；
-    - prompt 注入 trigger_reason（为什么现在被咨询）；
-    - 动作空间扩展 restart_fraction：收敛后参数调整失效时，
-      允许 LLM 重启最差个体比例，恢复搜索能力 —— 能控性。
+    - prompt 注入 trigger_reason（为什么现在被咨询）。
 
 注入点：before_mutation（变异前，由 solver 的事件触发器决定何时调用）
 """
@@ -30,21 +35,26 @@ logger = logging.getLogger(__name__)
 
 # 预定义 CR 候选值
 CR_CHOICES = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-# 预定义重启比例候选值(替换最差个体的比例)
-RESTART_CHOICES = [0.0, 0.1, 0.2, 0.3]
+# 预定义 F 候选值（与 CR 解耦，独立控制变异步长）
+F_CHOICES = [0.3, 0.5, 0.7, 0.9, 1.2, 1.5]
 
 
 class LLMSearchControllerModule(BaseLLMModule):
-    """LLM 搜索控制器:决定 CR 与 restart_fraction。"""
+    """LLM 搜索控制器:独立决定 CR、F、GMR。
+
+    动作空间（解耦设计）：
+        cr_action: hold | set   → 是否改变 CR
+        cr:        离散候选值   → 具体 CR 值（仅 set 时有效）
+        f_action:  hold | set   → 是否改变 F
+        f:         离散候选值   → 具体 F 值（仅 set 时有效）
+        gmr_mode:  auto|on|off → 灭绝模式
+    """
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
         self._prompt_path = self._config.get("system_prompt_path")
         self._cr_choices = self._config.get("cr_choices", CR_CHOICES)
-        self._restart_choices = self._config.get(
-            "restart_choices",
-            self._config.get("actions", {}).get("restart_choices", RESTART_CHOICES),
-        )
+        self._f_choices = self._config.get("f_choices", F_CHOICES)
         self._system_prompt: str | None = None  # 缓存,按 model_type 分别解析
 
     @property
@@ -81,7 +91,6 @@ class LLMSearchControllerModule(BaseLLMModule):
             "stagnation_raw": state.stagnation_raw,
             # 上次动作及其效果
             "prev_action_cr": state.prev_action,
-            "prev_action_restart": state.prev_action_restart,
             "prev_delta_fitness_pct": state.prev_delta_fitness,
             "prev_delta_diversity": state.prev_delta_diversity,
             # stage 内逐代 best 曲线(降采样,携带 stage 内动态)
@@ -93,6 +102,7 @@ class LLMSearchControllerModule(BaseLLMModule):
             "cr_frozen_reason": state.cr_frozen_reason or None,
             # 当前 DE 参数(LLM 可覆写)
             "current_f": round(state.f_scale, 4),
+            "f_choices": self._f_choices,
             "current_gmr_mode": state.gmr_mode,
         }
 
@@ -119,7 +129,7 @@ class LLMSearchControllerModule(BaseLLMModule):
         stage_hist = state.stage_history
         if stage_hist:
             lines = [
-                "Stage | Len | CR | F | GMR | Restart | Best Fitness | "
+                "Stage | Len | CR | F | GMR | Best Fitness | "
                 "df(%) | df_shadow(%) | dD | Accept%"
             ]
             for s in stage_hist[-5:]:
@@ -139,12 +149,11 @@ class LLMSearchControllerModule(BaseLLMModule):
                     f"{s['acceptance_rate'] * 100:5.1f}"
                     if s.get("acceptance_rate") is not None else "  N/A"
                 )
-                rst = s.get("restart_fraction", 0.0)
                 f_val = s.get("f_scale", "?")
                 gmr = s.get("gmr_mode", "?")
                 lines.append(
                     f"{s['stage']:5d} | {s.get('stage_length', '?'):3} | "
-                    f"{s['cr']:.1f} | {f_val} | {gmr:<3} | {rst:<7.1f} | "
+                    f"{s['cr']:.1f} | {f_val} | {gmr:<3} | "
                     f"{s['best_fitness']:12.1f} | "
                     f"{df} | {dfs} | {dd} | {acc}"
                 )
@@ -156,13 +165,12 @@ class LLMSearchControllerModule(BaseLLMModule):
             feedback = (
                 f"\n\n## Last Decision Feedback\n"
                 f"First decision: no previous LLM action/outcome available.\n"
-                f"No prior CR context to evaluate. Choose based on current state."
+                f"No prior parameter context to evaluate. Choose based on current state."
             )
         else:
             feedback = (
                 f"\n\n## Last Decision Feedback\n"
-                f"You set CR={state.prev_action:.1f}, "
-                f"restart_fraction={state.prev_action_restart:.1f}. "
+                f"You set CR={state.prev_action:.1f}. "
                 f"The observed stage outcome was "
                 f"df={state.delta_fitness:+.2f}%, "
                 f"dD={state.delta_diversity:+.4f}."
@@ -190,10 +198,9 @@ class LLMSearchControllerModule(BaseLLMModule):
                 prompt_path=self._prompt_path,
                 model_type=state.model_type,
                 cr_choices=self._cr_choices,
-                restart_choices=self._restart_choices,
+                f_choices=self._f_choices,
                 shadow_cr=state.shadow_cr,
                 cr_frozen=state.cr_frozen,
-                restart_confounded=(state.prev_action_restart or 0.0) > 0,
             )
 
         return [
@@ -259,23 +266,33 @@ class LLMSearchControllerModule(BaseLLMModule):
         if action == "hold":
             cr = None
 
-        # 验证 restart_fraction(钳位到最近的合法候选)
-        rf = data.get("restart_fraction", 0.0)
-        try:
-            rf = float(rf)
-        except (ValueError, TypeError):
-            rf = 0.0
-        rf = min(self._restart_choices, key=lambda r: abs(r - rf))
+        # ---- F: 独立变异步长（与 CR 对称的 hold/set 二级决策） ----
+        f_action_raw = data.get("f_action", None)
+        f_action = self._normalize_action(f_action_raw)
 
-        # ---- F: 独立变异步长 ----
         f_raw = data.get("f", None)
         f_val = None
-        if f_raw is not None:
-            try:
-                f_val = float(f_raw)
-                f_val = max(0.1, min(2.0, f_val))  # 钳位到合理范围
-            except (ValueError, TypeError):
-                f_val = None  # 解析失败 = 不覆写
+        try:
+            f_val = float(f_raw)
+        except (ValueError, TypeError):
+            f_val = None
+
+        if f_action == "set":
+            if f_val is None:
+                # 声明要改却没给合法值 → 回退到 hold
+                f_action = "hold"
+            else:
+                # 钳位到最近的候选值
+                f_val = min(self._f_choices, key=lambda f: abs(f - f_val))
+        elif f_action == "hold":
+            f_val = None
+        else:
+            # 未声明 f_action 但给了 f 值 → 隐式 set（向后兼容）
+            if f_val is not None:
+                f_action = "set"
+                f_val = min(self._f_choices, key=lambda f: abs(f - f_val))
+            else:
+                f_action = "hold"
 
         # ---- GMR: 灭绝模式 ----
         gmr_raw = data.get("gmr_mode", "auto")
@@ -292,9 +309,9 @@ class LLMSearchControllerModule(BaseLLMModule):
         return {
             "cr_action": action,
             "cr": cr,                      # None = 保持当前 CR
-            "f": f_val,                     # None = 使用公式推导值
+            "f_action": f_action,
+            "f": f_val,                     # None = 保持当前 F
             "gmr_mode": gmr_mode,           # "auto" | "on" | "off"
-            "restart_fraction": rf,
             "evidence_read": evidence_read,
             "reasoning": data.get("reasoning", ""),
         }
@@ -318,9 +335,9 @@ class LLMSearchControllerModule(BaseLLMModule):
         return {
             "cr_action": "hold",
             "cr": None,
+            "f_action": "hold",
             "f": None,                 # 不覆写 F
             "gmr_mode": "auto",        # 不改变 GMR
-            "restart_fraction": 0.0,
             "evidence_read": evidence_read,
             "reasoning": reason,
         }
@@ -328,29 +345,29 @@ class LLMSearchControllerModule(BaseLLMModule):
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
         """将决策应用到搜索状态。
 
-        CR: cr_action == "hold" 时不改动 state.cr。
-        F:  非 None 时直接覆写 state.f_override(覆盖公式 3-11)。
+        CR:  cr_action == "hold" 时不改动 state.cr。
+        F:   f_action == "set" 时覆写 state.f_override(覆盖公式 3-11)。
         GMR: "auto" 保持公式 3-12,"on" 强制灭绝,"off" 禁止灭绝。
-        restart_fraction 通过 state.extra 传递给 solver 执行。
         """
+        # CR
         new_cr = decision.get("cr", None)
         if new_cr is not None and decision.get("cr_action") == "set":
             state.cr = float(new_cr)
-        # hold:保持 state.cr 不变
         state.extra["llm_cr"] = new_cr
         state.extra["llm_cr_action"] = decision.get("cr_action", "hold")
 
-        # F: 独立覆写
+        # F: 独立覆写（与 CR 对称的 hold/set 决策）
         f_val = decision.get("f", None)
-        if f_val is not None:
+        f_action = decision.get("f_action", "hold")
+        if f_action == "set" and f_val is not None:
             state.f_override = float(f_val)
+        # hold: 保持 state.f_override 不变
         state.extra["llm_f"] = f_val
+        state.extra["llm_f_action"] = f_action
 
         # GMR: 模式覆写
         gmr_mode = decision.get("gmr_mode", "auto")
         state.gmr_mode = gmr_mode
         state.extra["llm_gmr_mode"] = gmr_mode
 
-        # restart_fraction
-        state.extra["llm_restart_fraction"] = decision.get("restart_fraction", 0.0)
         return state

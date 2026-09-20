@@ -360,27 +360,25 @@ You make sequential control decisions. You are consulted only when the search \
 state changes (see trigger_reason) or when a fallback timer expires.
 
 ## Actions You Control
-You independently control three DE parameters plus a population reset lever:
+You independently control three DE parameters:
 
 1. **CR** (crossover rate), one of {cr_choices}:
    Controls the per-gene probability of using DE/rand/1 (exploration) vs \
 DE/best/2 (exploitation). Higher CR → more rand/1 → more exploration.
+   Decision: cr_action = "hold" (keep current) or "set" (choose new value).
 
-2. **F** (mutation scale factor), range [0.1, 2.0]:
+2. **F** (mutation scale factor), one of {f_choices}:
    Controls the step size of differential mutations. Higher F → larger steps. \
-F is independent of CR — you can set them independently. \
-"auto" = solver derives F from CR via formula (legacy coupled mode). \
-A specific value (e.g., 0.5, 1.0) overrides the formula.
+F is independent of CR — you can set them independently.
+   "auto" = solver derives F from CR via formula (legacy coupled mode). \
+A specific value overrides the formula.
+   Decision: f_action = "hold" (keep current) or "set" (choose new value).
 
 3. **GMR** (global mutation rate / extinction mode):
    Controls whether the solver applies extinction (resetting poor individuals).
    - "auto": extinction triggered by formula (CR < threshold → probabilistic).
    - "on": force extinction this stage (resets worst individuals).
    - "off": suppress extinction this stage.
-
-4. **restart_fraction**, one of {restart_choices}:
-   Replaces the worst fraction of the population with fresh random individuals. \
-This is your ONLY lever that works after the population has converged.
 
 ## Decoupled Control
 Previously, F was derived from CR (formula 3-11) and GMR was derived from CR \
@@ -451,14 +449,8 @@ The absence of evidence is NOT evidence of absence.
 - If the search is actively improving → **hold everything**.
 - If stagnating but CR/F/GMR have not been varied → consider an **exploratory change**. \
   Pick the parameter most likely to address the diagnosed bottleneck.
-- If converged and restart has not helped → consider GMR=on to force diversity injection.
+- If converged and CR/F changes have not helped → consider GMR=on to force diversity injection.
 - If uncertain → **hold**. A wrong change can harm search; holding cannot.
-
-### restart_fraction Decision
-restart is appropriate when the search has converged and parameter changes \
-have not produced improvement — typically: low acceptance, high stagnation. \
-Higher fractions are warranted when stagnation is deeper and longer. \
-If the search is still actively improving, restart is premature — hold everything.
 
 ## Decision Policy
 - Hold is the default. You were possibly consulted by a fallback timer rather than
@@ -486,7 +478,7 @@ The difference df - df_shadow = the combined effect of your CR+F+GMR choices.
   Hold — do not change what is working. (This does not guarantee your parameters are optimal, \
   but changing without further evidence is risky.)
 - **df ≈ df_shadow (both near zero)**: converged. Neither your strategy nor the baseline \
-  can improve fitness. Use restart_fraction or GMR=on.
+  can improve fitness. Consider GMR=on to force diversity injection.
 - **df ≈ df_shadow (both significantly negative)**: both produce similar \
   improvement. Your choices are not differentiating — the improvement comes from \
   the search landscape, not your strategy. Hold.
@@ -496,17 +488,7 @@ The difference df - df_shadow = the combined effect of your CR+F+GMR choices.
 ### Shadow Across Stages
 If df tracks df_shadow across multiple stages, your parameter choices are not adding \
 value over the fixed baseline. Reduce confidence in parameter adjustments; rely more \
-on restart_fraction or GMR=on.
-"""
-
-_SC_CONFOUND = """\
-## CR Attribution Is CONFOUNDED This Round
-Your previous decision included restart_fraction > 0, which injected fresh random \
-individuals into the population. Any fitness change observed since then is therefore \
-NOT attributable to your parameters — the injected individuals are the likely cause, and the \
-shadow population received no restart, so df vs df_shadow no longer isolates CR.
-Do not use df vs df_shadow as evidence for changing CR this round. If you see no \
-CR-specific evidence, report `cr_action: "hold"`.
+on GMR=on to force diversity injection.
 """
 
 _SC_FROZEN = """\
@@ -515,9 +497,8 @@ The solver measured that over the last stage your parameters produced no improve
 (|df| within noise) and no difference from the fixed-CR shadow \
 (|df - df_shadow| within noise). The CR channel is therefore currently
 uninformative, and CR is FROZEN — you must set `cr_action: "hold"`.
-You may still adjust F, GMR, and restart_fraction. The CR channel \
-being frozen does not mean the search is healthy — it means CR \
-is not the lever to use right now.
+You may still adjust F and GMR. The CR channel being frozen does not \
+mean the search is healthy — it means CR is not the lever to use right now.
 """
 
 _SC_SIGNAL_GUIDE = """\
@@ -556,9 +537,9 @@ Respond with a JSON object only (no markdown), filling the fields IN THIS ORDER:
     "evidence_read": "<state: ...> | <param_effect: ...> | <history: ...>",
     "cr_action": "hold" | "set",
     "cr": {cr_null_or_value},
-    "f": null | <float in [0.1, 2.0]>,
+    "f_action": "hold" | "set",
+    "f": {f_null_or_value},
     "gmr_mode": "auto" | "on" | "off",
-    "restart_fraction": <one of {restart_choices}>,
     "reasoning": "<one sentence>"
 }}
 
@@ -569,13 +550,12 @@ Rules:
 - `cr_action`: "hold" unless evidence supports a different CR.
   If "hold", `cr` MUST be null.
   If "set", `cr` must be one of {cr_choices}.
-- `f`: null = keep current F (auto-derived or previously set). \
-  A float value overrides the formula. Use when F-related symptoms appear \
-  (oscillation → lower F; crawling → raise F).
+- `f_action`: "hold" unless evidence supports a different F. \
+  If "hold", `f` MUST be null. \
+  If "set", `f` must be one of {f_choices}.
 - `gmr_mode`: "auto" = formula decides (default). \
   "on" = force extinction (deep stagnation, other levers exhausted). \
   "off" = suppress extinction (active improvement, don't disrupt).
-- `restart_fraction`: 0.0 = no restart. Higher = more individuals replaced.
 - Do not alternate values without evidence — a hold is not a failure to act.
 """
 
@@ -623,10 +603,9 @@ _SC_SCENE_MAP: dict[str, str] = {
 def get_search_controller_prompt(
     cr_choices: list[float] | None = None,
     model_type: str | None = None,
-    restart_choices: list[float] | None = None,
+    f_choices: list[float] | None = None,
     shadow_cr: float | None = None,
     cr_frozen: bool = False,
-    restart_confounded: bool = False,
 ) -> str:
     """获取搜索控制器 system prompt。
 
@@ -634,19 +613,18 @@ def get_search_controller_prompt(
         cr_choices: CR 候选值列表
         model_type: 场景类型 ("balanced"/"overloaded"/"srp")，
                      非空时追加场景搜索特性描述（供 LLM 参考，非决策规则）
-        restart_choices: 重启比例候选值列表
         shadow_cr: 影子对照种群使用的固定 CR（None = 无影子对照）
         cr_frozen: CR 通道是否被冻结（无证据守卫触发）。
                    True 时注入冻结段并把输出格式的 cr 固定为 null
     """
     if cr_choices is None:
         cr_choices = [0.1, 0.3, 0.5, 0.7, 0.9]
-    if restart_choices is None:
-        restart_choices = [0.0, 0.1, 0.2, 0.3]
+    if f_choices is None:
+        f_choices = [0.3, 0.5, 0.7, 0.9, 1.2, 1.5]
 
     base = _SC_BASE.format(
         cr_choices=cr_choices,
-        restart_choices=restart_choices,
+        f_choices=f_choices,
     )
     # 影子对照段：仅在 solver 实际启用影子种群时注入
     if shadow_cr is not None:
@@ -654,16 +632,15 @@ def get_search_controller_prompt(
     # 冻结段：CR 通道被判定为无信息时，明确禁止本轮改动 CR
     if cr_frozen:
         base += _SC_FROZEN
-    # 混淆段：上一轮执行了 restart，df vs df_shadow 不再能隔离 CR 的效应
-    if restart_confounded:
-        base += _SC_CONFOUND
     scene_extra = _SC_SCENE_MAP.get(model_type, "") if model_type else ""
     fmt = _SC_FORMAT.format(
         cr_choices=cr_choices,
-        restart_choices=restart_choices,
+        f_choices=f_choices,
         cr_null_or_value="null (CR is FROZEN — you must hold)" if cr_frozen
         else "null if cr_action is \"hold\", else one of {cr_choices}".format(
             cr_choices=cr_choices),
+        f_null_or_value="null if f_action is \"hold\", else one of {f_choices}".format(
+            f_choices=f_choices),
     )
 
     return base + _SC_SIGNAL_GUIDE + scene_extra + fmt
@@ -681,9 +658,9 @@ SEARCH_CONTROLLER_USER_PROMPT = """\
 {trajectory_text}
 
 ## Task
-Decide CR and restart_fraction for the next stage. \
-Answer the two questions in order: (1) should CR change at all — the default is \
-"hold"; (2) only if yes, what value. Then decide restart_fraction. \
+Decide CR, F, and GMR for the next stage. \
+For CR and F: answer two questions in order — (1) should the parameter change at all \
+(the default is "hold"); (2) only if yes, what value. \
 Use the evidence: current state, stage history, shadow contrast, and the \
 trigger_reason (why you are being consulted now). \
 Note that being consulted is not by itself evidence: the controller also consults \
