@@ -346,9 +346,12 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             if fire_decision:
                 # 使用 LLM 的实际决策值（如有），否则用公式 3-9
                 actual_cr = llm_cr if llm_cr is not None else dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
-                # 计算实际的 F 值（取种群平均值作为代表值）
-                actual_f_values = dynamic_scale_factor_batch(actual_cr, cfg.pop_size, rng)
-                actual_f_mean = float(np.mean(actual_f_values))
+                # 计算实际的 F 值：LLM override 优先，否则公式 3-11
+                if llm_f_override is not None:
+                    actual_f_mean = llm_f_override
+                else:
+                    actual_f_values = dynamic_scale_factor_batch(actual_cr, cfg.pop_size, rng)
+                    actual_f_mean = float(np.mean(actual_f_values))
 
                 state = self._build_state(
                     gen, cfg.max_generations, population, best_idx,

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""cr_control.py — LLM 交叉率控制模块
+"""cr_control.py — LLM 交叉率控制模块（旧版，已被 search_controller 取代）
 
 职责：
     根据搜索状态 + 上次决策反馈，由 LLM 动态调整 CR。
-    F 完全由 DMDE 公式 3-11 从 CR 自动推导，LLM 不控制 F。
+    注：此模块已被 search_controller 取代，search_controller 现在独立控制 CR、F、GMR。
 
 注入点：before_evolve（每代进化前，按 interval 触发）
 """
@@ -99,7 +99,7 @@ class LLMCRControlModule(BaseLLMModule):
         }
 
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
-        """将 LLM 决策的 CR 应用到状态。F 由 solver 根据 CR 自动推导。"""
+        """将 LLM 决策的 CR 应用到状态。（旧模块，F/GMR 由 search_controller 独立控制）"""
         cr = decision.get("cr")
 
         if cr is not None:

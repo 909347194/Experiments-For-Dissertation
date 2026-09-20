@@ -473,35 +473,37 @@ If the search is still actively improving, restart is premature — hold everyth
 """
 
 _SC_SHADOW = """\
-## Shadow Control (CR Attribution)
+## Shadow Control (Attribution)
 A shadow population, evolved from the SAME starting point as the main population \
-with FIXED CR={shadow_cr}, is run in parallel over the same stage window.
-The only difference between main and shadow is CR, so df - df_shadow =
-the effect attributable to your CR choice.
+with FIXED CR={shadow_cr} (and F, GMR derived from that CR via formulas), \
+is run in parallel over the same stage window.
+The shadow represents the "no LLM intervention" baseline: \
+all parameters are formula-derived from a fixed CR. \
+The difference df - df_shadow = the combined effect of your CR+F+GMR choices.
 
 ### Reading the Shadow Signal
-- **df significantly better than df_shadow**: your CR outperforms the fixed baseline. \
-  Hold — do not change what is working. (This does not guarantee your CR is optimal, \
+- **df significantly better than df_shadow**: your strategy outperforms the fixed baseline. \
+  Hold — do not change what is working. (This does not guarantee your parameters are optimal, \
   but changing without further evidence is risky.)
-- **df ≈ df_shadow (both near zero)**: converged. Neither CR nor the baseline \
-  can improve fitness. CR is irrelevant — use restart_fraction.
-- **df ≈ df_shadow (both significantly negative)**: both CRs produce similar \
-  improvement. Your CR is not differentiating — the improvement comes from \
-  the search landscape, not your choice. Hold CR.
-- **df worse than df_shadow**: your CR is actively hurting. Strongest evidence \
-  for changing CR — move toward the shadow's value.
+- **df ≈ df_shadow (both near zero)**: converged. Neither your strategy nor the baseline \
+  can improve fitness. Use restart_fraction or GMR=on.
+- **df ≈ df_shadow (both significantly negative)**: both produce similar \
+  improvement. Your choices are not differentiating — the improvement comes from \
+  the search landscape, not your strategy. Hold.
+- **df worse than df_shadow**: your current strategy is actively hurting. Strongest evidence \
+  for changing parameters — consider adjusting CR, F, or GMR.
 
 ### Shadow Across Stages
-If df tracks df_shadow across multiple stages, your CR choices are not adding \
-value over the fixed baseline. Reduce confidence in CR adjustments; rely more \
-on restart_fraction.
+If df tracks df_shadow across multiple stages, your parameter choices are not adding \
+value over the fixed baseline. Reduce confidence in parameter adjustments; rely more \
+on restart_fraction or GMR=on.
 """
 
 _SC_CONFOUND = """\
 ## CR Attribution Is CONFOUNDED This Round
 Your previous decision included restart_fraction > 0, which injected fresh random \
 individuals into the population. Any fitness change observed since then is therefore \
-NOT attributable to your CR — the injected individuals are the likely cause, and the \
+NOT attributable to your parameters — the injected individuals are the likely cause, and the \
 shadow population received no restart, so df vs df_shadow no longer isolates CR.
 Do not use df vs df_shadow as evidence for changing CR this round. If you see no \
 CR-specific evidence, report `cr_action: "hold"`.
@@ -509,7 +511,7 @@ CR-specific evidence, report `cr_action: "hold"`.
 
 _SC_FROZEN = """\
 ## CR Channel Is FROZEN This Round
-The solver measured that over the last stage your CR produced no improvement
+The solver measured that over the last stage your parameters produced no improvement
 (|df| within noise) and no difference from the fixed-CR shadow \
 (|df - df_shadow| within noise). The CR channel is therefore currently
 uninformative, and CR is FROZEN — you must set `cr_action: "hold"`.
@@ -540,7 +542,7 @@ Each row is one of your previous decision stages. Read it for:
 - **GMR-response**: did GMR=on cause diversity spike + fitness reset? \
   Did GMR=off preserve improvement momentum?
 - **Shadow tracking**: does df follow df_shadow? If always similar, \
-  your CR is not adding value over the fixed baseline.
+  your parameter choices are not adding value over the fixed baseline.
 - **Diminishing returns**: are improvements shrinking stage over stage?
 - **Acceptance trend**: is acceptance_rate declining? \
   Declining = the population is hardening against new solutions.
@@ -719,7 +721,7 @@ CR_CONTROL_USER_PROMPT = """\
 ## Current Search State
 {state_json}
 
-The `previous_decision_feedback` section shows the effect of your last CR decision.
+The `previous_decision_feedback` section shows the effect of your last decision.
 Use this feedback to evaluate whether your previous adjustment helped or hurt,
 and adapt your next decision accordingly.
 

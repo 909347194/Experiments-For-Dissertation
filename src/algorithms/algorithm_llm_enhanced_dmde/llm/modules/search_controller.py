@@ -2,16 +2,16 @@
 """search_controller.py — LLM 搜索控制器模块
 
 职责：
-    在一次 LLM 调用中，决定交叉率 CR 和重启比例 restart_fraction。
-    F 完全由 DMDE 公式 3-11 从 CR 自动推导，LLM 不控制 F。
+    在一次 LLM 调用中，独立决定 CR、F、GMR 和 restart_fraction。
+    CR、F、GMR 是解耦的独立参数，LLM 可以分别控制。
 
     v2 闭环控制改造（可观测 / 可归因 / 可触发 / 能控性）：
     - prompt 注入 stage 级过程统计（接受率、改进次数、停滞真实值、
       多样性分位数、stage 内 best 曲线），不再只喂两个聚合标量；
-    - prompt 注入影子对照（固定 CR 的影子种群在同一 stage 的 Δf/ΔD），
-      使 LLM 的动作效果可以与"什么都不调"的基线分离 —— 可归因；
+    - prompt 注入影子对照（固定参数的影子种群在同一 stage 的 Δf/ΔD），
+      使 LLM 的动作效果可以与“什么都不调”的基线分离 —— 可归因；
     - prompt 注入 trigger_reason（为什么现在被咨询）；
-    - 动作空间扩展 restart_fraction：收敛后 CR 失效时，
+    - 动作空间扩展 restart_fraction：收敛后参数调整失效时，
       允许 LLM 重启最差个体比例，恢复搜索能力 —— 能控性。
 
 注入点：before_mutation（变异前，由 solver 的事件触发器决定何时调用）
@@ -30,12 +30,12 @@ logger = logging.getLogger(__name__)
 
 # 预定义 CR 候选值
 CR_CHOICES = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-# 预定义重启比例候选值（替换最差个体的比例）
+# 预定义重启比例候选值(替换最差个体的比例)
 RESTART_CHOICES = [0.0, 0.1, 0.2, 0.3]
 
 
 class LLMSearchControllerModule(BaseLLMModule):
-    """LLM 搜索控制器：决定 CR 与 restart_fraction。"""
+    """LLM 搜索控制器:决定 CR 与 restart_fraction。"""
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
@@ -45,7 +45,7 @@ class LLMSearchControllerModule(BaseLLMModule):
             "restart_choices",
             self._config.get("actions", {}).get("restart_choices", RESTART_CHOICES),
         )
-        self._system_prompt: str | None = None  # 缓存，按 model_type 分别解析
+        self._system_prompt: str | None = None  # 缓存,按 model_type 分别解析
 
     @property
     def name(self) -> str:
@@ -56,7 +56,7 @@ class LLMSearchControllerModule(BaseLLMModule):
         return "before_mutation"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
-        # ---- State: S_t（可观测性扩展版） ----
+        # ---- State: S_t(可观测性扩展版) ----
         features = {
             "generation": state.generation,
             "max_generations": state.max_generations,
@@ -76,7 +76,7 @@ class LLMSearchControllerModule(BaseLLMModule):
             ),
             "improvements_in_stage": state.improvements_in_stage,
             "gens_since_last_improvement": state.gens_since_last_improvement,
-            # 停滞（真实值，未封顶）
+            # 停滞(真实值,未封顶)
             "stagnation_count": state.stagnation_count,
             "stagnation_raw": state.stagnation_raw,
             # 上次动作及其效果
@@ -84,19 +84,19 @@ class LLMSearchControllerModule(BaseLLMModule):
             "prev_action_restart": state.prev_action_restart,
             "prev_delta_fitness_pct": state.prev_delta_fitness,
             "prev_delta_diversity": state.prev_delta_diversity,
-            # stage 内逐代 best 曲线（降采样，携带 stage 内动态）
+            # stage 内逐代 best 曲线(降采样,携带 stage 内动态)
             "stage_best_curve": state.stage_best_curve,
             # 本次被触发的原因
             "trigger_reason": state.trigger_reason or None,
-            # CR 通道是否被冻结（无证据守卫）
+            # CR 通道是否被冻结(无证据守卫)
             "cr_frozen": state.cr_frozen,
             "cr_frozen_reason": state.cr_frozen_reason or None,
-            # 当前 DE 参数（LLM 可覆写）
+            # 当前 DE 参数(LLM 可覆写)
             "current_f": round(state.f_scale, 4),
             "current_gmr_mode": state.gmr_mode,
         }
 
-        # ---- 影子对照（可归因锚点） ----
+        # ---- 影子对照(可归因锚点) ----
         if state.shadow_cr is not None:
             features["shadow_control"] = {
                 "shadow_cr": round(state.shadow_cr, 2),
@@ -114,7 +114,7 @@ class LLMSearchControllerModule(BaseLLMModule):
                 ),
             }
 
-        # ---- Stage 级轨迹表格（最近 5 个 stage） ----
+        # ---- Stage 级轨迹表格(最近 5 个 stage) ----
         trajectory_text = "No stage history yet (first decision)."
         stage_hist = state.stage_history
         if stage_hist:
@@ -150,7 +150,7 @@ class LLMSearchControllerModule(BaseLLMModule):
                 )
             trajectory_text = "\n".join(lines)
 
-        # ---- Action-Outcome 反馈（含影子对照，可归因） ----
+        # ---- Action-Outcome 反馈(含影子对照,可归因) ----
         feedback = ""
         if state.prev_action is None:
             feedback = (
@@ -173,7 +173,7 @@ class LLMSearchControllerModule(BaseLLMModule):
                     f"df_shadow={state.shadow_delta_fitness:+.2f}%, "
                     f"dD_shadow={state.shadow_delta_diversity:+.4f}. "
                     f"The difference (yours minus shadow) is the effect "
-                    f"attributable to your CR choice."
+                    f"attributable to your parameter choices (CR, F, GMR)."
                 )
 
         user = get_prompt(
@@ -204,11 +204,11 @@ class LLMSearchControllerModule(BaseLLMModule):
     def parse_response(self, llm_output: str) -> dict[str, Any]:
         """解析 LLM 输出。
 
-        动作空间为两级：先决定 cr_action（hold / set），再决定具体 CR 值。
-        **默认路径是 hold** —— 解析失败、字段缺失或格式非法时一律返回 hold，
-        而不是返回一个新的 CR 值。这是修复"无条件翻转"的关键：
-        旧版 schema 强制模型每次输出一个 CR 数字，模型在证据无区分度时
-        退化为 CR_t = flip(CR_{t-1})（实测 corr = -0.967，翻转率 0.98）。
+        动作空间为两级:先决定 cr_action(hold / set),再决定具体 CR 值。
+        **默认路径是 hold** -- 解析失败、字段缺失或格式非法时一律返回 hold,
+        而不是返回一个新的 CR 值。这是修复"无条件翻转"的关键:
+        旧版 schema 强制模型每次输出一个 CR 数字,模型在证据无区分度时
+        退化为 CR_t = flip(CR_{t-1})(实测 corr = -0.967,翻转率 0.98)。
         """
         json_str = self._extract_json(llm_output)
         if json_str is None:
@@ -224,7 +224,7 @@ class LLMSearchControllerModule(BaseLLMModule):
 
         evidence_read = str(data.get("evidence_read", ""))[:500]
 
-        # ---- 第 1 级决策：是否改动 CR ----
+        # ---- 第 1 级决策:是否改动 CR ----
         raw_cr = data.get("cr", None)
         cr_num = None
         try:
@@ -235,31 +235,31 @@ class LLMSearchControllerModule(BaseLLMModule):
         if "cr_action" in data:
             action = self._normalize_action(data.get("cr_action"))
         elif cr_num is not None:
-            # 旧 schema（只给 cr、不给 cr_action）：视为隐式 set，保持向后兼容
+            # 旧 schema(只给 cr、不给 cr_action):视为隐式 set,保持向后兼容
             action = "set_implicit"
         else:
-            # 既没说要改、也没给值 → hold（本 bug 的核心修复路径）
+            # 既没说要改、也没给值 → hold(本 bug 的核心修复路径)
             return self._hold_decision(
                 "No cr_action and no usable cr in LLM output; holding CR by default",
                 evidence_read,
             )
 
-        # ---- 第 2 级决策：具体 CR 值（仅 set 时有效） ----
+        # ---- 第 2 级决策:具体 CR 值(仅 set 时有效) ----
         cr = None
         if action in ("set", "set_implicit"):
             if cr_num is None:
-                # 声明要改却没给合法值 → 回退到 hold（不猜一个值）
+                # 声明要改却没给合法值 → 回退到 hold(不猜一个值)
                 return self._hold_decision(
                     f"cr_action='set' but cr={raw_cr!r} is not a number; "
                     f"holding CR by default", evidence_read,
                 )
             cr = min(self._cr_choices, key=lambda c: abs(c - cr_num))
 
-        # 防御：cr_action=hold 时忽略模型可能仍填的 cr 值
+        # 防御:cr_action=hold 时忽略模型可能仍填的 cr 值
         if action == "hold":
             cr = None
 
-        # 验证 restart_fraction（钳位到最近的合法候选）
+        # 验证 restart_fraction(钳位到最近的合法候选)
         rf = data.get("restart_fraction", 0.0)
         try:
             rf = float(rf)
@@ -303,7 +303,7 @@ class LLMSearchControllerModule(BaseLLMModule):
     def _normalize_action(raw: Any) -> str:
         """把模型对 cr_action 的各种说法归一化为 "hold" / "set"。
 
-        未知/缺失/非法一律归为 hold（保守默认）。
+        未知/缺失/非法一律归为 hold(保守默认)。
         """
         if raw is None:
             return "hold"
@@ -314,7 +314,7 @@ class LLMSearchControllerModule(BaseLLMModule):
         return "hold"
 
     def _hold_decision(self, reason: str, evidence_read: str = "") -> dict[str, Any]:
-        """构造一个 hold 决策（兜底路径）。"""
+        """构造一个 hold 决策(兜底路径)。"""
         return {
             "cr_action": "hold",
             "cr": None,
@@ -329,14 +329,14 @@ class LLMSearchControllerModule(BaseLLMModule):
         """将决策应用到搜索状态。
 
         CR: cr_action == "hold" 时不改动 state.cr。
-        F:  非 None 时直接覆写 state.f_override（覆盖公式 3-11）。
-        GMR: "auto" 保持公式 3-12，"on" 强制灭绝，"off" 禁止灭绝。
+        F:  非 None 时直接覆写 state.f_override(覆盖公式 3-11)。
+        GMR: "auto" 保持公式 3-12,"on" 强制灭绝,"off" 禁止灭绝。
         restart_fraction 通过 state.extra 传递给 solver 执行。
         """
         new_cr = decision.get("cr", None)
         if new_cr is not None and decision.get("cr_action") == "set":
             state.cr = float(new_cr)
-        # hold：保持 state.cr 不变
+        # hold:保持 state.cr 不变
         state.extra["llm_cr"] = new_cr
         state.extra["llm_cr_action"] = decision.get("cr_action", "hold")
 
