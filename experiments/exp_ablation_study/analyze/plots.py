@@ -324,3 +324,70 @@ def plot_parameter_control_overview(all_stats: dict, scenario_key: str, figures_
     fig.savefig(out, dpi=150)
     plt.close(fig)
     print(f"  参数控制总览: {out}")
+
+
+def plot_decoupling_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
+    """解耦效应对比图：A1（耦合）vs A3（解耦）的收敛曲线 + 箱线图。
+
+    两行子图：
+    - 上行：A1 vs A3 收敛曲线对比（控制了 PopInit，隔离解耦效应）
+    - 下行：A1 vs A3 箱线图（fitness 分布对比）
+    """
+    if not HAS_MPL:
+        return
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # ---- 左图：收敛曲线对比 ----
+    ax = axes[0]
+    for config_key in ["A1", "A3"]:
+        stats = all_stats.get(f"{scenario_key}_{config_key}", {})
+        raw = stats.get("_raw", [])
+        curves = extract_convergence_curves(raw)
+        if not curves:
+            continue
+        conv = compute_convergence_stats(curves)
+        if not conv:
+            continue
+        x = np.array(conv["gens"])
+        mean = np.array(conv["mean"])
+        std = np.array(conv["std"])
+        color = CONFIG_COLORS[config_key]
+        ax.plot(x, mean, label=CONFIG_LABELS[config_key], color=color, linewidth=2)
+        ax.fill_between(x, mean - std, mean + std, alpha=0.15, color=color)
+    ax.set_xlabel("Generation", fontsize=12)
+    ax.set_ylabel("Best Fitness", fontsize=12)
+    ax.set_title(
+        f"Decoupling Effect: Convergence\n"
+        f"{SCENARIO_LABELS.get(scenario_key, scenario_key)}",
+        fontsize=13,
+    )
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+
+    # ---- 右图：箱线图 ----
+    ax = axes[1]
+    data, labels, colors = [], [], []
+    for config_key in ["A0", "A1", "A2", "A3"]:
+        stats = all_stats.get(f"{scenario_key}_{config_key}", {})
+        arr = stats.get("fitness_array", np.array([]))
+        if len(arr) > 0:
+            data.append(arr)
+            labels.append(CONFIG_LABELS[config_key])
+            colors.append(CONFIG_COLORS[config_key])
+    if data:
+        try:
+            bp = ax.boxplot(data, tick_labels=labels, patch_artist=True)
+        except TypeError:
+            bp = ax.boxplot(data, labels=labels, patch_artist=True)
+        for patch, color in zip(bp["boxes"], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.6)
+    ax.set_ylabel("Best Fitness", fontsize=12)
+    ax.set_title("All Configurations", fontsize=13)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    fig.tight_layout()
+    out = figures_dir / f"decoupling_{scenario_key}.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"  解耦效应: {out}")

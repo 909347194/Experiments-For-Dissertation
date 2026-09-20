@@ -13,6 +13,7 @@ from .stats import (
     compute_synergy,
     compute_convergence_gens,
     extract_initial_pop_fitness,
+    compute_decoupling_effect,
 )
 from .tables import (
     generate_markdown_table,
@@ -30,6 +31,8 @@ from .tables import (
     generate_gmr_stats_table,
     generate_parameter_coupling_table,
     generate_latex_decoupled_table,
+    generate_decoupling_table,
+    generate_latex_decoupling_table,
 )
 from .plots import (
     plot_convergence_comparison,
@@ -39,6 +42,7 @@ from .plots import (
     plot_f_comparison,
     plot_gmr_mode_distribution,
     plot_parameter_control_overview,
+    plot_decoupling_comparison,
     HAS_MPL,
 )
 
@@ -112,6 +116,13 @@ def main():
     print(f"\n{coupling_md}")
 
     # ═══════════════════════════════════════════════════════════
+    # 5. 解耦效应分析（核心论点支撑）
+    # ═══════════════════════════════════════════════════════════
+    decoupling = compute_decoupling_effect(all_stats)
+    decoupling_md = generate_decoupling_table(decoupling)
+    print(f"\n{decoupling_md}")
+
+    # ═══════════════════════════════════════════════════════════
     # 5. 保存 Markdown
     # ═══════════════════════════════════════════════════════════
     md_out = FIGURES_DIR / "summary_table.md"
@@ -131,6 +142,8 @@ def main():
         f.write(gmr_stats_md)
         f.write("\n\n## 参数解耦分析\n\n")
         f.write(coupling_md)
+        f.write("\n\n")
+        f.write(decoupling_md)
         f.write("\n")
 
     # ═══════════════════════════════════════════════════════════
@@ -176,6 +189,8 @@ def main():
         + generate_latex_initial_pop_table(init_pop) + "\n\n"
         r"\section*{解耦参数控制分析}" "\n\n"
         + generate_latex_decoupled_table(all_stats) + "\n\n"
+        r"\section*{解耦效应分析}" "\n\n"
+        + generate_latex_decoupling_table(decoupling) + "\n\n"
         r"\end{document}" "\n"
     )
     tex_out = FIGURES_DIR / "ablation_tables.tex"
@@ -194,6 +209,7 @@ def main():
             plot_f_comparison(all_stats, s_key, FIGURES_DIR)
             plot_gmr_mode_distribution(all_stats, s_key, FIGURES_DIR)
             plot_parameter_control_overview(all_stats, s_key, FIGURES_DIR)
+            plot_decoupling_comparison(all_stats, s_key, FIGURES_DIR)
         plot_time_breakdown(all_stats, FIGURES_DIR)
     else:
         print("\n(matplotlib 不可用，跳过图表)")

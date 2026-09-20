@@ -7,6 +7,7 @@ from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
 from .stats import (
     mannwhitney_test, p_mark, summarize_llm_decisions,
     compute_f_stats, compute_gmr_stats, compute_parameter_coupling,
+    compute_decoupling_effect,
 )
 
 
@@ -504,5 +505,152 @@ def generate_latex_decoupled_table(all_stats: dict) -> str:
                 lines.append(f" & {c_label} & {corr_str} & {cr_str} & {f_str} & {gmr_str} \\\\")
         lines.append(r"\midrule")
     lines.pop()
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(lines)
+
+
+def generate_decoupling_table(decoupling: dict) -> str:
+    """解耦效应分析表（Markdown）。
+
+    核心论点支撑：在 PopInit 条件相同（均无）的前提下，
+    解耦 LLM 独立控制 CR/F/GMR 是否优于耦合公式。
+    """
+    lines = [
+        "## 解耦效应分析 (Decoupling Effect)\n",
+        "**核心论点**：将原本耦合的 CR→F→GMR 控制链解耦，",
+        "让 LLM 在诊断推理框架下独立决定 CR、F、GMR，效果优于耦合公式。\n",
+        "| 指标 | S1 (balanced) | S2 (srp) |",
+        "|---|---|---|",
+    ]
+
+    def _row(label, key, fmt="{:.2f}", suffix=""):
+        vals = []
+        for s_key in ["S1", "S2"]:
+            d = decoupling.get(s_key, {})
+            v = d.get(key)
+            if v is None:
+                vals.append("---")
+            elif isinstance(v, float) and not np.isfinite(v):
+                vals.append("N/A")
+            else:
+                vals.append(fmt.format(v) + suffix)
+        return f"| {label} | " + " | ".join(vals) + " |"
+
+    lines.append(_row("A1 均值 (耦合)", "A1_mean"))
+    lines.append(_row("A3 均值 (解耦)", "A3_mean"))
+    lines.append(_row("**A3 vs A1 增益**", "delta_A3_A1", fmt="{:+.2f}"))
+    lines.append(_row("PopInit 单独贡献", "delta_A2_A0", fmt="{:+.2f}"))
+    lines.append(_row("**纯解耦效应**", "pure_decoupling_effect", fmt="{:+.2f}"))
+
+    # 显著性
+    sig_vals = []
+    for s_key in ["S1", "S2"]:
+        d = decoupling.get(s_key, {})
+        p = d.get("p_value_A3_vs_A1", -1)
+        sig = d.get("significant", False)
+        if p < 0:
+            sig_vals.append("---")
+        else:
+            mark = "✓" if sig else "✗"
+            sig_vals.append(f"p={p:.4f} {mark}")
+    lines.append(f"| 显著性 (Mann-Whitney U) | " + " | ".join(sig_vals) + " |")
+
+    # 收敛速度
+    conv_vals = []
+    for s_key in ["S1", "S2"]:
+        d = decoupling.get(s_key, {})
+        a1g = d.get("A1_conv_gen_95", -1)
+        a3g = d.get("A3_conv_gen_95", -1)
+        sp = d.get("conv_speedup")
+        if a1g < 0 or a3g < 0:
+            conv_vals.append("---")
+        else:
+            sp_str = f"快 {sp:.1f}%" if sp and sp > 0 else f"慢 {abs(sp):.1f}%" if sp else "---"
+            conv_vals.append(f"A1=Gen{a1g} → A3=Gen{a3g} ({sp_str})")
+    lines.append(f"| 收敛速度 (95%改进) | " + " | ".join(conv_vals) + " |")
+
+    # 参数解耦指标
+    corr_vals = []
+    for s_key in ["S1", "S2"]:
+        d = decoupling.get(s_key, {})
+        a1c = d.get("A1_cr_f_corr")
+        a3c = d.get("A3_cr_f_corr")
+        parts = []
+        if a1c is not None:
+            parts.append(f"A1={a1c:+.3f}")
+        if a3c is not None:
+            parts.append(f"A3={a3c:+.3f}")
+        corr_vals.append(" → ".join(parts) if parts else "---")
+    lines.append(f"| CR-F 相关系数 | " + " | ".join(corr_vals) + " |")
+
+    # GMR 模式
+    gmr_vals = []
+    for s_key in ["S1", "S2"]:
+        d = decoupling.get(s_key, {})
+        a1m = d.get("A1_gmr_modes", {})
+        a3m = d.get("A3_gmr_modes", {})
+        a1_str = ", ".join(f"{m}:{c}" for m, c in sorted(a1m.items())) if a1m else "formula"
+        a3_str = ", ".join(f"{m}:{c}" for m, c in sorted(a3m.items())) if a3m else "---"
+        gmr_vals.append(f"A1=[{a1_str}] → A3=[{a3_str}]")
+    lines.append(f"| GMR 模式分布 | " + " | ".join(gmr_vals) + " |")
+
+    return "\n".join(lines)
+
+
+def generate_latex_decoupling_table(decoupling: dict) -> str:
+    """解耦效应分析表（LaTeX）。"""
+    lines = [
+        r"\begin{table}[htbp]", r"\centering",
+        r"\caption{解耦效应分析：$A_3$（解耦 CR/F/GMR）vs $A_1$（仅 LLM 控 CR，F/GMR 耦合）}",
+        r"\label{tab:decoupling_effect}",
+        r"\begin{tabular}{lcc}", r"\toprule",
+        r"指标 & S1 (balanced) & S2 (srp) \\", r"\midrule",
+    ]
+
+    def _row(label, key, fmt="{:.2f}", bold=False):
+        vals = []
+        for s_key in ["S1", "S2"]:
+            d = decoupling.get(s_key, {})
+            v = d.get(key)
+            if v is None or (isinstance(v, float) and not np.isfinite(v)):
+                vals.append("---")
+            else:
+                s = fmt.format(v)
+                if bold:
+                    s = r"\textbf{" + s + "}"
+                vals.append(s)
+        return f"{label} & " + " & ".join(vals) + r" \\"
+
+    lines.append(_row(r"$A_1$ 均值 (耦合)", "A1_mean"))
+    lines.append(_row(r"$A_3$ 均值 (解耦)", "A3_mean"))
+    lines.append(_row(r"$\Delta_{A_3-A_1}$ (总增益)", "delta_A3_A1", fmt="{:+.2f}", bold=True))
+    lines.append(_row(r"$\Delta_{A_2-A_0}$ (PopInit)", "delta_A2_A0", fmt="{:+.2f}"))
+    lines.append(_row(r"纯解耦效应", "pure_decoupling_effect", fmt="{:+.2f}", bold=True))
+
+    # 显著性
+    sig_vals = []
+    for s_key in ["S1", "S2"]:
+        d = decoupling.get(s_key, {})
+        p = d.get("p_value_A3_vs_A1", -1)
+        sig = d.get("significant", False)
+        if p < 0:
+            sig_vals.append("---")
+        else:
+            mark = r"$^{*}$" if sig else r"n.s."
+            sig_vals.append(f"{p:.4f} {mark}")
+    lines.append(r"$p$-value (Mann-Whitney U) & " + " & ".join(sig_vals) + r" \\")
+
+    # 收敛速度
+    conv_vals = []
+    for s_key in ["S1", "S2"]:
+        d = decoupling.get(s_key, {})
+        a1g = d.get("A1_conv_gen_95", -1)
+        a3g = d.get("A3_conv_gen_95", -1)
+        if a1g < 0 or a3g < 0:
+            conv_vals.append("---")
+        else:
+            conv_vals.append(f"Gen {a1g} $\\to$ Gen {a3g}")
+    lines.append(r"收敛速度 (95\% 改进) & " + " & ".join(conv_vals) + r" \\")
+
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
     return "\n".join(lines)

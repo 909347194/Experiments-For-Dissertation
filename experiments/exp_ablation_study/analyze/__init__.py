@@ -11,6 +11,7 @@ from .stats import (
     compute_f_stats,
     compute_gmr_stats,
     compute_parameter_coupling,
+    compute_decoupling_effect,
     mannwhitney_test,
     p_mark,
 )
@@ -30,4 +31,6 @@ from .tables import (
     generate_gmr_stats_table,
     generate_parameter_coupling_table,
     generate_latex_decoupled_table,
+    generate_decoupling_table,
+    generate_latex_decoupling_table,
 )

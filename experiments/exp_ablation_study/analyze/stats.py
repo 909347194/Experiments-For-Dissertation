@@ -542,3 +542,126 @@ def compute_parameter_coupling(results: list[dict]) -> dict:
         "gmr_mode_counts": mode_counts,
         "n_samples": len(all_cr),
     }
+
+
+# ── 解耦效应分析 (Decoupling Effect) ─────────────────────
+
+def compute_decoupling_effect(all_stats: dict) -> dict:
+    """计算解耦效应：A3（解耦 CR/F/GMR）vs A1（仅 LLM 控制 CR，F/GMR 耦合）。
+
+    核心论点支撑：在 PopInit 条件相同（均无）的前提下，
+    解耦 LLM 独立控制 CR/F/GMR 是否优于耦合公式。
+
+    对比矩阵：
+        A1: LLM 控制 CR，F 由公式 3-11 推导，GMR 由公式 3-12 推导（耦合）
+        A3: LLM 独立控制 CR、F、GMR + PopInit
+
+    注意 A3 包含 PopInit 而 A1 不包含，因此 A3 - A1 = 解耦效应 + PopInit 效应。
+    为了隔离纯解耦效应，我们计算：
+        纯解耦效应 = (A3 - A1) - (A2 - A0)
+    即：A3 相对 A1 的超额增益中，扣除 PopInit 单独贡献的部分。
+
+    Returns:
+        {"S1": {...}, "S2": {...}} 各场景的解耦效应指标。
+    """
+    from .constants import SCENARIOS
+    result = {}
+    for s_key in SCENARIOS:
+        a0 = all_stats.get(f"{s_key}_A0", {})
+        a1 = all_stats.get(f"{s_key}_A1", {})
+        a2 = all_stats.get(f"{s_key}_A2", {})
+        a3 = all_stats.get(f"{s_key}_A3", {})
+
+        if not all([a0, a1, a2, a3]):
+            continue
+
+        # 基本 fitness 指标
+        a0_mean = a0.get("mean", float("inf"))
+        a1_mean = a1.get("mean", float("inf"))
+        a2_mean = a2.get("mean", float("inf"))
+        a3_mean = a3.get("mean", float("inf"))
+
+        # A3 vs A1 的增益（含 PopInit + 解耦）
+        delta_a3_a1 = a1_mean - a3_mean  # 正值 = A3 更好
+
+        # PopInit 单独贡献 = A2 vs A0 的增益
+        delta_a2_a0 = a0_mean - a2_mean  # 正值 = A2 更好
+
+        # 纯解耦效应 = A3 超额增益 - PopInit 贡献
+        pure_decoupling = delta_a3_a1 - delta_a2_a0
+
+        # Mann-Whitney U 检验 A3 vs A1
+        a1_arr = a1.get("fitness_array", np.array([]))
+        a3_arr = a3.get("fitness_array", np.array([]))
+        p_a3_vs_a1 = mannwhitney_test(a3_arr, a1_arr)
+
+        # 收敛速度对比（达到 95% 改进的代数）
+        a1_conv = a1.get("_raw", [])
+        a3_conv = a3.get("_raw", [])
+        a1_gens_95 = _median_conv_gen(a1_conv, 0.95)
+        a3_gens_95 = _median_conv_gen(a3_conv, 0.95)
+
+        # 参数解耦指标
+        a1_coupling = compute_parameter_coupling(a1_conv)
+        a3_coupling = compute_parameter_coupling(a3_conv)
+
+        # F 独立控制指标
+        a1_f_stats = compute_f_stats(a1_conv)
+        a3_f_stats = compute_f_stats(a3_conv)
+
+        # GMR 独立控制指标
+        a1_gmr = compute_gmr_stats(a1_conv)
+        a3_gmr = compute_gmr_stats(a3_conv)
+
+        result[s_key] = {
+            # Fitness 对比
+            "A0_mean": a0_mean,
+            "A1_mean": a1_mean,
+            "A2_mean": a2_mean,
+            "A3_mean": a3_mean,
+            "delta_A3_A1": round(delta_a3_a1, 2),      # A3 vs A1 总增益
+            "delta_A2_A0": round(delta_a2_a0, 2),      # PopInit 单独贡献
+            "pure_decoupling_effect": round(pure_decoupling, 2),  # 纯解耦效应
+            "p_value_A3_vs_A1": p_a3_vs_a1,
+            "significant": p_a3_vs_a1 >= 0 and p_a3_vs_a1 < 0.05,
+            # 收敛速度
+            "A1_conv_gen_95": a1_gens_95,
+            "A3_conv_gen_95": a3_gens_95,
+            "conv_speedup": (
+                round((a1_gens_95 - a3_gens_95) / a1_gens_95 * 100, 1)
+                if a1_gens_95 > 0 else None
+            ),
+            # 参数解耦指标
+            "A1_cr_f_corr": a1_coupling.get("cr_f_correlation"),
+            "A3_cr_f_corr": a3_coupling.get("cr_f_correlation"),
+            "A1_f_override_count": a1_f_stats.get("f_override_count", 0),
+            "A3_f_override_count": a3_f_stats.get("f_override_count", 0),
+            "A1_gmr_modes": a1_gmr.get("mode_counts", {}),
+            "A3_gmr_modes": a3_gmr.get("mode_counts", {}),
+        }
+    return result
+
+
+def _median_conv_gen(results: list[dict], threshold: float) -> int:
+    """计算达到 threshold 比例改进的中位代数。"""
+    if not results:
+        return -1
+    gen_at = []
+    for r in results:
+        curve = r.get("convergence_curve", [])
+        if len(curve) < 2:
+            continue
+        gens = curve_gens(r)
+        initial = curve[0]
+        final = curve[-1]
+        improvement = initial - final
+        if not np.isfinite(improvement) or improvement <= 0:
+            continue
+        target = final + improvement * (1 - threshold)
+        gen = gens[-1]
+        for i, v in enumerate(curve):
+            if v <= target:
+                gen = gens[i]
+                break
+        gen_at.append(gen)
+    return int(np.median(gen_at)) if gen_at else -1
