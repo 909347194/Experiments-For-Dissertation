@@ -196,6 +196,12 @@ class ModuleState:
     cr: float = 0.5
     f_scale: float = 0.5
     temperature: float = 0.5
+    # LLM 可覆写的 DE 参数（None = 使用公式推导值）
+    f_override: float | None = None    # LLM 直接指定 F，覆盖公式 3-11
+    gmr_mode: str = "auto"             # GMR 模式: "auto" | "on" | "off"
+    # "auto" = 公式 3-12 (CR < δ 时触发)
+    # "on"   = 强制触发灭绝
+    # "off"  = 强制不触发灭绝
     # 代价矩阵信息
     cost_matrix: np.ndarray | None = None
     n_uavs: int = 0

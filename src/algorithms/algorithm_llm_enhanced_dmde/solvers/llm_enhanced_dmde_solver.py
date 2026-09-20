@@ -244,6 +244,8 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         llm_cr_prev_diversity = 0.0                     # 上次 LLM CR 决定时的 diversity
         llm_cr_prev_gen = 0                             # 上次 LLM CR 决定时的代数
         llm_restart_prev = 0.0                          # 上次决策的重启比例
+        llm_f_override = None    # None = 使用公式 3-11，float = LLM 直接指定 F
+        llm_gmr_mode = "auto"    # "auto" = 公式 3-12，"on" = 强制灭绝，"off" = 禁止灭绝
 
         # Stage 级历史记录（闭环控制用）
         # 每次 LLM 调用 = 一个 stage，记录 stage 结束时的 fitness/diversity/CR
@@ -483,6 +485,8 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     decision["cr_effective"] = new_cr
                     decision["cr_frozen"] = cr_frozen
                     decision["cr_frozen_reason"] = cr_frozen_reason
+                    decision["f_effective"] = llm_f_override
+                    decision["gmr_mode_effective"] = llm_gmr_mode
                     self._record_decision(gen, "search_controller", decision, state)
 
                     shadow_df_val = state.shadow_delta_fitness
@@ -518,6 +522,9 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                             if decision.get("cr") is not None else None
                         ),
                         "cr_frozen": cr_frozen,
+                        # v4：LLM 独立控制的 F 和 GMR
+                        "f_scale": round(llm_f_override, 4) if llm_f_override is not None else "auto",
+                        "gmr_mode": llm_gmr_mode,
                     })
 
                     # ---- 应用 restart_fraction（能控性：收敛后的有效动作） ----
@@ -556,6 +563,12 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     llm_cr_prev_fitness = current_fitness
                     llm_cr_prev_diversity = current_diversity
                     llm_cr_prev_gen = gen
+                    # F: 从 decision 读取 LLM 指定值
+                    llm_f_val = decision.get("f", None)
+                    if llm_f_val is not None:
+                        llm_f_override = float(llm_f_val)
+                    # GMR: 从 decision 读取 LLM 指定模式
+                    llm_gmr_mode = decision.get("gmr_mode", "auto")
 
                     # ---- 影子种群重置为当前主种群（下一 stage 的对照起点） ----
                     if shadow_enabled:
@@ -569,8 +582,11 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 cr = llm_cr
             else:
                 cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)
-            # F 从 CR 按公式 3-11 批量计算（每个个体独立 F 值）
-            f_values = dynamic_scale_factor_batch(cr, cfg.pop_size, rng)
+            # F 来源：LLM 直接指定 or 公式 3-11
+            if llm_f_override is not None:
+                f_values = np.full(cfg.pop_size, llm_f_override)
+            else:
+                f_values = dynamic_scale_factor_batch(cr, cfg.pop_size, rng)
 
             # 计算温度
             temperature = 1.0 - gen / cfg.max_generations
@@ -602,8 +618,16 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                         last_improve_gen = gen
             stage_offspring += cfg.pop_size
 
-            # GMR 灭绝判断
-            if should_extinct(cr, cfg.delta, rng):
+            # GMR 灭绝判断（LLM 可覆写）
+            trigger_extinction = False
+            if llm_gmr_mode == "on":
+                trigger_extinction = True
+            elif llm_gmr_mode == "off":
+                trigger_extinction = False
+            else:  # "auto"
+                trigger_extinction = should_extinct(cr, cfg.delta, rng)
+
+            if trigger_extinction:
                 fitness_arr = np.array([ind.fitness for ind in population])
                 new_cv, survived = apply_extinction(
                     fitness_arr, cost_vectors, best_idx,

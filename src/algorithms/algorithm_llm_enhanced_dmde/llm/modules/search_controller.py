@@ -91,6 +91,9 @@ class LLMSearchControllerModule(BaseLLMModule):
             # CR 通道是否被冻结（无证据守卫）
             "cr_frozen": state.cr_frozen,
             "cr_frozen_reason": state.cr_frozen_reason or None,
+            # 当前 DE 参数（LLM 可覆写）
+            "current_f": round(state.f_scale, 4),
+            "current_gmr_mode": state.gmr_mode,
         }
 
         # ---- 影子对照（可归因锚点） ----
@@ -116,7 +119,7 @@ class LLMSearchControllerModule(BaseLLMModule):
         stage_hist = state.stage_history
         if stage_hist:
             lines = [
-                "Stage | Len | CR | Restart | Best Fitness | "
+                "Stage | Len | CR | F | GMR | Restart | Best Fitness | "
                 "df(%) | df_shadow(%) | dD | Accept%"
             ]
             for s in stage_hist[-5:]:
@@ -137,9 +140,11 @@ class LLMSearchControllerModule(BaseLLMModule):
                     if s.get("acceptance_rate") is not None else "  N/A"
                 )
                 rst = s.get("restart_fraction", 0.0)
+                f_val = s.get("f_scale", "?")
+                gmr = s.get("gmr_mode", "?")
                 lines.append(
                     f"{s['stage']:5d} | {s.get('stage_length', '?'):3} | "
-                    f"{s['cr']:.1f} | {rst:<7.1f} | "
+                    f"{s['cr']:.1f} | {f_val} | {gmr:<3} | {rst:<7.1f} | "
                     f"{s['best_fitness']:12.1f} | "
                     f"{df} | {dfs} | {dd} | {acc}"
                 )
@@ -262,9 +267,33 @@ class LLMSearchControllerModule(BaseLLMModule):
             rf = 0.0
         rf = min(self._restart_choices, key=lambda r: abs(r - rf))
 
+        # ---- F: 独立变异步长 ----
+        f_raw = data.get("f", None)
+        f_val = None
+        if f_raw is not None:
+            try:
+                f_val = float(f_raw)
+                f_val = max(0.1, min(2.0, f_val))  # 钳位到合理范围
+            except (ValueError, TypeError):
+                f_val = None  # 解析失败 = 不覆写
+
+        # ---- GMR: 灭绝模式 ----
+        gmr_raw = data.get("gmr_mode", "auto")
+        gmr_mode = "auto"
+        if gmr_raw is not None:
+            s = str(gmr_raw).strip().lower()
+            if s in {"on", "force", "extinct"}:
+                gmr_mode = "on"
+            elif s in {"off", "none", "skip"}:
+                gmr_mode = "off"
+            else:
+                gmr_mode = "auto"
+
         return {
             "cr_action": action,
             "cr": cr,                      # None = 保持当前 CR
+            "f": f_val,                     # None = 使用公式推导值
+            "gmr_mode": gmr_mode,           # "auto" | "on" | "off"
             "restart_fraction": rf,
             "evidence_read": evidence_read,
             "reasoning": data.get("reasoning", ""),
@@ -289,6 +318,8 @@ class LLMSearchControllerModule(BaseLLMModule):
         return {
             "cr_action": "hold",
             "cr": None,
+            "f": None,                 # 不覆写 F
+            "gmr_mode": "auto",        # 不改变 GMR
             "restart_fraction": 0.0,
             "evidence_read": evidence_read,
             "reasoning": reason,
@@ -297,9 +328,10 @@ class LLMSearchControllerModule(BaseLLMModule):
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
         """将决策应用到搜索状态。
 
-        cr_action == "hold"（或 decision["cr"] 为 None）时不改动 state.cr。
-        F 不在此处计算，由求解器根据 LLM 的 CR 通过公式 3-11 计算。
-        restart_fraction 通过 state.extra 传递给 solver 执行（替换最差个体）。
+        CR: cr_action == "hold" 时不改动 state.cr。
+        F:  非 None 时直接覆写 state.f_override（覆盖公式 3-11）。
+        GMR: "auto" 保持公式 3-12，"on" 强制灭绝，"off" 禁止灭绝。
+        restart_fraction 通过 state.extra 传递给 solver 执行。
         """
         new_cr = decision.get("cr", None)
         if new_cr is not None and decision.get("cr_action") == "set":
@@ -307,5 +339,18 @@ class LLMSearchControllerModule(BaseLLMModule):
         # hold：保持 state.cr 不变
         state.extra["llm_cr"] = new_cr
         state.extra["llm_cr_action"] = decision.get("cr_action", "hold")
+
+        # F: 独立覆写
+        f_val = decision.get("f", None)
+        if f_val is not None:
+            state.f_override = float(f_val)
+        state.extra["llm_f"] = f_val
+
+        # GMR: 模式覆写
+        gmr_mode = decision.get("gmr_mode", "auto")
+        state.gmr_mode = gmr_mode
+        state.extra["llm_gmr_mode"] = gmr_mode
+
+        # restart_fraction
         state.extra["llm_restart_fraction"] = decision.get("restart_fraction", 0.0)
         return state

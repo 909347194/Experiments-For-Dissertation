@@ -360,13 +360,36 @@ You make sequential control decisions. You are consulted only when the search \
 state changes (see trigger_reason) or when a fallback timer expires.
 
 ## Actions You Control
+You independently control three DE parameters plus a population reset lever:
+
 1. **CR** (crossover rate), one of {cr_choices}:
-   Each gene independently uses DE/rand/1 (exploration) when random <= CR,
-   else DE/best/2 (exploitation). F is derived from CR automatically — do not specify F.
-2. **restart_fraction**, one of {restart_choices}:
-   Replaces the worst fraction of the population with fresh random individuals.
-   This is your ONLY lever that works after the population has converged —
-   CR cannot help when no offspring is being accepted.
+   Controls the per-gene probability of using DE/rand/1 (exploration) vs \
+DE/best/2 (exploitation). Higher CR → more rand/1 → more exploration.
+
+2. **F** (mutation scale factor), range [0.1, 2.0]:
+   Controls the step size of differential mutations. Higher F → larger steps. \
+F is independent of CR — you can set them independently. \
+"auto" = solver derives F from CR via formula (legacy coupled mode). \
+A specific value (e.g., 0.5, 1.0) overrides the formula.
+
+3. **GMR** (global mutation rate / extinction mode):
+   Controls whether the solver applies extinction (resetting poor individuals).
+   - "auto": extinction triggered by formula (CR < threshold → probabilistic).
+   - "on": force extinction this stage (resets worst individuals).
+   - "off": suppress extinction this stage.
+
+4. **restart_fraction**, one of {restart_choices}:
+   Replaces the worst fraction of the population with fresh random individuals. \
+This is your ONLY lever that works after the population has converged.
+
+## Decoupled Control
+Previously, F was derived from CR (formula 3-11) and GMR was derived from CR \
+(formula 3-12). You now control them independently. This means:
+- You can increase exploration (high CR) without amplifying step size (keep F moderate).
+- You can fine-tune (low F) without forcing exploitation (keep CR moderate).
+- You can trigger extinction (GMR=on) without affecting CR or F.
+Use this freedom to match the search dynamics, not to set all three every time. \
+If the current values are working, hold them.
 
 ## Reference Magnitudes
 - |delta_fitness_pct| < 0.05%: effectively ZERO improvement.
@@ -399,52 +422,52 @@ Synthesize ALL available signals into a coherent picture:
   e.g., low acceptance + high diversity may indicate oscillation, not convergence. \
   Check stage_best_curve for instability in such cases.
 
-### Step 2: CR Channel Diagnosis
-Evaluate whether the current CR is effective, using TWO sources:
+### Step 2: Parameter Effectiveness Diagnosis
+Evaluate the current CR, F, and GMR settings:
 
-**A. Current stage evidence** (this stage's df, shadow, acceptance):
+**CR effectiveness**:
 - df vs df_shadow is the PRIMARY attribution signal. See Shadow Control section.
 - If acceptance_rate is very low, the population is not accepting offspring \
 regardless of CR — CR is not the bottleneck.
+- If all recent stages used the same CR, you have no comparative data. \
+The absence of evidence is NOT evidence of absence.
 
-**B. Historical trends** (stage_history table):
-- CR-response correlation: when CR changed across stages, did df change \
-consistently? If yes → CR is effective. If no → CR is insensitive.
-- Shadow tracking: does df consistently track df_shadow? If yes, your CR \
-choices are not adding value over the fixed-CR baseline.
-- Diminishing returns: are successive CR adjustments producing smaller df \
-changes? The search may be exhausting what CR can influence.
-- Look for consistent trends across 4-5 stages. Do NOT conclude from 2-3 data points.
+**F effectiveness**:
+- If F is too high: mutations overshoot, offspring are rejected (low acceptance). \
+  stage_best_curve will show oscillation or flat+high-rejection.
+- If F is too low: mutations are tiny, search crawls (slow df, long stagnation). \
+  stage_best_curve will show gradual decline with no acceleration.
+- If F is appropriate: steady improvement with reasonable acceptance.
+
+**GMR effectiveness**:
+- GMR=on forces extinction: diversity spikes, fitness may temporarily worsen. \
+  Useful when stagnation is deep and CR/F changes have not helped.
+- GMR=off suppresses extinction: preserves current population structure. \
+  Useful when the search is actively improving and extinction would be disruptive.
+- GMR=auto: the formula decides. Review stage_history to see if auto triggers \
+  are well-timed or disruptive.
 
 ### Step 3: Decision
-- If the CR channel is uninformative (Step 2A + 2B both show no effect) → **hold CR**. \
-  Consider restart_fraction if the search state needs intervention.
-- If the CR channel IS informative AND historical patterns suggest a direction → **set CR**.
-- If uncertain → **hold**. A wrong CR change can harm search; holding cannot.
-- **Uninformative history**: if all recent stages used the SAME CR value, you have \
-  no comparative data. The history table cannot tell you whether a different CR \
-  would help — because you never tried one. In this case, the absence of evidence \
-  is NOT evidence of absence. Consider whether the search state warrants \
-  an exploratory CR change to generate new evidence. \
-  Only do this when the search has stagnated AND restart_fraction has not \
-  produced improvement across multiple stages.
+- If the search is actively improving → **hold everything**.
+- If stagnating but CR/F/GMR have not been varied → consider an **exploratory change**. \
+  Pick the parameter most likely to address the diagnosed bottleneck.
+- If converged and restart has not helped → consider GMR=on to force diversity injection.
+- If uncertain → **hold**. A wrong change can harm search; holding cannot.
 
 ### restart_fraction Decision
-restart is appropriate when the CR channel is uninformative but the search \
-still needs intervention — typically: low acceptance, high stagnation, and \
-CR changes that have not produced improvement across multiple stages. \
+restart is appropriate when the search has converged and parameter changes \
+have not produced improvement — typically: low acceptance, high stagnation. \
 Higher fractions are warranted when stagnation is deeper and longer. \
-If the search is still actively improving (high acceptance, negative df), \
-restart is premature — hold everything.
+If the search is still actively improving, restart is premature — hold everything.
 
 ## Decision Policy
 - Hold is the default. You were possibly consulted by a fallback timer rather than
-  by a real event — being consulted is not evidence that CR should change.
-- Changing CR requires evidence that (a) appeared since your last decision AND
-  (b) distinguishes the candidate CR values from each other.
-- The following are NOT valid reasons to change CR:
+  by a real event — being consulted is not evidence that a parameter should change.
+- Changing a parameter requires evidence that (a) appeared since your last decision AND
+  (b) distinguishes the candidate values from each other.
+- The following are NOT valid reasons to change:
   * "I was consulted" / "it is time to act" / "the controller should respond".
-  * The current CR has been in place for several stages.
+  * The current value has been in place for several stages.
   * A generic wish to explore more, exploit more, or "try something different".
   * The state is unchanged — an unchanged state is evidence FOR holding.
 """
@@ -490,8 +513,9 @@ The solver measured that over the last stage your CR produced no improvement
 (|df| within noise) and no difference from the fixed-CR shadow \
 (|df - df_shadow| within noise). The CR channel is therefore currently
 uninformative, and CR is FROZEN — you must set `cr_action: "hold"`.
-Decide restart_fraction only. This is not a request to be passive: the restart
-channel is the one that is measurably affecting the search right now.
+You may still adjust F, GMR, and restart_fraction. The CR channel \
+being frozen does not mean the search is healthy — it means CR \
+is not the lever to use right now.
 """
 
 _SC_SIGNAL_GUIDE = """\
@@ -510,6 +534,11 @@ The curve shape reflects search dynamics, not a specific CR value.
 Each row is one of your previous decision stages. Read it for:
 - **CR-response**: did df change when CR changed across stages? \
   Consistent correlation → CR is effective. No correlation → insensitive.
+- **F-response**: did changing F affect acceptance_rate or df? \
+  High F + low acceptance → F may be too high (mutations overshoot). \
+  Low F + slow improvement → F may be too low.
+- **GMR-response**: did GMR=on cause diversity spike + fitness reset? \
+  Did GMR=off preserve improvement momentum?
 - **Shadow tracking**: does df follow df_shadow? If always similar, \
   your CR is not adding value over the fixed baseline.
 - **Diminishing returns**: are improvements shrinking stage over stage?
@@ -520,28 +549,32 @@ Require 4-5 stages of consistent trend before drawing conclusions.
 
 _SC_FORMAT = """\
 ## Decision Format
-Respond with a JSON object only (no markdown), filling the fields IN THIS ORDER —
-the order matters because you must commit to the evidence before naming an action:
+Respond with a JSON object only (no markdown), filling the fields IN THIS ORDER:
 {{
-    "evidence_read": "<state: ...> | <cr_effect: ...> | <history: ...>",
+    "evidence_read": "<state: ...> | <param_effect: ...> | <history: ...>",
     "cr_action": "hold" | "set",
     "cr": {cr_null_or_value},
+    "f": null | <float in [0.1, 2.0]>,
+    "gmr_mode": "auto" | "on" | "off",
     "restart_fraction": <one of {restart_choices}>,
-    "reasoning": "<one sentence. If cr_action is hold, state what is missing that would justify a change>"
+    "reasoning": "<one sentence>"
 }}
 
-Rules for the fields:
-- `evidence_read` must summarize your diagnostic chain in three parts:
-  * state: what the search state is (converged / exploring / stagnating).
-  * cr_effect: whether the current CR is helping, hurting, or irrelevant
-    (based on df vs df_shadow and acceptance_rate).
-  * history: what the stage_history trend suggests about CR responsiveness.
+Rules:
+- `evidence_read`: three parts — state (converged/exploring/stagnating), \
+  param_effect (are current CR/F/GMR helping?), history (stage_history trend).
   If no stage history exists yet, write "history: first decision".
-- `cr_action` must be "hold" unless the evidence specifically supports a different CR.
-- If `cr_action` is "hold", `cr` MUST be null. (null = keep the current CR.)
-- If `cr_action` is "set", `cr` must be one of {cr_choices}.
-- Do not alternate CR between decisions without evidence — a hold is not a failure
-  to act, it is the correct reading of an uninformative state.
+- `cr_action`: "hold" unless evidence supports a different CR.
+  If "hold", `cr` MUST be null.
+  If "set", `cr` must be one of {cr_choices}.
+- `f`: null = keep current F (auto-derived or previously set). \
+  A float value overrides the formula. Use when F-related symptoms appear \
+  (oscillation → lower F; crawling → raise F).
+- `gmr_mode`: "auto" = formula decides (default). \
+  "on" = force extinction (deep stagnation, other levers exhausted). \
+  "off" = suppress extinction (active improvement, don't disrupt).
+- `restart_fraction`: 0.0 = no restart. Higher = more individuals replaced.
+- Do not alternate values without evidence — a hold is not a failure to act.
 """
 
 _SC_BALANCED_EXTRA = """\
