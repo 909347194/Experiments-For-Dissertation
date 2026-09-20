@@ -310,8 +310,8 @@ def extract_llm_decisions(results: list[dict]) -> list[dict]:
     for r in results:
         decisions = r.get("llm_decisions", [])
         for d in decisions:
-            d["_run_seed"] = r.get("seed")
-            all_decisions.append(d)
+            # 浅拷贝避免污染原始数据（原始 dict 可能被多次读取）
+            all_decisions.append({**d, "_run_seed": r.get("seed")})
     return all_decisions
 
 

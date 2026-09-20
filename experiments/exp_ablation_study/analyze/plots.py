@@ -24,6 +24,7 @@ from .stats import (
     extract_f_override_histories,
     extract_gmr_histories,
     compute_convergence_stats,
+    compute_gmr_stats,
     curve_gens,
 )
 
@@ -217,9 +218,11 @@ def plot_f_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
 
 
 def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: Path):
-    """GMR 模式分布图：展示 LLM 在各代选择的 GMR 模式分布。
+    """GMR 模式分布图：展示 LLM 在 search_controller 决策中选择的 GMR 模式分布。
 
     仅对 A3_full（含 search_controller）有意义。
+    数据来源：llm_decisions（仅 search_controller 模块的决策），
+    而非 generation_records（后者 99% 是默认 "auto"，会严重膨胀饼图）。
     """
     if not HAS_MPL:
         return
@@ -227,24 +230,12 @@ def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: 
     raw = stats.get("_raw", [])
     if not raw:
         return
-    # 收集所有 run 的 GMR 模式序列
-    all_modes = []
-    for r in raw:
-        recs = r.get("generation_records", [])
-        modes = [rec.get("gmr_mode", "auto") for rec in recs]
-        if modes:
-            all_modes.append(modes)
-    if not all_modes:
+    # 使用 compute_gmr_stats 从 llm_decisions 统计（仅 search_controller 决策点）
+    gmr_stats = compute_gmr_stats(raw)
+    if not gmr_stats:
         return
-    # 统计每代各模式的 run 比例
-    max_len = max(len(m) for m in all_modes)
-    # 只看有 LLM 决策的代（即 gmr_mode != "auto" 的代或有变化的代）
-    # 为简洁，按决策点统计
-    mode_counts = {}
-    for modes in all_modes:
-        for m in modes:
-            mode_counts[m] = mode_counts.get(m, 0) + 1
-    total = sum(mode_counts.values())
+    mode_counts = gmr_stats.get("mode_counts", {})
+    total = gmr_stats.get("total_decisions", 0)
     if total == 0:
         return
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -255,7 +246,7 @@ def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: 
         labels.append(GMR_MODE_LABELS.get(mode, mode))
         sizes.append(mode_counts[mode])
         colors.append(GMR_MODE_COLORS.get(mode, "#999999"))
-    wedges, texts, autotexts = ax.pie(
+    _, texts, autotexts = ax.pie(
         sizes, labels=labels, colors=colors, autopct="%1.1f%%",
         startangle=90, textprops={"fontsize": 10},
     )
@@ -263,7 +254,7 @@ def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: 
         autotext.set_fontsize(9)
     ax.set_title(
         f"GMR Mode Distribution — {SCENARIO_LABELS.get(scenario_key, scenario_key)}\n"
-        f"(A3 Full, {len(raw)} runs, {total} decisions)",
+        f"(A3 Full, {len(raw)} runs, {total} LLM decisions)",
         fontsize=12,
     )
     fig.tight_layout()
