@@ -8,6 +8,9 @@ from .stats import (
     compute_synergy,
     compute_convergence_gens,
     extract_initial_pop_fitness,
+    compute_f_stats,
+    compute_gmr_stats,
+    compute_parameter_coupling,
     mannwhitney_test,
     p_mark,
 )
@@ -23,4 +26,8 @@ from .tables import (
     generate_latex_convergence_speed_table,
     generate_initial_pop_table,
     generate_latex_initial_pop_table,
+    generate_f_stats_table,
+    generate_gmr_stats_table,
+    generate_parameter_coupling_table,
+    generate_latex_decoupled_table,
 )

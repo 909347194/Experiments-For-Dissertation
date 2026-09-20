@@ -4,7 +4,10 @@
 import numpy as np
 
 from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
-from .stats import mannwhitney_test, p_mark, summarize_llm_decisions
+from .stats import (
+    mannwhitney_test, p_mark, summarize_llm_decisions,
+    compute_f_stats, compute_gmr_stats, compute_parameter_coupling,
+)
 
 
 # ── LaTeX ─────────────────────────────────────────────────
@@ -146,8 +149,8 @@ def generate_markdown_table(all_stats: dict) -> str:
 def generate_llm_decision_summary(all_stats: dict) -> str:
     lines = [
         "## LLM 决策分析\n",
-        "| 场景 | 配置 | LLM模块 | 调用次数 | 平均耗时(s) | 总耗时(s) | CR均值 | CR标准差 |",
-        "|---|---|---|---|---|---|---|---|",
+        "| 场景 | 配置 | LLM模块 | 调用次数 | 平均耗时(s) | 总耗时(s) | CR均值 | CR标准差 | F均值 | F标准差 | GMR模式分布 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s_key in SCENARIOS:
         for c_key in ["A1", "A2", "A3"]:
@@ -155,15 +158,26 @@ def generate_llm_decision_summary(all_stats: dict) -> str:
             raw = stats.get("_raw", [])
             summary = summarize_llm_decisions(raw)
             if not summary:
-                lines.append(f"| {s_key} | {CONFIG_LABELS[c_key]} | --- | --- | --- | --- | --- | --- |")
+                lines.append(f"| {s_key} | {CONFIG_LABELS[c_key]} | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
                 continue
             for mod_name, mod_data in summary.items():
                 cr_mean = f"{mod_data.get('cr_mean', 0):.4f}" if "cr_mean" in mod_data else "---"
                 cr_std = f"{mod_data.get('cr_std', 0):.4f}" if "cr_std" in mod_data else "---"
+                f_mean = f"{mod_data.get('f_mean', 0):.4f}" if "f_mean" in mod_data else "---"
+                f_std = f"{mod_data.get('f_std', 0):.4f}" if "f_std" in mod_data else "---"
+                # GMR 模式分布
+                gmr_pcts = mod_data.get("gmr_mode_pcts", {})
+                if gmr_pcts:
+                    gmr_str = ", ".join(
+                        f"{m}:{p:.0f}%" for m, p in sorted(gmr_pcts.items())
+                    )
+                else:
+                    gmr_str = "---"
                 lines.append(
                     f"| {s_key} | {CONFIG_LABELS[c_key]} | {mod_name} "
                     f"| {mod_data['total_calls']} | {mod_data['avg_duration']:.3f} "
-                    f"| {mod_data['total_duration']:.1f} | {cr_mean} | {cr_std} |"
+                    f"| {mod_data['total_duration']:.1f} | {cr_mean} | {cr_std} "
+                    f"| {f_mean} | {f_std} | {gmr_str} |"
                 )
     return "\n".join(lines)
 
@@ -344,6 +358,150 @@ def generate_latex_initial_pop_table(init_pop: dict) -> str:
                 first_row = False
             else:
                 lines.append(f" & {c_label} & {ms} & {md} \\\\")
+        lines.append(r"\midrule")
+    lines.pop()
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(lines)
+
+
+def generate_f_stats_table(all_stats: dict) -> str:
+    """F 值统计表（Markdown）。
+
+    展示各配置中 F 值的分布特征，验证 LLM 独立控制 F 的效果。
+    """
+    lines = [
+        "## F (Scale Factor) 统计分析\n",
+        "| 场景 | 配置 | F均值 | F标准差 | F最小值 | F最大值 | F中位数 | LLM覆写次数 | LLM覆写F均值 |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for s_key in SCENARIOS:
+        for c_key in CONFIGS:
+            stats = all_stats.get(f"{s_key}_{c_key}", {})
+            raw = stats.get("_raw", [])
+            f_stats = compute_f_stats(raw)
+            if not f_stats:
+                lines.append(f"| {s_key} | {CONFIG_LABELS[c_key]} | --- | --- | --- | --- | --- | --- | --- |")
+                continue
+            override_count = f_stats.get("f_override_count", 0)
+            override_mean = f"{f_stats.get('f_override_mean', 0):.4f}" if override_count > 0 else "---"
+            lines.append(
+                f"| {s_key} | {CONFIG_LABELS[c_key]} "
+                f"| {f_stats['f_mean']:.4f} | {f_stats['f_std']:.4f} "
+                f"| {f_stats['f_min']:.4f} | {f_stats['f_max']:.4f} "
+                f"| {f_stats['f_median']:.4f} | {override_count} | {override_mean} |"
+            )
+    return "\n".join(lines)
+
+
+def generate_gmr_stats_table(all_stats: dict) -> str:
+    """GMR 模式统计表（Markdown）。
+
+    展示 LLM 在 search_controller 中对 GMR 模式的选择分布。
+    """
+    lines = [
+        "## GMR (Extinction) 模式分析\n",
+        "| 场景 | 配置 | 总决策次数 | 模式分布 | 模式切换次数 |",
+        "|---|---|---|---|---|",
+    ]
+    for s_key in SCENARIOS:
+        for c_key in ["A1", "A3"]:
+            stats = all_stats.get(f"{s_key}_{c_key}", {})
+            raw = stats.get("_raw", [])
+            gmr_stats = compute_gmr_stats(raw)
+            if not gmr_stats:
+                lines.append(f"| {s_key} | {CONFIG_LABELS[c_key]} | --- | --- | --- |")
+                continue
+            pcts = gmr_stats.get("mode_pcts", {})
+            mode_str = ", ".join(f"{m}: {p:.0f}%" for m, p in sorted(pcts.items()))
+            lines.append(
+                f"| {s_key} | {CONFIG_LABELS[c_key]} "
+                f"| {gmr_stats['total_decisions']} "
+                f"| {mode_str} "
+                f"| {gmr_stats['mode_switches']} |"
+            )
+    return "\n".join(lines)
+
+
+def generate_parameter_coupling_table(all_stats: dict) -> str:
+    """参数耦合分析表（Markdown）。
+
+    分析 CR、F、GMR 三个参数的独立性和相关性，
+    验证解耦控制的有效性。
+    """
+    lines = [
+        "## 参数解耦分析\n",
+        "| 场景 | 配置 | CR-F相关系数 | CR均值±标准差 | F均值±标准差 | GMR模式分布 | 样本数 |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for s_key in SCENARIOS:
+        for c_key in ["A0", "A3"]:
+            stats = all_stats.get(f"{s_key}_{c_key}", {})
+            raw = stats.get("_raw", [])
+            coupling = compute_parameter_coupling(raw)
+            if not coupling:
+                lines.append(f"| {s_key} | {CONFIG_LABELS[c_key]} | --- | --- | --- | --- | --- |")
+                continue
+            corr = coupling.get("cr_f_correlation", 0)
+            # 相关系数解释
+            if abs(corr) < 0.1:
+                corr_label = "≈ 0 (独立)"
+            elif abs(corr) < 0.3:
+                corr_label = f"{corr:+.4f} (弱相关)"
+            elif abs(corr) < 0.7:
+                corr_label = f"{corr:+.4f} (中等相关)"
+            else:
+                corr_label = f"{corr:+.4f} (强相关)"
+            cr_str = f"{coupling['cr_mean']:.4f} ± {coupling['cr_std']:.4f}"
+            f_str = f"{coupling['f_mean']:.4f} ± {coupling['f_std']:.4f}"
+            gmr_counts = coupling.get("gmr_mode_counts", {})
+            gmr_str = ", ".join(f"{m}: {c}" for m, c in sorted(gmr_counts.items())) if gmr_counts else "---"
+            lines.append(
+                f"| {s_key} | {CONFIG_LABELS[c_key]} "
+                f"| {corr_label} | {cr_str} | {f_str} | {gmr_str} | {coupling['n_samples']} |"
+            )
+    return "\n".join(lines)
+
+
+def generate_latex_decoupled_table(all_stats: dict) -> str:
+    """解耦参数控制 LaTeX 表。
+
+    展示 LLM 独立控制 CR、F、GMR 的统计证据。
+    """
+    lines = [
+        r"\begin{table}[htbp]", r"\centering",
+        r"\caption{解耦参数控制分析：LLM 独立决定 CR、F、GMR 的效果}",
+        r"\label{tab:decoupled_params}",
+        r"\begin{tabular}{llcccc}", r"\toprule",
+        r"场景 & 配置 & CR-F 相关系数 & CR 均值 & F 均值 & GMR 模式 \\",
+        r"\midrule",
+    ]
+    for s_key in SCENARIOS:
+        first_row = True
+        for c_key in ["A0", "A3"]:
+            stats = all_stats.get(f"{s_key}_{c_key}", {})
+            raw = stats.get("_raw", [])
+            coupling = compute_parameter_coupling(raw)
+            if not coupling:
+                continue
+            s_label = SCENARIO_LABELS[s_key] if first_row else ""
+            c_label = CONFIG_LABELS[c_key]
+            corr = coupling.get("cr_f_correlation", 0)
+            if c_key == "A0":
+                corr_str = "---"  # A0 无 LLM 控制
+            else:
+                corr_str = f"{corr:+.4f}"
+            cr_str = f"{coupling['cr_mean']:.3f}"
+            f_str = f"{coupling['f_mean']:.3f}"
+            gmr_counts = coupling.get("gmr_mode_counts", {})
+            if gmr_counts:
+                gmr_str = ", ".join(f"{m}: {c}" for m, c in sorted(gmr_counts.items()))
+            else:
+                gmr_str = "formula"
+            if first_row:
+                lines.append(f"{s_label} & {c_label} & {corr_str} & {cr_str} & {f_str} & {gmr_str} \\\\")
+                first_row = False
+            else:
+                lines.append(f" & {c_label} & {corr_str} & {cr_str} & {f_str} & {gmr_str} \\\\")
         lines.append(r"\midrule")
     lines.pop()
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]

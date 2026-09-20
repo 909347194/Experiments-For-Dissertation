@@ -27,3 +27,15 @@ SCENARIO_LABELS = {
     "S1": r"balanced ($N=M=10$)",
     "S2": r"srp ($N=10, M=20$)",
 }
+
+# GMR 模式颜色（用于 GMR 模式分布图）
+GMR_MODE_COLORS = {
+    "auto": "#1f77b4",
+    "on": "#d62728",
+    "off": "#2ca02c",
+}
+GMR_MODE_LABELS = {
+    "auto": "Auto (formula)",
+    "on": "Force Extinction",
+    "off": "No Extinction",
+}

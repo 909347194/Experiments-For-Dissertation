@@ -147,6 +147,42 @@ class RecordingLLMDESolver:
         self._solver = solver
         self._rec = recorder
 
+    @staticmethod
+    def _build_llm_decision_map(llm_decisions: list[dict]) -> dict[int, dict]:
+        """构建 generation → LLM decision 的映射表。
+
+        用于在记录每代数据时，查找该代最近一次 LLM 决策中覆写的 F 和 GMR 值。
+        """
+        decision_map: dict[int, dict] = {}
+        for d in llm_decisions:
+            gen = d.get("generation", 0)
+            decision = d.get("decision", {})
+            decision_map[gen] = {
+                "f": decision.get("f", None),
+                "gmr_mode": decision.get("gmr_mode", "auto"),
+            }
+        return decision_map
+
+    @staticmethod
+    def _get_active_llm_params(
+        gen: int, decision_map: dict[int, dict],
+    ) -> tuple[float | None, str]:
+        """获取在给定代数生效的 LLM 覆写参数（F, GMR mode）。
+
+        查找逻辑：取 generation <= gen 的最近一次 LLM 决策。
+        LLM 决策从触发代开始生效，持续到下一次 LLM 决策。
+        """
+        active_f = None
+        active_gmr = "auto"
+        for d_gen in sorted(decision_map.keys()):
+            if d_gen > gen:
+                break
+            params = decision_map[d_gen]
+            if params["f"] is not None:
+                active_f = params["f"]
+            active_gmr = params["gmr_mode"]
+        return active_f, active_gmr
+
     def solve(self, cost_matrix, n_uavs, n_targets, **kwargs):
         """代理 solve，从 trajectory 提取 LLM 决策记录。"""
         result = self._solver.solve(cost_matrix, n_uavs, n_targets, **kwargs)
@@ -168,12 +204,19 @@ class RecordingLLMDESolver:
                     temperature=d.get("llm_input", {}).get("temperature", 0.0),
                 )
 
+            # 构建 generation → LLM decision 映射（用于提取 F/GMR 覆写）
+            decision_map = self._build_llm_decision_map(llm_decisions)
+
             # 从 trajectory 提取每代记录（跳过 LLM 决策条目，
             # 它们的 fitness_best 来自 _build_state_before_init()=inf，
             # 不代表真实种群状态，混入会污染收敛曲线起点）
             for entry in trajectory.get_all():
                 if entry.llm_module:
                     continue
+                # 查找该代生效的 LLM 覆写参数
+                active_f, active_gmr = self._get_active_llm_params(
+                    entry.generation, decision_map,
+                )
                 self._rec.record_generation(
                     gen=entry.generation,
                     fitness_best=entry.fitness_best,
@@ -182,6 +225,8 @@ class RecordingLLMDESolver:
                     f_scale=entry.f_scale,
                     diversity=entry.diversity,
                     feasible_ratio=entry.feasible_ratio,
+                    f_override=active_f,
+                    gmr_mode=active_gmr,
                 )
 
         return result

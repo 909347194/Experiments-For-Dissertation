@@ -323,13 +323,20 @@ def summarize_llm_decisions(results: list[dict]) -> dict:
     for d in decisions:
         mod = d.get("module", "unknown")
         if mod not in modules:
-            modules[mod] = {"count": 0, "durations": [], "cr_values": []}
+            modules[mod] = {"count": 0, "durations": [], "cr_values": [],
+                           "f_values": [], "gmr_modes": []}
         modules[mod]["count"] += 1
         modules[mod]["durations"].append(d.get("duration", 0))
         if mod == "search_controller":
-            cr = d.get("parsed_decision", {}).get("cr", 0)
-            if cr:
+            parsed = d.get("parsed_decision", {})
+            cr = parsed.get("cr")
+            if cr is not None:
                 modules[mod]["cr_values"].append(cr)
+            f_val = parsed.get("f")
+            if f_val is not None:
+                modules[mod]["f_values"].append(f_val)
+            gmr = parsed.get("gmr_mode", "auto")
+            modules[mod]["gmr_modes"].append(gmr)
     summary = {}
     for mod, data in modules.items():
         durs = np.array(data["durations"])
@@ -344,4 +351,194 @@ def summarize_llm_decisions(results: list[dict]) -> dict:
             summary[mod]["cr_std"] = round(float(crs.std()), 4)
             summary[mod]["cr_min"] = round(float(crs.min()), 4)
             summary[mod]["cr_max"] = round(float(crs.max()), 4)
+        if data["f_values"]:
+            fvs = np.array(data["f_values"])
+            summary[mod]["f_mean"] = round(float(fvs.mean()), 4)
+            summary[mod]["f_std"] = round(float(fvs.std()), 4)
+            summary[mod]["f_min"] = round(float(fvs.min()), 4)
+            summary[mod]["f_max"] = round(float(fvs.max()), 4)
+        if data["gmr_modes"]:
+            modes = data["gmr_modes"]
+            total = len(modes)
+            summary[mod]["gmr_mode_counts"] = {
+                m: modes.count(m) for m in set(modes)
+            }
+            summary[mod]["gmr_mode_pcts"] = {
+                m: round(modes.count(m) / total * 100, 1) for m in set(modes)
+            }
     return summary
+
+
+# ── F 轨迹分析 ────────────────────────────────────────────
+
+def extract_f_histories(results: list[dict]) -> list[tuple[list[int], list[float]]]:
+    """提取各 run 的 F 值轨迹。
+
+    优先使用 f_override（LLM 直接指定），回退到 f_scale（公式推导）。
+    Returns:
+        [(gens, f_values), ...]
+    """
+    histories = []
+    for r in results:
+        recs = r.get("generation_records", [])
+        if not recs:
+            continue
+        gens = []
+        f_vals = []
+        for rec in recs:
+            gens.append(rec.get("gen", 0))
+            # f_override 为 LLM 直接指定值，f_scale 为公式推导值
+            f_val = rec.get("f_override")
+            if f_val is None:
+                f_val = rec.get("f_scale", 0.5)
+            f_vals.append(f_val)
+        if gens:
+            histories.append((gens, f_vals))
+    return histories
+
+
+def extract_f_override_histories(results: list[dict]) -> list[tuple[list[int], list[float]]]:
+    """提取各 run 中 LLM 实际覆写 F 的代数和值（仅 f_override 非 None 的代）。
+
+    Returns:
+        [(gens, f_values), ...]  gens/f_values 等长，只含 LLM 覆写代。
+    """
+    histories = []
+    for r in results:
+        recs = r.get("generation_records", [])
+        if not recs:
+            continue
+        gens = []
+        f_vals = []
+        for rec in recs:
+            f_val = rec.get("f_override")
+            if f_val is not None:
+                gens.append(rec.get("gen", 0))
+                f_vals.append(f_val)
+        if gens:
+            histories.append((gens, f_vals))
+    return histories
+
+
+def compute_f_stats(results: list[dict]) -> dict:
+    """计算 F 值的统计信息。"""
+    histories = extract_f_histories(results)
+    if not histories:
+        return {}
+    # 收集所有 F 值
+    all_f = []
+    for _, f_vals in histories:
+        all_f.extend(f_vals)
+    if not all_f:
+        return {}
+    arr = np.array(all_f)
+    # LLM 覆写统计
+    override_histories = extract_f_override_histories(results)
+    all_override_f = []
+    for _, f_vals in override_histories:
+        all_override_f.extend(f_vals)
+    result = {
+        "f_mean": round(float(arr.mean()), 4),
+        "f_std": round(float(arr.std()), 4),
+        "f_min": round(float(arr.min()), 4),
+        "f_max": round(float(arr.max()), 4),
+        "f_median": round(float(np.median(arr)), 4),
+        "n_runs": len(histories),
+    }
+    if all_override_f:
+        oarr = np.array(all_override_f)
+        result["f_override_count"] = len(all_override_f)
+        result["f_override_mean"] = round(float(oarr.mean()), 4)
+        result["f_override_std"] = round(float(oarr.std()), 4)
+    return result
+
+
+# ── GMR 模式分析 ──────────────────────────────────────────
+
+def extract_gmr_histories(results: list[dict]) -> list[list[str]]:
+    """提取各 run 的 GMR 模式轨迹。
+
+    Returns:
+        [[mode_gen0, mode_gen1, ...], ...]
+    """
+    histories = []
+    for r in results:
+        recs = r.get("generation_records", [])
+        if not recs:
+            continue
+        modes = [rec.get("gmr_mode", "auto") for rec in recs]
+        histories.append(modes)
+    return histories
+
+
+def compute_gmr_stats(results: list[dict]) -> dict:
+    """计算 GMR 模式的统计信息。"""
+    decisions = extract_llm_decisions(results)
+    sc_decisions = [d for d in decisions if d.get("module") == "search_controller"]
+    if not sc_decisions:
+        return {}
+    all_modes = []
+    for d in sc_decisions:
+        parsed = d.get("parsed_decision", {})
+        gmr = parsed.get("gmr_mode", "auto")
+        all_modes.append(gmr)
+    total = len(all_modes)
+    mode_counts = {m: all_modes.count(m) for m in set(all_modes)}
+    mode_pcts = {m: round(c / total * 100, 1) for m, c in mode_counts.items()}
+    # 模式切换次数
+    switches = sum(1 for i in range(1, len(all_modes)) if all_modes[i] != all_modes[i-1])
+    return {
+        "total_decisions": total,
+        "mode_counts": mode_counts,
+        "mode_pcts": mode_pcts,
+        "mode_switches": switches,
+    }
+
+
+# ── 解耦参数控制综合分析 ──────────────────────────────────
+
+def compute_parameter_coupling(results: list[dict]) -> dict:
+    """分析 CR、F、GMR 三个参数之间的独立性和相关性。
+
+    Returns:
+        含相关系数、独立性指标的字典。
+    """
+    if not results:
+        return {}
+    # 收集所有 run 的 CR 和 F 序列
+    all_cr = []
+    all_f = []
+    for r in results:
+        recs = r.get("generation_records", [])
+        for rec in recs:
+            cr = rec.get("cr", 0.5)
+            f_val = rec.get("f_override")
+            if f_val is None:
+                f_val = rec.get("f_scale", 0.5)
+            all_cr.append(cr)
+            all_f.append(f_val)
+    if len(all_cr) < 10:
+        return {}
+    cr_arr = np.array(all_cr)
+    f_arr = np.array(all_f)
+    # Pearson 相关系数
+    if np.std(cr_arr) > 1e-10 and np.std(f_arr) > 1e-10:
+        corr = float(np.corrcoef(cr_arr, f_arr)[0, 1])
+    else:
+        corr = 0.0
+    # GMR 模式统计
+    gmr_modes = []
+    for r in results:
+        recs = r.get("generation_records", [])
+        for rec in recs:
+            gmr_modes.append(rec.get("gmr_mode", "auto"))
+    mode_counts = {m: gmr_modes.count(m) for m in set(gmr_modes)} if gmr_modes else {}
+    return {
+        "cr_f_correlation": round(corr, 4),
+        "cr_mean": round(float(cr_arr.mean()), 4),
+        "cr_std": round(float(cr_arr.std()), 4),
+        "f_mean": round(float(f_arr.mean()), 4),
+        "f_std": round(float(f_arr.std()), 4),
+        "gmr_mode_counts": mode_counts,
+        "n_samples": len(all_cr),
+    }

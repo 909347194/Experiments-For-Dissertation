@@ -26,12 +26,19 @@ from .tables import (
     generate_latex_convergence_speed_table,
     generate_initial_pop_table,
     generate_latex_initial_pop_table,
+    generate_f_stats_table,
+    generate_gmr_stats_table,
+    generate_parameter_coupling_table,
+    generate_latex_decoupled_table,
 )
 from .plots import (
     plot_convergence_comparison,
     plot_cr_comparison,
     plot_boxplot,
     plot_time_breakdown,
+    plot_f_comparison,
+    plot_gmr_mode_distribution,
+    plot_parameter_control_overview,
     HAS_MPL,
 )
 
@@ -93,6 +100,18 @@ def main():
     print(init_pop_md)
 
     # ═══════════════════════════════════════════════════════════
+    # 4.5 解耦参数控制分析（CR / F / GMR 独立控制）
+    # ═══════════════════════════════════════════════════════════
+    f_stats_md = generate_f_stats_table(all_stats)
+    print(f"\n{f_stats_md}")
+
+    gmr_stats_md = generate_gmr_stats_table(all_stats)
+    print(f"\n{gmr_stats_md}")
+
+    coupling_md = generate_parameter_coupling_table(all_stats)
+    print(f"\n{coupling_md}")
+
+    # ═══════════════════════════════════════════════════════════
     # 5. 保存 Markdown
     # ═══════════════════════════════════════════════════════════
     md_out = FIGURES_DIR / "summary_table.md"
@@ -106,6 +125,13 @@ def main():
         f.write("\n\n## 初始种群质量对比\n\n")
         f.write(init_pop_md)
         f.write(f"\n\n{llm_summary}\n")
+        f.write("\n\n## F (Scale Factor) 统计\n\n")
+        f.write(f_stats_md)
+        f.write("\n\n## GMR (Extinction) 模式分析\n\n")
+        f.write(gmr_stats_md)
+        f.write("\n\n## 参数解耦分析\n\n")
+        f.write(coupling_md)
+        f.write("\n")
 
     # ═══════════════════════════════════════════════════════════
     # 6. CSV
@@ -148,6 +174,8 @@ def main():
         + generate_latex_convergence_speed_table(conv_gens) + "\n\n"
         r"\section*{初始种群质量对比}" "\n\n"
         + generate_latex_initial_pop_table(init_pop) + "\n\n"
+        r"\section*{解耦参数控制分析}" "\n\n"
+        + generate_latex_decoupled_table(all_stats) + "\n\n"
         r"\end{document}" "\n"
     )
     tex_out = FIGURES_DIR / "ablation_tables.tex"
@@ -163,6 +191,9 @@ def main():
             plot_convergence_comparison(all_stats, s_key, FIGURES_DIR)
             plot_cr_comparison(all_stats, s_key, FIGURES_DIR)
             plot_boxplot(all_stats, s_key, FIGURES_DIR)
+            plot_f_comparison(all_stats, s_key, FIGURES_DIR)
+            plot_gmr_mode_distribution(all_stats, s_key, FIGURES_DIR)
+            plot_parameter_control_overview(all_stats, s_key, FIGURES_DIR)
         plot_time_breakdown(all_stats, FIGURES_DIR)
     else:
         print("\n(matplotlib 不可用，跳过图表)")

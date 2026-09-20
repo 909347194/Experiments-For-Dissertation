@@ -13,10 +13,16 @@ try:
 except ImportError:
     HAS_MPL = False
 
-from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, CONFIG_COLORS, SCENARIO_LABELS
+from .constants import (
+    SCENARIOS, CONFIGS, CONFIG_LABELS, CONFIG_COLORS,
+    SCENARIO_LABELS, GMR_MODE_COLORS, GMR_MODE_LABELS,
+)
 from .stats import (
     extract_convergence_curves,
     extract_cr_histories,
+    extract_f_histories,
+    extract_f_override_histories,
+    extract_gmr_histories,
     compute_convergence_stats,
     curve_gens,
 )
@@ -159,3 +165,171 @@ def plot_time_breakdown(all_stats: dict, figures_dir: Path):
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  时间分解: {out}")
+
+
+def plot_f_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
+    """F 值轨迹对比图：展示各配置的 F 值随代数变化。
+
+    仅绘制 A3_full（含 LLM 覆写）和 A0（公式推导基线）。
+    """
+    if not HAS_MPL:
+        return
+    fig, ax = plt.subplots(figsize=(10, 4))
+    for config_key in ["A0", "A3"]:
+        stats = all_stats.get(f"{scenario_key}_{config_key}", {})
+        raw = stats.get("_raw", [])
+        if not raw:
+            continue
+        series = []
+        for r in raw:
+            recs = r.get("generation_records", [])
+            if not recs:
+                continue
+            gens = [rec["gen"] for rec in recs]
+            # 优先 f_override，回退 f_scale
+            f_vals = [
+                rec.get("f_override") if rec.get("f_override") is not None
+                else rec.get("f_scale", 0.5)
+                for rec in recs
+            ]
+            series.append((gens, f_vals))
+        if not series:
+            continue
+        min_len = min(len(f) for _, f in series)
+        arr = np.array([f[:min_len] for _, f in series])
+        mean = arr.mean(axis=0)
+        std = arr.std(axis=0)
+        x = np.array(series[0][0][:min_len])
+        color = CONFIG_COLORS[config_key]
+        ax.plot(x, mean, label=CONFIG_LABELS[config_key], color=color, linewidth=1.5)
+        ax.fill_between(x, mean - std, mean + std, alpha=0.15, color=color)
+    ax.set_xlabel("Generation", fontsize=12)
+    ax.set_ylabel("Scale Factor (F)", fontsize=12)
+    ax.set_title(f"F Trajectory — {SCENARIO_LABELS.get(scenario_key, scenario_key)}", fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 2)
+    fig.tight_layout()
+    out = figures_dir / f"f_trajectory_{scenario_key}.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"  F 轨迹: {out}")
+
+
+def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: Path):
+    """GMR 模式分布图：展示 LLM 在各代选择的 GMR 模式分布。
+
+    仅对 A3_full（含 search_controller）有意义。
+    """
+    if not HAS_MPL:
+        return
+    stats = all_stats.get(f"{scenario_key}_A3", {})
+    raw = stats.get("_raw", [])
+    if not raw:
+        return
+    # 收集所有 run 的 GMR 模式序列
+    all_modes = []
+    for r in raw:
+        recs = r.get("generation_records", [])
+        modes = [rec.get("gmr_mode", "auto") for rec in recs]
+        if modes:
+            all_modes.append(modes)
+    if not all_modes:
+        return
+    # 统计每代各模式的 run 比例
+    max_len = max(len(m) for m in all_modes)
+    # 只看有 LLM 决策的代（即 gmr_mode != "auto" 的代或有变化的代）
+    # 为简洁，按决策点统计
+    mode_counts = {}
+    for modes in all_modes:
+        for m in modes:
+            mode_counts[m] = mode_counts.get(m, 0) + 1
+    total = sum(mode_counts.values())
+    if total == 0:
+        return
+    fig, ax = plt.subplots(figsize=(6, 4))
+    labels = []
+    sizes = []
+    colors = []
+    for mode in sorted(mode_counts.keys()):
+        labels.append(GMR_MODE_LABELS.get(mode, mode))
+        sizes.append(mode_counts[mode])
+        colors.append(GMR_MODE_COLORS.get(mode, "#999999"))
+    wedges, texts, autotexts = ax.pie(
+        sizes, labels=labels, colors=colors, autopct="%1.1f%%",
+        startangle=90, textprops={"fontsize": 10},
+    )
+    for autotext in autotexts:
+        autotext.set_fontsize(9)
+    ax.set_title(
+        f"GMR Mode Distribution — {SCENARIO_LABELS.get(scenario_key, scenario_key)}\n"
+        f"(A3 Full, {len(raw)} runs, {total} decisions)",
+        fontsize=12,
+    )
+    fig.tight_layout()
+    out = figures_dir / f"gmr_distribution_{scenario_key}.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"  GMR 分布: {out}")
+
+
+def plot_parameter_control_overview(all_stats: dict, scenario_key: str, figures_dir: Path):
+    """参数控制总览：展示 A3 Full 中 CR、F、GMR 的独立控制效果。
+
+    三行子图：CR 轨迹、F 轨迹、GMR 模式时间线。
+    """
+    if not HAS_MPL:
+        return
+    stats = all_stats.get(f"{scenario_key}_A3", {})
+    raw = stats.get("_raw", [])
+    if not raw:
+        return
+    # 选取第一个 run 作为示例
+    r = raw[0]
+    recs = r.get("generation_records", [])
+    if not recs:
+        return
+    gens = [rec["gen"] for rec in recs]
+    cr_vals = [rec.get("cr", 0.5) for rec in recs]
+    f_vals = [
+        rec.get("f_override") if rec.get("f_override") is not None
+        else rec.get("f_scale", 0.5)
+        for rec in recs
+    ]
+    gmr_modes = [rec.get("gmr_mode", "auto") for rec in recs]
+    # 将 GMR 模式转为数值
+    gmr_num_map = {"auto": 0, "off": 1, "on": 2}
+    gmr_nums = [gmr_num_map.get(m, 0) for m in gmr_modes]
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
+    # CR
+    axes[0].plot(gens, cr_vals, color="#1f77b4", linewidth=1.2)
+    axes[0].set_ylabel("CR", fontsize=11)
+    axes[0].set_ylim(0, 1)
+    axes[0].set_title(
+        f"Parameter Control Overview — {SCENARIO_LABELS.get(scenario_key, scenario_key)}\n"
+        f"(A3 Full, seed={r.get('seed', '?')})",
+        fontsize=12,
+    )
+    axes[0].grid(True, alpha=0.3)
+    # F
+    axes[1].plot(gens, f_vals, color="#ff7f0e", linewidth=1.2)
+    axes[1].set_ylabel("F (Scale Factor)", fontsize=11)
+    axes[1].set_ylim(0, 2)
+    axes[1].grid(True, alpha=0.3)
+    # GMR
+    # 用散点+阶梯线表示离散模式
+    axes[2].step(gens, gmr_nums, where="post", color="#2ca02c", linewidth=1.2, alpha=0.7)
+    # 标记模式切换点
+    for i in range(1, len(gmr_modes)):
+        if gmr_modes[i] != gmr_modes[i - 1]:
+            axes[2].axvline(x=gens[i], color="red", alpha=0.3, linestyle="--", linewidth=0.8)
+    axes[2].set_yticks([0, 1, 2])
+    axes[2].set_yticklabels(["Auto", "Off", "On"], fontsize=9)
+    axes[2].set_ylabel("GMR Mode", fontsize=11)
+    axes[2].set_xlabel("Generation", fontsize=11)
+    axes[2].grid(True, alpha=0.3)
+    fig.tight_layout()
+    out = figures_dir / f"param_control_overview_{scenario_key}.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"  参数控制总览: {out}")
