@@ -31,7 +31,7 @@ def build_cost_matrix_and_evaluator():
 
 # DMDE 参数
 POP_SIZE = 50
-MAX_GENERATIONS = 1000
+MAX_GENERATIONS = 500
 ZETA = 3
 DELTA = 0.3
 SEEDS = list(range(42, 72))  # 30 runs
