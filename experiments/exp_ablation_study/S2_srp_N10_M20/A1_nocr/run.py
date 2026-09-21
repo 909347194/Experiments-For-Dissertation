@@ -11,6 +11,7 @@ _ABSTRACTION_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ABSTRACTION_DIR.parents[1]))
 sys.path.insert(0, str(_ABSTRACTION_DIR))
 
+import os
 from core import build_scenario, run_llm_dmde, save_results, load_modules_config
 
 
@@ -36,7 +37,9 @@ def main():
         print(f"  Run {i+1}/{args.runs} (seed={seed}) ...", end=" ", flush=True)
         r = run_llm_dmde(seed, cost_matrix, evaluator, n_uavs, n_targets,
                          POP_SIZE, MAX_GENERATIONS, ZETA, DELTA,
-                         llm_config_path, modules)
+                         llm_config_path, modules,
+                         model=os.environ.get("LLM_MODEL"),
+                         fallback_model=os.environ.get("LLM_FALLBACK_MODEL"))
         results.append(r)
         print(f"fitness={r['best_fitness']:.2f} total={r['total_time']:.1f}s "
               f"llm={r['llm_time']:.1f}s calls={r['llm_call_count']}")

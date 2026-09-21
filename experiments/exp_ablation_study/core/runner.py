@@ -43,7 +43,9 @@ def run_llm_dmde(seed: int, cost_matrix: np.ndarray, evaluator: object,
                  n_uavs: int, n_targets: int,
                  pop_size: int, max_generations: int,
                  zeta: int, delta: float,
-                 llm_config_path: Path, modules_config: dict) -> dict:
+                 llm_config_path: Path, modules_config: dict,
+                 model: str | None = None,
+                 fallback_model: str | None = None) -> dict:
     """运行 LLM-DMDE（A1），记录 LLM 决策详情 + 每代轨迹。"""
     from src.algorithms.algorithm_llm_enhanced_dmde.solvers.llm_enhanced_dmde_solver import (
         LLMEnhancedDMDESolver, LLMEnhancedDMDEConfig,
@@ -59,6 +61,40 @@ def run_llm_dmde(seed: int, cost_matrix: np.ndarray, evaluator: object,
         llm_config_path=str(llm_config_path),
         modules=modules_config,
     )
+
+    # 模型覆盖：写入临时 YAML，优先级高于原始配置
+    if model or fallback_model:
+        import yaml, tempfile, os
+        with open(llm_config_path, "r", encoding="utf-8") as f:
+            llm_cfg = yaml.safe_load(f) or {}
+        if model:
+            llm_cfg["model"] = model
+        if fallback_model:
+            llm_cfg["fallback_model"] = fallback_model
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8",
+        )
+        yaml.dump(llm_cfg, tmp, allow_unicode=True, default_flow_style=False)
+        tmp.close()
+        cfg.llm_config_path = tmp.name
+        try:
+            result = _run_llm_dmde_inner(cfg, seed, cost_matrix, evaluator,
+                                         n_uavs, n_targets)
+        finally:
+            os.unlink(tmp.name)
+        return result
+
+    return _run_llm_dmde_inner(cfg, seed, cost_matrix, evaluator,
+                               n_uavs, n_targets)
+
+
+def _run_llm_dmde_inner(cfg, seed, cost_matrix, evaluator,
+                        n_uavs, n_targets) -> dict:
+    from src.algorithms.algorithm_llm_enhanced_dmde.solvers.llm_enhanced_dmde_solver import (
+        LLMEnhancedDMDESolver,
+    )
+    from .solver_wrappers import RecordingLLMDESolver
+
     solver = LLMEnhancedDMDESolver(cfg)
     recorder = RunRecorder(seed)
     wrapped = RecordingLLMDESolver(solver, recorder)

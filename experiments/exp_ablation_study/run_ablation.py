@@ -5,6 +5,8 @@
     python run_ablation.py --runs 30
     python run_ablation.py --scenario S1 --runs 30
     python run_ablation.py --config A1 --runs 30
+    python run_ablation.py --model Qwen/Qwen3.8-27B --runs 30
+    python run_ablation.py --model Qwen/Qwen3.8-27B --fallback-model Qwen/Qwen3-14B --runs 30
 """
 
 import argparse
@@ -26,18 +28,29 @@ def main():
     parser = argparse.ArgumentParser(description="消融实验统一入口")
     parser.add_argument("--runs", type=int, default=30, help="每组运行次数")
     parser.add_argument("--scenario", choices=["S1", "S2", "all"], default="all")
-    parser.add_argument("--config", choices=["A0", "A1", "all"], default="all")
+    parser.add_argument("--config", choices=["A0", "A1", "A1c", "A1n", "all"], default="all",
+                        help="A0=Vanilla DMDE, A1=解耦SC, A1c=耦合CR, A1n=CR锁定")
+    parser.add_argument("--model", type=str, default=None,
+                        help="覆盖 llm_config.yaml 中的 model（如 Qwen/Qwen3.8-27B）")
+    parser.add_argument("--fallback-model", type=str, default=None,
+                        help="覆盖 llm_config.yaml 中的 fallback_model")
     args = parser.parse_args()
 
     scenarios = SCENARIOS if args.scenario == "all" else [
         s for s in SCENARIOS if args.scenario in s
     ]
-    configs = CONFIGS if args.config == "all" else [
-        c for c in CONFIGS if args.config in c
-    ]
+    config_map = {"A0": "A0_dmde", "A1": "A1_cr_control", "A1c": "A1_coupled", "A1n": "A1_nocr"}
+    if args.config == "all":
+        configs = CONFIGS
+    else:
+        configs = [config_map[args.config]] if args.config in config_map else []
 
     total = len(scenarios) * len(configs)
     print(f"消融实验：{len(scenarios)} 场景 × {len(configs)} 配置 = {total} 组，每组 {args.runs} runs")
+    if args.model:
+        print(f"模型覆盖: {args.model}")
+    if args.fallback_model:
+        print(f"回退模型: {args.fallback_model}")
     print(f"项目根目录: {PROJECT_ROOT}\n")
 
     idx = 0
@@ -52,10 +65,18 @@ def main():
 
             print(f"[{idx}/{total}] {scenario}/{config} ...")
             t0 = time.time()
+
+            # 构造子进程环境变量
+            env = {**__import__("os").environ, "PYTHONPATH": str(PROJECT_ROOT)}
+            if args.model:
+                env["LLM_MODEL"] = args.model
+            if args.fallback_model:
+                env["LLM_FALLBACK_MODEL"] = args.fallback_model
+
             result = subprocess.run(
                 [sys.executable, str(run_py), "--runs", str(args.runs)],
                 cwd=str(run_py.parent),
-                env={**__import__("os").environ, "PYTHONPATH": str(PROJECT_ROOT)},
+                env=env,
             )
             elapsed = time.time() - t0
             status = "OK" if result.returncode == 0 else f"FAIL({result.returncode})"
