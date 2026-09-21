@@ -46,7 +46,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent
 FIGURES_DIR = SCRIPT_DIR / "figures"
 FIGURES_DIR.mkdir(exist_ok=True)
 
+PROJECT_ROOT = SCRIPT_DIR.parents[1]
+
 sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(PROJECT_ROOT))
 from core.results import load_results
 
 

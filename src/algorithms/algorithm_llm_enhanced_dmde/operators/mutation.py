@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from .crossover import dynamic_crossover_rate, hybrid_differential_population
+from .crossover import (
+    dynamic_crossover_rate,
+    hybrid_differential_population,
+    mutate_with_strategy,
+)
 from .scale_factor import dynamic_scale_factor_batch
 
 
@@ -52,7 +56,9 @@ def mutate_population(
         f_scale:        直接使用此 F（None = 由公式 3-11 批量计算）。
         strategy:       变异策略。None = 原始 CR 切换；
                         "rand/1" = 全部使用 DE/rand/1；
-                        "best/2" = 全部使用 DE/best/2。
+                        "best/1" = 全部使用 DE/best/1；
+                        "best/2" = 全部使用 DE/best/2；
+                        "mixed" = 混合策略（按 CR 切换 rand/1 + best/2）。
 
     Returns:
         试验向量矩阵。
@@ -77,8 +83,9 @@ def mutate_population(
     else:
         f_values = dynamic_scale_factor_batch(cr, pop_size, rng)
 
-    # 混合差分
-    return hybrid_differential_population(
-        cost_vectors, best_idx, f_values, cr, rng,
-        strategy=strategy,
+    # 委托给 mutate_with_strategy，统一处理所有策略
+    # （None → 原始 CR 切换，"rand/1"/"best/1"/"best/2"/"mixed" 各有对应）
+    return mutate_with_strategy(
+        cost_vectors, best_idx, f_values, cr,
+        strategy=strategy or "mixed", rng=rng,
     )
