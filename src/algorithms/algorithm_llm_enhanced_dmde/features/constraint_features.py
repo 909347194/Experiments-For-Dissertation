@@ -17,14 +17,24 @@ from __future__ import annotations
 import numpy as np
 
 
-def compute_feasible_ratio(population: list) -> float:
+def compute_feasible_ratio(
+    population: list,
+    feasibility_threshold: float | None = None,
+) -> float:
     """计算种群中可行解的比例。
 
-    可行解定义为 fitness < 1e10（即未被惩罚的解）。
-    这是因为不可行解通常会被赋予极大的惩罚适应度值。
+    可行解判定逻辑：
+    1. 如果显式传入 feasibility_threshold，用该阈值判断。
+    2. 否则，自动推断阈值：取种群中最小 fitness 的 1.05 倍作为边界，
+       或 1e-6（全零/接近零可行时的保底）。
+    3. fitness 必须有限（inf/nan 视为不可行）。
+
+    原始版本使用固定的 1e10 阈值，对约束违反量级在 10^5 ~ 10^6 的
+    问题（如 SRP 场景）会把所有个体误判为可行。
 
     Args:
         population: 种群个体列表。每个个体需有 fitness 属性。
+        feasibility_threshold: 显式阈值（None = 自动推断）。
 
     Returns:
         可行解比例，范围 [0.0, 1.0]。
@@ -32,9 +42,23 @@ def compute_feasible_ratio(population: list) -> float:
     if not population:
         return 0.0
 
+    fitness_values = [ind.fitness for ind in population]
+    finite_values = [f for f in fitness_values if np.isfinite(f)]
+
+    if not finite_values:
+        return 0.0
+
+    if feasibility_threshold is not None:
+        threshold = feasibility_threshold
+    else:
+        # 自动推断：取最小 fitness 的 1.05 倍（允许 5% 容差）
+        # 全零 fitness 时代价为 0，用 1e-6 保底
+        min_fit = min(finite_values)
+        threshold = max(abs(min_fit) * 1.05, 1e-6)
+
     feasible_count = sum(
-        1 for ind in population
-        if np.isfinite(ind.fitness) and ind.fitness < 1e10
+        1 for f in fitness_values
+        if np.isfinite(f) and f <= threshold
     )
     return feasible_count / len(population)
 
@@ -68,9 +92,23 @@ def compute_violation_distribution(population: list) -> dict[str, float]:
         }
 
     fitness_values = np.array([ind.fitness for ind in population])
+    finite_mask = np.isfinite(fitness_values)
+    finite_values = fitness_values[finite_mask]
 
-    # 分离可行解和不可行解
-    feasible_mask = np.isfinite(fitness_values) & (fitness_values < 1e10)
+    if len(finite_values) == 0:
+        return {
+            "mean": float("inf"),
+            "std": 0.0,
+            "min": float("inf"),
+            "max": float("inf"),
+            "median": float("inf"),
+            "feasible_ratio": 0.0,
+        }
+
+    # 可行解判定：用与 compute_feasible_ratio 相同的自动阈值
+    min_fit = float(np.min(finite_values))
+    threshold = max(abs(min_fit) * 1.05, 1e-6)
+    feasible_mask = finite_mask & (fitness_values <= threshold)
 
     if not np.any(feasible_mask):
         return {

@@ -28,6 +28,8 @@ import json
 import logging
 from typing import Any
 
+import numpy as np
+
 from ..base_module import BaseLLMModule, ModuleState
 from ..prompts import get_prompt
 from ..presets import (
@@ -92,6 +94,9 @@ class LLMSearchControllerModule(BaseLLMModule):
             # 当前档位信息
             "current_preset": state.extra.get("current_preset", "balanced"),
             "current_mutation_strategy": state.extra.get("current_mutation_strategy", "mixed"),
+            # 适应度（LLM 决策的核心参考）
+            "best_fitness": round(state.best_fitness, 2) if np.isfinite(state.best_fitness) else None,
+            "mean_fitness": round(state.mean_fitness, 2) if np.isfinite(state.mean_fitness) else None,
             # 约束可行性
             "feasible_ratio": round(state.feasible_ratio, 4),
             "violation_mean": round(state.violation_mean, 4),
