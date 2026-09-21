@@ -8,14 +8,20 @@ SCENARIOS = {
 CONFIGS = {
     "A0": "A0_dmde",
     "A1": "A1_cr_control",
+    "A1c": "A1_coupled",
+    "A1n": "A1_nocr",
 }
 CONFIG_LABELS = {
     "A0": "Vanilla DMDE",
     "A1": "LLM-DMDE (Preset SC)",
+    "A1c": "LLM-DMDE (Coupled CR)",
+    "A1n": "LLM-DMDE (No CR)",
 }
 CONFIG_COLORS = {
     "A0": "#1f77b4",
     "A1": "#ff7f0e",
+    "A1c": "#2ca02c",
+    "A1n": "#d62728",
 }
 SCENARIO_LABELS = {
     "S1": r"balanced ($N=M=10$)",

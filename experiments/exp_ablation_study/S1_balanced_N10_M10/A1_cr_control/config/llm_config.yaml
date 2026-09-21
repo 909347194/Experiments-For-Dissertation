@@ -1,8 +1,8 @@
 # A1: 仅启用 CR Control — SiliconFlow
 provider: siliconflow
-model: Qwen/Qwen3-14B
+model: Qwen/Qwen3.8-27B
 # 主模型（27B）重试耗尽后切换到的快速回退模型（14B，同一 provider）
-fallback_model: Qwen/Qwen3.8-27B
+fallback_model: Qwen/Qwen3-14B
 temperature: 0.7
 max_tokens: 8192
 timeout: 60

@@ -19,7 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[1]
 
 SCENARIOS = ["S1_balanced_N10_M10", "S2_srp_N10_M20"]
-CONFIGS = ["A0_dmde", "A1_cr_control"]
+CONFIGS = ["A0_dmde", "A1_cr_control", "A1_coupled", "A1_nocr"]
 
 
 def main():
