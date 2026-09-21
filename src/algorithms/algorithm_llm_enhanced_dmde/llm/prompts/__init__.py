@@ -550,6 +550,33 @@ _SC_PRESET_DECISION = """\
 - If uncertain → **hold**. A wrong change can harm search; holding cannot.
 """
 
+# ---- 耦合对照模式专用诊断块（仅 CR，F/GMR 由公式推导）----
+_SC_PARAM_EFFECT_COUPLED = """\
+Evaluate the current CR setting. Remember F and GMR are NOT yours to set — \
+they follow CR through the formulas, so judge CR on all three effects at once:
+
+**CR effectiveness**:
+- df vs df_shadow is the PRIMARY attribution signal. See Shadow Control section.
+- If acceptance_rate is very low, the population is not accepting offspring \
+regardless of CR — CR is not the bottleneck.
+- If all recent stages used the same CR, you have no comparative data. \
+The absence of evidence is NOT evidence of absence.
+
+**Coupled side effects to weigh before changing CR**:
+- Raising CR also raises F (larger mutation steps) and pushes GMR toward 0 \\n(fewer extinctions). Useful when the search is stagnant AND diversity is low.
+- Lowering CR also lowers F (finer steps) and raises GMR (more extinctions). \\
+Useful when the search is close to a good solution but overshoots it.
+- If the population is fighting constraints (low feasible_ratio), be careful: \
+raising CR inflates F and may worsen feasibility."""
+
+_SC_DECISION_COUPLED = """\
+- If the search is actively improving → **hold**.
+- If stagnating and CR has not been varied → consider an **exploratory change** to CR. \
+  Weigh its coupled side effects on F and GMR before choosing.
+- If uncertain → **hold**. A wrong change can harm search; holding cannot.
+- You cannot trigger extinction directly. If you believe extinction is needed, \
+the only way to influence it is through CR (lower CR raises GMR)."""
+
 _SC_FROZEN = """\
 ## Preset Restrictions This Round
 The solver measured that over the last stage your parameters produced no improvement
