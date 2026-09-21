@@ -210,6 +210,10 @@ class ModuleState:
     # "auto" = 公式 3-12 (CR < δ 时触发)
     # "on"   = 强制触发灭绝
     # "off"  = 强制不触发灭绝
+    mutation_strategy: str = "mixed"   # 变异策略: "rand/1" | "best/1" | "mixed"
+    # "rand/1" = 纯 DE/rand/1（探索）
+    # "best/1" = 纯 DE/best/1（开发）
+    # "mixed"  = 混合策略（公式 3-10，按 CR 比例混合 rand/1 + best/2）
     # 代价矩阵信息
     cost_matrix: np.ndarray | None = None
     n_uavs: int = 0

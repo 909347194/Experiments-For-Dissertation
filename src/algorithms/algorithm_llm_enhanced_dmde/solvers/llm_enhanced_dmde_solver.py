@@ -32,7 +32,7 @@ import numpy as np
 from ..base.base_optimizer import BaseOptimizer, SolverResult
 from ..representation.encoder import PopulationEncoder, Individual
 from ..representation.inverse_mapper import inverse_phi
-from ..operators.crossover import dynamic_crossover_rate
+from ..operators.crossover import dynamic_crossover_rate, mutate_with_strategy
 from ..operators.scale_factor import dynamic_scale_factor_batch
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
@@ -243,6 +243,8 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         llm_cr_prev_gen = 0                             # 上次 LLM CR 决定时的代数
         llm_f_override = None    # None = 使用公式 3-11，float = LLM 直接指定 F
         llm_gmr_mode = "auto"    # "auto" = 公式 3-12,"on" = 强制灭绝,"off" = 禁止灭绝
+        llm_mutation_strategy = "mixed"  # "rand/1" | "best/1" | "mixed"
+        llm_preset_name = "balanced"     # 当前生效的预设档位名称
         # GMR / F 失败冻结守卫的连续失败计数（跨 stage 累积，实质改善时清零）
         gmr_fail_streak = 0
         f_fail_streak = 0
@@ -358,6 +360,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     cost_history, actual_cr, actual_f_mean, 1.0 - gen / cfg.max_generations,
                 )
                 state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
+                # 注入当前档位信息（供 prompt 展示）
+                state.extra["current_preset"] = llm_preset_name
+                state.extra["current_mutation_strategy"] = llm_mutation_strategy
+                state.extra["prev_preset"] = llm_preset_name
 
                 # ---- Δ 趋势信号(闭环控制核心) ----
                 current_fitness = best_individual.fitness
@@ -556,6 +562,8 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                         "gen_start": llm_cr_prev_gen,
                         "gen_end": gen,
                         "stage_length": gen - llm_cr_prev_gen,
+                        "preset": llm_preset_name,
+                        "mutation_strategy": llm_mutation_strategy,
                         "cr": round(actual_cr, 4),
                         "best_fitness": round(current_fitness, 2),
                         "delta_fitness": round(delta_fitness, 4) if delta_fitness is not None else None,
@@ -614,6 +622,14 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     llm_f_action_prev = f_action
                     # GMR: 从 decision 读取 LLM 指定模式(冻结时已是 "auto")
                     llm_gmr_mode = decision.get("gmr_mode", "auto")
+                    # 档位: 从 decision 读取 preset 名称和变异策略
+                    # hold 时不更新（保持当前值）
+                    new_preset = decision.get("preset")
+                    if new_preset and new_preset != "hold":
+                        llm_preset_name = new_preset
+                        new_strategy = decision.get("mutation_strategy")
+                        if new_strategy:
+                            llm_mutation_strategy = new_strategy
 
                     # ---- 影子种群重置为当前主种群(下一 stage 的对照起点) ----
                     if shadow_enabled:
@@ -642,10 +658,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             cost_vectors = np.array([ind.cost_vector for ind in population])
             fitness_values = np.array([ind.fitness for ind in population])
 
-            # 混合变异产生试验向量
-            trial_vectors = mutate_population(
-                cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng,
-                cr=cr, f_scale=f_values,
+            # 混合变异产生试验向量（使用 LLM 选择的变异策略）
+            trial_vectors = mutate_with_strategy(
+                cost_vectors, best_idx, f_values, cr,
+                strategy=llm_mutation_strategy, rng=rng,
             )
 
             # 对每个个体执行反映射 + 评估 + 贪婪选择
