@@ -17,9 +17,12 @@
 \toprule
 场景 & 配置 & Best & Mean $\pm$ Std & Median \\
 \midrule
-balanced ($N=M=10$) & Vanilla DMDE & \textbf{325672.23} & 325730.76 $\pm$ 101.38 & \textbf{325672.23} \\
- & +CR Control & \textbf{325672.23} & \textbf{325707.35} $\pm$ 78.53 & \textbf{325672.23} \\
- & Full LLM-DMDE & \textbf{325672.23} & 325730.76 $\pm$ 101.38 & \textbf{325672.23} \\
+balanced ($N=M=10$) & Vanilla DMDE & \textbf{325672.23} & \textbf{325730.76} $\pm$ 101.38 & \textbf{325672.23} \\
+ & +CR Control & \textbf{325672.23} & 325806.33 $\pm$ 189.65 & 325806.33 \\
+ & Full LLM-DMDE & \textbf{325672.23} & \textbf{325730.76} $\pm$ 101.38 & \textbf{325672.23} \\
+\midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 572483.70 & 589120.27 $\pm$ 6934.98 & 588953.85 \\
+ & +CR Control & \textbf{564918.98} & \textbf{583580.78} $\pm$ 17808.16 & \textbf{585432.82} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -33,9 +36,11 @@ balanced ($N=M=10$) & Vanilla DMDE & \textbf{325672.23} & 325730.76 $\pm$ 101.38
 场景 & 配置 & 总耗时(s) & DMDE(s) & LLM总耗时(s) & LLM Init(s) & LLM CR(s) \\
 \midrule
 balanced ($N=M=10$) & Vanilla DMDE & 59.2 & 59.2 & --- & --- & --- \\
- & +CR Control & 110.6 & 45.0 & 65.6 & --- & 65.6 \\
+ & +CR Control & 212.3 & 90.5 & 121.8 & --- & 121.8 \\
  & Full LLM-DMDE & 166.6 & 41.2 & 125.4 & 60.4 & 65.1 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 28.9 & 28.9 & --- & --- & --- \\
+ & +CR Control & 488.6 & 45.8 & 442.9 & --- & 442.9 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -81,9 +86,11 @@ srp ($N=10, M=20$) & --- & --- & --- \\
 场景 & 配置 & 达到 90\% 改进 & 达到 95\% 改进 & 达到 99\% 改进 \\
 \midrule
 balanced ($N=M=10$) & Vanilla DMDE & 152 & 152 & 240 \\
- & +CR Control & 130 & 160 & 280 \\
+ & +CR Control & 55 & 185 & 215 \\
  & Full LLM-DMDE & 100 & 270 & 460 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 123 & 260 & 498 \\
+ & +CR Control & 60 & 420 & 860 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -101,6 +108,46 @@ balanced ($N=M=10$) & Vanilla DMDE & 152 & 152 & 240 \\
 balanced ($N=M=10$) & Vanilla DMDE & 465205.83 $\pm$ 8362.75 & 467620.05 \\
  & Full LLM-DMDE & 455851.13 $\pm$ 5175.79 & 457157.33 \\
 \midrule
+srp ($N=10, M=20$) & Vanilla DMDE & 1199749.92 $\pm$ 25165.40 & 1193026.50 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{解耦参数控制分析}
+
+\begin{table}[htbp]
+\centering
+\caption{解耦参数控制分析：LLM 独立决定 CR、F、GMR 的效果}
+\label{tab:decoupled_params}
+\begin{tabular}{llcccc}
+\toprule
+场景 & 配置 & CR-F 相关系数 & CR 均值 & F 均值 & GMR 模式 \\
+\midrule
+balanced ($N=M=10$) & Vanilla DMDE & --- & 0.326 & 0.929 & auto: 3003 \\
+ & Full LLM-DMDE & +0.9373 & 0.589 & 1.036 & auto: 303 \\
+\midrule
+srp ($N=10, M=20$) & Vanilla DMDE & --- & 0.326 & 0.929 & auto: 30030 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{解耦效应分析}
+
+\begin{table}[htbp]
+\centering
+\caption{解耦效应分析：$A_3$（解耦 CR/F/GMR）vs $A_1$（仅 LLM 控 CR，F/GMR 耦合）}
+\label{tab:decoupling_effect}
+\begin{tabular}{lcc}
+\toprule
+指标 & S1 (balanced) & S2 (srp) \\
+\midrule
+$A_1$ 均值 (耦合) & --- & --- \\
+$A_3$ 均值 (解耦) & --- & --- \\
+$\Delta_{A_3-A_1}$ (总增益) & --- & --- \\
+$\Delta_{A_2-A_0}$ (PopInit) & --- & --- \\
+纯解耦效应 & --- & --- \\
+$p$-value (Mann-Whitney U) & --- & --- \\
+收敛速度 (95\% 改进) & --- & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
