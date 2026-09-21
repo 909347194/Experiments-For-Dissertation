@@ -44,88 +44,88 @@ PRESETS: dict[str, StrategyPreset] = {
     "explore": StrategyPreset(
         name="explore",
         label="全局探索",
-        description="高步长、高交叉率，侧重探索未知区域",
+        description="High step size, high crossover rate, focuses on exploring unknown regions",
         mutation_strategy="rand/1",
         cr=0.8,
         f=1.2,
         gmr_mode="off",
         when_to_use=(
-            "种群多样性低、搜索停滞、需要跳出当前区域时。"
-            "DE/rand/1 用 3 个随机个体构造变异向量，不依赖最优个体，"
-            "天然具有强探索能力。"
+            "Low diversity, stagnation, need to escape the current region. "
+            "DE/rand/1 uses 3 random individuals to construct the mutation vector, "
+            "independent of the best individual — inherently strong exploration."
         ),
     ),
     "balanced": StrategyPreset(
         name="balanced",
         label="均衡",
-        description="探索与开发兼顾的中间档位",
+        description="Middle ground between exploration and exploitation",
         mutation_strategy="mixed",
         cr=0.5,
         f=0.7,
         gmr_mode="auto",
         when_to_use=(
-            "搜索状态不明确、没有强烈信号指向某一方向时。"
-            "混合策略（rand/1 + best/2 按 CR 比例混合）"
-            "在探索与开发之间自动平衡。"
+            "Search state is unclear, no strong signal pointing in any direction. "
+            "Mixed strategy (rand/1 + best/2 blended by CR) "
+            "automatically balances exploration and exploitation."
         ),
     ),
     "exploit": StrategyPreset(
         name="exploit",
         label="局部开发",
-        description="小步长、低交叉率，侧重精细搜索当前最优附近",
+        description="Small step size, low crossover rate, fine-tunes near current best",
         mutation_strategy="best/1",
         cr=0.3,
         f=0.5,
         gmr_mode="off",
         when_to_use=(
-            "搜索正在稳步改进、可行解占比高、需要加速收敛时。"
-            "DE/best/1 以最优个体为基准构造变异向量，"
-            "所有变异都朝最优方向收缩，收敛快。"
+            "Search is steadily improving, high feasible ratio, need faster convergence. "
+            "DE/best/1 uses the best individual as the base for mutation — "
+            "all mutations shrink toward the best, fast convergence."
         ),
     ),
     "recover": StrategyPreset(
         name="recover",
         label="停滞恢复",
-        description="强制灭绝重置 + 探索型参数，打破搜索僵局",
+        description="Force extinction reset + exploratory parameters to break stagnation",
         mutation_strategy="rand/1",
         cr=0.8,
         f=1.0,
         gmr_mode="on",
         when_to_use=(
-            "搜索深度停滞（stagnation_raw 很高）、"
-            "其他档位均未带来改善时。"
-            "GMR=on 强制灭绝最差个体并重新初始化，"
-            "配合 rand/1 大步长注入多样性。"
-            "⚠️ 会临时牺牲 fitness，仅在穷尽其他手段后使用。"
+            "Deep stagnation (stagnation_raw very high), "
+            "other presets have not helped. "
+            "GMR=on forces extinction of the worst individuals and reinitializes them, "
+            "combined with rand/1 and high F to inject diversity. "
+            "Warning: temporarily sacrifices fitness — use only as last resort."
         ),
     ),
     "rand-1": StrategyPreset(
         name="rand-1",
         label="纯 rand/1",
-        description="固定 DE/rand/1 策略，排除 best 干扰",
+        description="Fixed DE/rand/1 strategy, isolates exploration effect",
         mutation_strategy="rand/1",
         cr=0.6,
         f=0.8,
         gmr_mode="auto",
         when_to_use=(
-            "想测试纯探索策略的效果、或当前混合策略中"
-            "rand/1 贡献更大时。"
-            "不依赖最优个体，每个个体独立探索，"
-            "适合多样性充足但收敛方向不明确的阶段。"
+            "Want to test pure exploration, or when rand/1 contributes more "
+            "in the current mixed strategy. "
+            "Independent of the best individual, each individual explores independently — "
+            "suitable when diversity is sufficient but convergence direction is unclear."
         ),
     ),
     "best-1": StrategyPreset(
         name="best-1",
         label="纯 best/1",
-        description="固定 DE/best/1 策略，排除 rand 干扰",
+        description="Fixed DE/best/1 strategy, isolates exploitation effect",
         mutation_strategy="best/1",
         cr=0.4,
         f=0.6,
         gmr_mode="auto",
         when_to_use=(
-            "想测试纯开发策略的效果、或当前最优个体质量很高时。"
-            "所有变异以最优个体为锚点，收敛速度快，"
-            "但容易陷入局部最优。"
+            "Want to test pure exploitation, or when the current best individual is high quality. "
+            "All mutations anchored to the best individual — fast convergence "
+            "but prone to local optima."
         ),
     ),
 }
@@ -167,7 +167,7 @@ def format_presets_compact() -> str:
     parts = []
     for p in PRESETS.values():
         parts.append(
-            f"- **{p.name}** ({p.label}): {p.description}\n"
+            f"- **{p.name}**: {p.description}\n"
             f"  mutation={p.mutation_strategy}, CR={p.cr}, F={p.f}, GMR={p.gmr_mode}\n"
             f"  Use when: {p.when_to_use}"
         )

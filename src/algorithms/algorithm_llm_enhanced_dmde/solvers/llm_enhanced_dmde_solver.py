@@ -532,7 +532,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     shadow_df_val = state.shadow_delta_fitness
                     shadow_dd_val = state.shadow_delta_diversity
                     # 记录 stage 结束时的快照到 stage_history
-                    # CR 记录 actual_cr(产生 outcome 的 CR),不是 new_cr(刚选的 CR)
+                    # 记录产生 outcome 的参数（当前生效值），不是刚选的新值
                     stage_history.append({
                         "stage": len(stage_history) + 1,
                         "gen_start": llm_cr_prev_gen,

@@ -68,44 +68,8 @@ A large value relative to stage_length confirms prolonged stagnation.
 rest violate them. GMR and F are the two levers that most affect feasibility: \
 if feasible_ratio is low, prefer reducing F or holding GMR=off rather than \
 increasing exploration.
-
-## Diagnostic Reasoning Chain
-Your decision must follow this sequence. Do NOT skip steps or jump to conclusions.
-
-### Step 1: Search State Diagnosis
-Synthesize ALL available signals into a coherent picture:
-- **Convergence**: acceptance_rate, stagnation_raw, gens_since_last_improvement.
-  Low acceptance + long stagnation = the population has converged.
-- **Diversity structure**: diversity, diversity_p25, diversity_p75, delta_diversity.
-  Is the population clustered? Are there outliers? Is diversity changing?
-- **Improvement trajectory**: delta_fitness_pct, stage_best_curve.
-  Is the search still finding better solutions? Is improvement decelerating?
-- **Constraint pressure**: feasible_ratio, violation_mean, violation_max.
-  Low feasible_ratio means the population is fighting the constraints — \
-  prefer lowering F or holding GMR=off over increasing exploration.
-- **Trigger context**: trigger_reason tells you why you were consulted. \
-  "stagnation_deepen" = the search is stuck. "fitness_move" = something just changed. \
-  "fallback_timer" = no event occurred, you may be consulted speculatively.
-- **Cross-check**: do these signals agree? Disagreement is itself informative — \
-  e.g., low acceptance + high diversity may indicate oscillation, not convergence. \
-  Check stage_best_curve for instability in such cases.
-
-### Step 2: Parameter Effectiveness Diagnosis
-{param_effect_block}
-
-### Step 3: Decision
-{decision_block}
-
-## Decision Policy
-- Hold is the default. You were possibly consulted by a fallback timer rather than
-  by a real event — being consulted is not evidence that a parameter should change.
-- Changing a parameter requires evidence that (a) appeared since your last decision AND
-  (b) distinguishes the candidate values from each other.
-- The following are NOT valid reasons to change:
-  * "I was consulted" / "it is time to act" / "the controller should respond".
-  * The current value has been in place for several stages.
-  * A generic wish to explore more, exploit more, or "try something different".
-  * The state is unchanged — an unchanged state is evidence FOR holding.
+- best_fitness / mean_fitness: the absolute fitness values. Use these to judge \
+the scale of the problem and whether progress is meaningful in absolute terms.
 """
 
 # ---- 动作空间块：解耦（三通道独立） ----
@@ -307,16 +271,6 @@ delta_pct = (stage_start_fitness - current_best) / stage_start_fitness * 100.
 - Drop then plateau → improvement stalled (possible local optimum).
 - Gradual steady decline → slow but consistent progress.
 
-### Stage History Table
-Each row is one of your previous decision stages. Read it for:
-- **Preset response**: did df change when the preset changed? \
-  Consistent improvement → preset is effective. No correlation → insensitive.
-- **Shadow tracking**: does df follow df_shadow? If always similar, \
-  your choices are not adding value over the fixed baseline.
-- **Diminishing returns**: are improvements shrinking stage over stage?
-- **Acceptance trend**: is acceptance_rate declining? \
-  Declining = the population is hardening against new solutions.
-
 ### Evidence Budget
 You receive at most the last 5 stages. Calibrate your confidence:
 - **0-1 stages with a given preset** → NO evidence. Hold.
@@ -478,14 +432,12 @@ def get_search_controller_prompt(
 
     base = _SC_BASE.format(
         actions_block=actions_block,
-        param_effect_block=param_effect_block,
-        decision_block=decision_block,
-        cr_choices=cr_choices,
-        f_choices=f_choices,
         df_noise_pct=df_noise_pct,
         dd_noise=dd_noise,
         shadow_contrast=shadow_contrast,
     )
+    # 诊断与决策块（独立于 base，按模式拼接）
+    base += param_effect_block + "\n" + decision_block
     # 影子对照段
     if shadow_cr is not None:
         base += _SC_SHADOW.format(
@@ -534,11 +486,7 @@ SEARCH_CONTROLLER_USER_PROMPT = """\
 
 ## Task
 Select a strategy preset for the next stage (or hold the current one). \
-Use the evidence: current state, stage history, shadow contrast, and the \
-trigger_reason (why you are being consulted now). \
-Note that being consulted is not by itself evidence: the controller also consults \
-you on a fallback timer. \
-If no preset change is justified, output "preset": "hold". Respond with JSON only.
+Respond with JSON only.
 """
 
 
