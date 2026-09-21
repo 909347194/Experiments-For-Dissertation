@@ -321,3 +321,61 @@ def plot_parameter_control_overview(all_stats: dict, scenario_key: str, figures_
     fig.savefig(out, dpi=150)
     plt.close(fig)
     print(f"  参数控制总览: {out}")
+
+
+def plot_preset_distribution(all_stats: dict, scenario_key: str, figures_dir: Path):
+    """Preset 档位选择分布图（饼图 + 时间线）。"""
+    if not HAS_MPL:
+        return
+    from .stats import compute_preset_stats, extract_preset_histories
+    stats = all_stats.get(f"{scenario_key}_A1", {})
+    raw = stats.get("_raw", [])
+    if not raw:
+        return
+    preset_stats = compute_preset_stats(raw)
+    if not preset_stats:
+        return
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    # 左图：档位选择饼图
+    counts = preset_stats.get("preset_counts", {})
+    if counts:
+        labels = list(counts.keys())
+        sizes = list(counts.values())
+        colors = plt.cm.Set3(range(len(labels)))
+        wedges, texts, autotexts = ax1.pie(
+            sizes, labels=labels, autopct="%1.0f%%",
+            colors=colors, startangle=90,
+        )
+        ax1.set_title(
+            f"Preset Selection Distribution\n"
+            f"({SCENARIO_LABELS.get(scenario_key, scenario_key)}, "
+            f"{preset_stats['total_decisions']} decisions, "
+            f"{preset_stats['preset_switches']} switches)",
+            fontsize=11,
+        )
+    # 右图：第一个 run 的档位时间线
+    r = raw[0]
+    recs = r.get("generation_records", [])
+    if recs:
+        gens = [rec["gen"] for rec in recs]
+        presets = [rec.get("preset", "") for rec in recs]
+        # 离散化
+        preset_names = sorted(set(p for p in presets if p))
+        if preset_names:
+            preset_to_num = {p: i for i, p in enumerate(preset_names)}
+            preset_nums = [preset_to_num.get(p, -1) for p in presets]
+            ax2.scatter(gens, preset_nums, s=8, alpha=0.6, c="#1f77b4")
+            ax2.set_yticks(range(len(preset_names)))
+            ax2.set_yticklabels(preset_names, fontsize=9)
+            ax2.set_ylabel("Preset", fontsize=11)
+            ax2.set_xlabel("Generation", fontsize=11)
+            ax2.set_title(
+                f"Preset Timeline (seed={r.get('seed', '?')})",
+                fontsize=11,
+            )
+            ax2.grid(True, alpha=0.3)
+    fig.tight_layout()
+    out = figures_dir / f"preset_distribution_{scenario_key}.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"  档位分布: {out}")

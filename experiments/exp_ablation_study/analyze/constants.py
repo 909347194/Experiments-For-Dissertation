@@ -11,7 +11,7 @@ CONFIGS = {
 }
 CONFIG_LABELS = {
     "A0": "Vanilla DMDE",
-    "A1": "+Search Controller",
+    "A1": "LLM-DMDE (Preset SC)",
 }
 CONFIG_COLORS = {
     "A0": "#1f77b4",

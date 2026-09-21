@@ -205,18 +205,38 @@ def summarize_llm_decisions(results: list[dict]) -> dict:
         mod = d.get("module", "unknown")
         if mod not in modules:
             modules[mod] = {"count": 0, "durations": [], "cr_values": [],
-                           "f_values": [], "gmr_modes": []}
+                           "f_values": [], "gmr_modes": [], "presets": []}
         modules[mod]["count"] += 1
         modules[mod]["durations"].append(d.get("duration", 0))
         if mod == "search_controller":
             parsed = d.get("parsed_decision", {})
+            # v3 preset 格式
+            preset = parsed.get("preset", "")
+            if preset:
+                modules[mod]["presets"].append(preset)
+            # CR/F/GMR（从 preset 解包或旧格式直接读取）
             cr = parsed.get("cr")
+            if cr is None and preset and preset != "hold":
+                from src.algorithms.algorithm_llm_enhanced_dmde.llm.presets import get_preset
+                p = get_preset(preset)
+                if p:
+                    cr = p.cr
             if cr is not None:
                 modules[mod]["cr_values"].append(cr)
-            f_val = parsed.get("f")
+            f_val = parsed.get("f") or parsed.get("override_f")
+            if f_val is None and preset and preset != "hold":
+                from src.algorithms.algorithm_llm_enhanced_dmde.llm.presets import get_preset
+                p = get_preset(preset)
+                if p:
+                    f_val = p.f
             if f_val is not None:
                 modules[mod]["f_values"].append(f_val)
             gmr = parsed.get("gmr_mode", "auto")
+            if gmr == "auto" and preset and preset != "hold":
+                from src.algorithms.algorithm_llm_enhanced_dmde.llm.presets import get_preset
+                p = get_preset(preset)
+                if p:
+                    gmr = p.gmr_mode
             modules[mod]["gmr_modes"].append(gmr)
     summary = {}
     for mod, data in modules.items():
@@ -247,6 +267,21 @@ def summarize_llm_decisions(results: list[dict]) -> dict:
             summary[mod]["gmr_mode_pcts"] = {
                 m: round(modes.count(m) / total * 100, 1) for m in set(modes)
             }
+        if data.get("presets"):
+            presets = data["presets"]
+            total = len(presets)
+            summary[mod]["preset_counts"] = {
+                p: presets.count(p) for p in sorted(set(presets))
+            }
+            summary[mod]["preset_pcts"] = {
+                p: round(presets.count(p) / total * 100, 1) for p in sorted(set(presets))
+            }
+            # 档位切换次数
+            switches = sum(
+                1 for i in range(1, len(presets))
+                if presets[i] != presets[i - 1]
+            )
+            summary[mod]["preset_switches"] = switches
     return summary
 
 
@@ -335,6 +370,52 @@ def compute_f_stats(results: list[dict]) -> dict:
 
 
 # ── GMR 模式分析 ──────────────────────────────────────────
+
+# ── Preset 档位分析 ──────────────────────────────────────────
+
+def extract_preset_histories(results: list[dict]) -> list[list[str]]:
+    """提取各 run 的 preset 档位轨迹。
+
+    Returns:
+        [[preset_gen0, preset_gen1, ...], ...]
+    """
+    histories = []
+    for r in results:
+        recs = r.get("generation_records", [])
+        if not recs:
+            continue
+        presets = [rec.get("preset", "") for rec in recs]
+        histories.append(presets)
+    return histories
+
+
+def compute_preset_stats(results: list[dict]) -> dict:
+    """计算 preset 档位的统计信息。"""
+    decisions = extract_llm_decisions(results)
+    sc_decisions = [d for d in decisions if d.get("module") == "search_controller"]
+    if not sc_decisions:
+        return {}
+    all_presets = []
+    for d in sc_decisions:
+        parsed = d.get("parsed_decision", {})
+        preset = parsed.get("preset", "hold")
+        all_presets.append(preset)
+    total = len(all_presets)
+    preset_counts = {p: all_presets.count(p) for p in sorted(set(all_presets))}
+    preset_pcts = {p: round(c / total * 100, 1) for p, c in preset_counts.items()}
+    switches = sum(
+        1 for i in range(1, len(all_presets))
+        if all_presets[i] != all_presets[i - 1]
+    )
+    return {
+        "total_decisions": total,
+        "preset_counts": preset_counts,
+        "preset_pcts": preset_pcts,
+        "preset_switches": switches,
+    }
+
+
+# ── GMR 模式分析（保留向后兼容） ──────────────────────────────
 
 def extract_gmr_histories(results: list[dict]) -> list[list[str]]:
     """提取各 run 的 GMR 模式轨迹。

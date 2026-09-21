@@ -32,6 +32,7 @@ class GenerationRecord:
     # LLM 独立覆写的参数（None = 使用公式推导值）
     f_override: float | None = None     # LLM 直接指定的 F 值
     gmr_mode: str = "auto"              # LLM 指定的 GMR 模式: "auto" | "on" | "off"
+    preset: str = ""                     # LLM 选择的策略档位名称（空 = 无 LLM 决策）
     # LLM 决策（仅在 LLM 触发代有值）
     llm_module: str = ""
     llm_decision: dict = field(default_factory=dict)
@@ -92,6 +93,7 @@ class RunRecorder:
                           diversity: float = 0.0, feasible_ratio: float = 0.0,
                           f_override: float | None = None,
                           gmr_mode: str = "auto",
+                          preset: str = "",
                           llm_module: str = "", llm_decision: dict = None,
                           llm_reasoning: str = "", llm_call_duration: float = 0.0):
         """记录一代进化数据。"""
@@ -99,7 +101,7 @@ class RunRecorder:
             gen=gen, fitness_best=fitness_best, fitness_mean=fitness_mean,
             cr=cr, f_scale=f_scale, diversity=diversity,
             feasible_ratio=feasible_ratio,
-            f_override=f_override, gmr_mode=gmr_mode,
+            f_override=f_override, gmr_mode=gmr_mode, preset=preset,
             llm_module=llm_module, llm_decision=llm_decision or {},
             llm_reasoning=llm_reasoning, llm_call_duration=llm_call_duration,
         ))
@@ -162,6 +164,7 @@ class RunRecorder:
                     "f_scale": round(float(g.f_scale), 4),
                     "f_override": round(float(g.f_override), 4) if g.f_override is not None else None,
                     "gmr_mode": g.gmr_mode,
+                    "preset": g.preset,
                     "diversity": round(float(g.diversity), 4),
                     "llm_module": g.llm_module,
                 }

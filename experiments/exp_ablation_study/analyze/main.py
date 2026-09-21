@@ -32,6 +32,7 @@ from .plots import (
     plot_f_comparison,
     plot_gmr_mode_distribution,
     plot_parameter_control_overview,
+    plot_preset_distribution,
     HAS_MPL,
 )
 
@@ -161,6 +162,7 @@ def main():
             plot_f_comparison(all_stats, s_key, FIGURES_DIR)
             plot_gmr_mode_distribution(all_stats, s_key, FIGURES_DIR)
             plot_parameter_control_overview(all_stats, s_key, FIGURES_DIR)
+            plot_preset_distribution(all_stats, s_key, FIGURES_DIR)
         plot_time_breakdown(all_stats, FIGURES_DIR)
     else:
         print("\n(matplotlib 不可用，跳过图表)")

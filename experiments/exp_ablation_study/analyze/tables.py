@@ -7,6 +7,7 @@ from .constants import SCENARIOS, CONFIGS, CONFIG_LABELS, SCENARIO_LABELS
 from .stats import (
     mannwhitney_test, p_mark, summarize_llm_decisions,
     compute_f_stats, compute_gmr_stats, compute_parameter_coupling,
+    compute_preset_stats,
 )
 
 
@@ -147,7 +148,7 @@ def generate_markdown_table(all_stats: dict) -> str:
 def generate_llm_decision_summary(all_stats: dict) -> str:
     lines = [
         "## LLM 决策分析\n",
-        "| 场景 | 配置 | LLM模块 | 调用次数 | 平均耗时(s) | 总耗时(s) | CR均值 | CR标准差 | F均值 | F标准差 | GMR模式分布 |",
+        "| 场景 | 配置 | LLM模块 | 调用次数 | 平均耗时(s) | 总耗时(s) | 档位分布 | 档位切换 | CR均值 | F均值 | GMR模式分布 |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s_key in SCENARIOS:
@@ -160,9 +161,16 @@ def generate_llm_decision_summary(all_stats: dict) -> str:
                 continue
             for mod_name, mod_data in summary.items():
                 cr_mean = f"{mod_data.get('cr_mean', 0):.4f}" if "cr_mean" in mod_data else "---"
-                cr_std = f"{mod_data.get('cr_std', 0):.4f}" if "cr_std" in mod_data else "---"
                 f_mean = f"{mod_data.get('f_mean', 0):.4f}" if "f_mean" in mod_data else "---"
-                f_std = f"{mod_data.get('f_std', 0):.4f}" if "f_std" in mod_data else "---"
+                # Preset 分布
+                preset_pcts = mod_data.get("preset_pcts", {})
+                if preset_pcts:
+                    preset_str = ", ".join(
+                        f"{p}:{v:.0f}%" for p, v in sorted(preset_pcts.items())
+                    )
+                else:
+                    preset_str = "---"
+                preset_switches = mod_data.get("preset_switches", "---")
                 # GMR 模式分布
                 gmr_pcts = mod_data.get("gmr_mode_pcts", {})
                 if gmr_pcts:
@@ -174,8 +182,9 @@ def generate_llm_decision_summary(all_stats: dict) -> str:
                 lines.append(
                     f"| {s_key} | {CONFIG_LABELS[c_key]} | {mod_name} "
                     f"| {mod_data['total_calls']} | {mod_data['avg_duration']:.3f} "
-                    f"| {mod_data['total_duration']:.1f} | {cr_mean} | {cr_std} "
-                    f"| {f_mean} | {f_std} | {gmr_str} |"
+                    f"| {mod_data['total_duration']:.1f} "
+                    f"| {preset_str} | {preset_switches} "
+                    f"| {cr_mean} | {f_mean} | {gmr_str} |"
                 )
     return "\n".join(lines)
 
