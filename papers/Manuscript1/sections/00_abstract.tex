@@ -5,18 +5,26 @@
 %==============================================================================
 
 Differential evolution (DE) is widely adopted for multi-UAV cooperative path
-planning, yet its performance hinges on two decisions that are usually fixed by
-hand: how the initial population is seeded, and how the crossover rate is set
-along the search. This paper proposes an LLM-enhanced DE framework that
-delegates these two decisions to a large language model (LLM) without changing
-the underlying evolutionary operators. The LLM first repairs and injects a small
-number of feasible solutions into the initial population, and then re-tunes the
-crossover rate at fixed intervals using feedback on fitness improvement and
-population diversity. We evaluate the framework on two scenarios -- a balanced
-assignment task and a scarce-resource task -- against a vanilla DE baseline and
-against its two components in isolation.
-\todo{add one sentence of the key quantitative finding}.
+planning, yet its search behaviour is governed by hyper-parameters that are
+usually tied together by hand-designed equations. In the discrete-mapping DE
+(DMDE) formulation the crossover rate \CR{} determines the scale factor
+\Ffactor{} and the extinction rate \GMR{} through fixed formulas, so the three
+mechanisms can only move together. This paper proposes an LLM-enhanced DE
+framework that decouples these three mechanisms and delegates their
+coordination to a large language model (LLM) without changing the underlying
+evolutionary operators. At fixed intervals the LLM observes constraint
+feasibility, population diversity, fitness improvement, the outcome of its own
+previous decision and a fixed-\CR{} shadow population, and then adjusts \CR{},
+\Ffactor{} and \GMR{} independently. We evaluate the framework on two scenarios
+-- a balanced assignment task and a scarce-resource task -- against a vanilla
+DE baseline, and we additionally isolate the effect of the action space by
+comparing a decoupled, a coupled and a CR-locked control condition.
+% 实测结果（务必如实写入）：离线固定 CR=0.3 在 9/9 组对照中优于所有在线配置。
+\todo{add one sentence of the key quantitative finding: on this static task an
+      offline constant \CR{} = 0.3 outperforms every online variant in 9 out of
+      9 comparisons}.
 The results indicate that \todo{main finding}, while the computational overhead
-introduced by the LLM is reported separately. The proposed framework offers a
-practical route to reuse pretrained language models as plug-in controllers for
-evolutionary optimizers.
+introduced by the LLM is reported separately. The study therefore contributes a
+mechanistic account of when language models should, and should not, be given
+numeric parameter control.
+

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""runner.py — 单次实验运行封装（A0 / A1-A3）
+"""runner.py — 单次实验运行封装（A0 / A1）
 
 集成 RunRecorder 记录完整过程数据。
 """
@@ -44,7 +44,7 @@ def run_llm_dmde(seed: int, cost_matrix: np.ndarray, evaluator: object,
                  pop_size: int, max_generations: int,
                  zeta: int, delta: float,
                  llm_config_path: Path, modules_config: dict) -> dict:
-    """运行 LLM-DMDE（A1/A2/A3），记录 LLM 决策详情 + 每代轨迹。"""
+    """运行 LLM-DMDE（A1），记录 LLM 决策详情 + 每代轨迹。"""
     from src.algorithms.algorithm_llm_enhanced_dmde.solvers.llm_enhanced_dmde_solver import (
         LLMEnhancedDMDESolver, LLMEnhancedDMDEConfig,
     )
@@ -73,14 +73,12 @@ def run_llm_dmde(seed: int, cost_matrix: np.ndarray, evaluator: object,
     llm_call_count = extra.get("llm_call_count", 0)
     llm_decisions = recorder._llm_decisions
 
-    llm_init_time = sum(d.duration for d in llm_decisions if d.module == "population_init")
     llm_cr_time = sum(d.duration for d in llm_decisions if d.module == "search_controller")
 
     recorder.set_times(
         total=t_total,
         dmde=t_total - llm_time,
         llm=llm_time,
-        llm_init=llm_init_time,
         llm_cr=llm_cr_time,
     )
     # 覆盖 llm_call_count（从 solver 获取准确值）

@@ -3,7 +3,7 @@
 
 职责：
     定义所有 LLM 增强模块必须遵循的统一接口。
-    每个模块负责一种 LLM 增强能力（种群初始化、算子选择、CR 控制等），
+    每个模块负责一种 LLM 增强能力（搜索控制、算子选择、CR 控制等），
     可通过配置独立启用/禁用，支持消融实验。
 
 设计原则：
@@ -229,7 +229,7 @@ class ModuleState:
 class BaseLLMModule(ABC):
     """LLM 增强模块抽象基类。
 
-    所有 LLM 模块（种群初始化、算子选择、CR 控制等）
+    所有 LLM 模块（搜索控制、算子选择、CR 控制等）
     必须继承此类并实现以下方法：
     - name: 模块名称
     - hook_point: 模块在进化循环中的注入点
@@ -266,8 +266,6 @@ class BaseLLMModule(ABC):
         """模块在进化循环中的注入点。
 
         返回值：
-            "before_init"   — 种群初始化之前（用于 LLM 种群初始化）
-            "after_init"    — 种群初始化之后（用于 LLM 种群优化）
             "before_evolve" — 每代进化之前（用于 LLM CR/F 控制）
             "after_evolve"  — 每代进化之后（用于 LLM 算子选择）
             "on_extinction" — 灭绝判断时（用于 LLM 灭绝控制）

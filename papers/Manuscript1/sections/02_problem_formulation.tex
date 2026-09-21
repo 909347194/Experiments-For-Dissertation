@@ -47,7 +47,8 @@ strategy with scaling factor \Ffactor{} and crossover probability \CR{}:
 
 where $\bm{x}_{r_{1}}$ and $\bm{x}_{r_{2}}$ are randomly selected distinct
 individuals. Two hyper-parameters remain fixed throughout the search: the
-initial population is drawn uniformly at random, and \CR{} is held constant.
+\CR{} is held constant and determines \Ffactor{} and \GMR{} through
+hand-designed equations.
 % 待补：说明这两个固定设定为何在本文场景下不够好（可行解比例低、探索-开发失衡）
 \todo{explain why these two fixed settings are inadequate here: too few
       feasible solutions and a poor exploration--exploitation balance.}

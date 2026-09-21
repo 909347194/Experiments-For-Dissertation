@@ -97,7 +97,6 @@ def run_experiment(run_py: Path, n_runs: int, label: str, *,
         env["EXP_SOLVER_PARAMS"] = solver_params
     if ablation:
         env["EXP_MODULES"] = json.dumps({
-            "population_init": {"enabled": False},
             "search_controller": {"enabled": False},
         })
 

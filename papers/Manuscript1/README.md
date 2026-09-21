@@ -28,8 +28,8 @@ make                # 生成 build/main.pdf（首次约 30 s，连续编译 < 5 
 | 2 | Problem Formulation and DMDE | `sections/02_problem_formulation.tex` |
 | 3 | Proposed LLM-Enhanced DMDE | `sections/03_proposed_method.tex` |
 |   | 3.1 Overall Framework | （同文件 `\subsection`） |
-|   | 3.2 LLM-Guided Population Initialization | （同文件 `\subsection`） |
-|   | 3.3 LLM-Guided Adaptive Crossover Rate Control | （同文件 `\subsection`） |
+|   | 3.2 Action-Space Control Conditions | （同文件 `\subsection`） |
+|   | 3.3 LLM-Guided Search Control | （同文件 `\subsection`） |
 | 4 | Experimental Results and Discussion | `sections/04_experiments.tex` |
 |   | 4.1 Experimental Setup | |
 |   | 4.2 Comparison with Existing Methods | |
@@ -89,7 +89,7 @@ Manuscript1/
 │   ├── 00_abstract.tex
 │   ├── 01_introduction.tex
 │   ├── 02_problem_formulation.tex
-│   ├── 03_proposed_method.tex      # 含 3.1/3.2/3.3 三个 \subsection
+│   ├── 03_proposed_method.tex      # 含 3.1/3.2/3.3 三个 \subsection（解耦 + 动作空间 + 搜索控制）
 │   ├── 04_experiments.tex          # 含 4.1/4.2/4.3/4.4
 │   ├── 05_conclusion.tex
 │   └── 06_appendix.tex             # 默认 \iffalse 包裹，需时打开

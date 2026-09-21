@@ -6,12 +6,24 @@
 
 ### 概述
 
-LLM-DMDE 采用**分层干预框架**，LLM 在两个层级参与进化优化过程：
+LLM-DMDE 采用**单层干预框架**，LLM 只在进化过程中参与一次决策闭环：
 
-1. **种群初始化干预**（可选） — LLM 为部分个体提供知识驱动的种子解，其余个体由原始 DMDE 初始化机制生成以保持种群多样性。
-2. **搜索控制** — 每隔 _p_ 代，LLM 观察当前优化状态与近期搜索轨迹，自适应选择交叉率 CR。CR 天然影响公式 3-10 中 `DE/rand/1`（探索）与 `DE/best/2`（开发）的基因比例，从而间接控制搜索策略。
+**搜索控制（Search Controller）** — 每隔 _p_ 代，LLM 观察当前优化状态与近期搜索轨迹，
+自适应调整三个搜索机制参数：
 
-通过上述设计，LLM-DMDE 将**高层自适应参数决策**与**低层数值进化**解耦：LLM 负责"用多大的 CR 搜索"，DMDE 负责差分进化、离散-连续映射、逆映射、约束处理、目标评估和环境选择。
+- **CR**（交叉率）：影响公式 3-10 中 `DE/rand/1`（探索）与 `DE/best/2`（开发）的基因比例；
+- **F**（缩放因子）：原 DMDE 中由公式 3-11 从 CR 推导，解耦后可独立设定；
+- **GMR**（灭绝机制）：原 DMDE 中由公式 3-12 从 CR 推导，解耦后可独立开关。
+
+> 原 DMDE 用手工方程把 CR → F → GMR 绑在一条链上，三者只能协同移动。
+> 本框架的核心主张是**解耦**这条链，让 LLM 依据观测状态独立调整三个通道。
+
+通过上述设计，LLM-DMDE 将**高层自适应参数决策**与**低层数值进化**解耦：
+LLM 负责"以什么搜索姿态继续"，DMDE 负责差分进化、离散-连续映射、逆映射、
+约束处理、目标评估和环境选择。
+
+> 早期版本另有一个 LLM 增强种群初始化模块（PopInit），已从代码库中移除，
+> 理由见 `docs/prompt_design_search_controller.md`。
 
 ### 核心机制：LLM 通过 CR 控制搜索策略
 
@@ -30,33 +42,31 @@ LLM-DMDE 采用**分层干预框架**，LLM 在两个层级参与进化优化过
 
 LLM 根据优化状态（多样性、停滞、可行解比例等）动态选择 CR，间接控制搜索策略，同时保留原始 DMDE 的逐基因随机混合机制。
 
-### 两层干预详解
-
-#### 第一层：LLM 引导的种群初始化（可选）
-
-- LLM 基于结构化问题表示 **S_problem** 生成候选离散分配方案（assignment）
-- S_problem 包含：
-  - **Global Summary** — 问题规模、C_UT/C_TT 统计（min/max/mean/std）、可行性统计（不可行对比例、受限目标数）
-  - **Local Preference Structure** — TopKTargets(U_i)、TopKUAVs(T_j)、高竞争目标、受限目标
-- 候选 assignment 由代码侧按 DMDE 统一编码规则转换为 gene，自动补全 cost
-- 经验证、修复（repair_rules）、评估、quality + diversity 过滤后注入初始种群
-- 注入比例 K = ceil(r × N_pop)，r 为超参数
-- 剩余个体使用原始 DMDE 初始化机制随机生成，确保种群多样性
-
-#### 第二层：搜索控制（CR 自适应选择）
+### 搜索控制详解
 
 - 进化过程中，LLM 每隔 _p_ 代观察一次当前优化状态和近期搜索轨迹
-- 基于观察信息，LLM 选择交叉率 CR（从 {0.1, 0.3, 0.5, 0.7, 0.9} 中选取）
-- 缩放因子 F 按原始 DMDE 公式 3-11 由 CR 批量计算（每个个体独立 F 值）
-- CR 决定后续 _p_ 代的搜索倾向（探索 vs 开发），之后优化状态和轨迹更新并反馈给 LLM 进行下一轮决策
+- 观测特征涵盖：约束可行性（feasible_ratio / violation_mean / violation_max）、
+  多样性水平与结构分位数、Δf / ΔD 趋势、接受率、真实停滞代数（未封顶）、
+  上次动作、触发原因、冻结标志位，以及最近 5 个 stage 的历史表
+- 影子对照（可选）：同起点、固定 CR 的影子种群在同窗口上的增量，作为**可归因锚点**
+- 决策协议：**默认 hold** — 对每个通道先回答"要不要改"，只有答"要"才回答"改成什么"
+- 冻结守卫：CR 无证据守卫、GMR/F 连续无效动作守卫；冻结时输出被强制为
+  `null` / `"auto"` / `"hold"`，并在 prompt 中说明原因
+- 三条件动作空间对照（共用同一观测集与守卫，仅"能动什么"不同）：
+
+| 条件 | 动作空间 | CR |
+|---|---|---|
+| 解耦 | CR + F + GMR | LLM 决策 |
+| 耦合 | 仅 CR（F/GMR 由公式跟随） | LLM 决策 |
+| 去 CR | F + GMR | 锁定 0.3 |
 
 ### LLM 与 DMDE 职责边界
 
 | 职责                   | LLM                          | DMDE                |
 | ---------------------- | ---------------------------- | ------------------- |
-| 种群初始化（候选分配） | ✅ 基于 S_problem 生成候选 assignment（可选） | ✅ 转换为 gene + 随机生成剩余个体 |
 | 交叉率 CR 确定         | ✅ 自适应选择                | —                   |
-| 缩放因子 F 计算        | —                            | ✅ 由 CR 按公式 3-11 批量计算 |
+| 缩放因子 F 计算        | ✅ 解耦后可独立覆写          | ✅ 未覆写时按公式 3-11 批量计算 |
+| 灭绝机制 GMR           | ✅ 解耦后可独立开关          | ✅ 未覆写时按公式 3-12 推导 |
 | 混合变异策略执行       | —                            | ✅ 逐基因随机选择 rand/1 或 best/2 |
 | 差分进化执行           | —                            | ✅                  |
 | 离散-连续映射 / 逆映射 | —                            | ✅                  |
@@ -69,28 +79,20 @@ LLM 根据优化状态（多样性、停滞、可行解比例等）动态选择 
 
 ```mermaid
 flowchart TD
-    A["构建 S_problem"] --> B["LLM 生成 K 个候选 assignment"]
-    B --> C["代码转换为 gene + 补全 cost"]
-    C --> D["验证 + 修复 + 评估 + 过滤"]
-    D --> E["注入 K 个 + DMDE 随机补齐 (N_pop - K) 个"]
-    E --> F[标准 DMDE 进化运行]
+    A["标准 DMDE 初始化 (论文规则 3.1 ~ 3.3)"] --> F[标准 DMDE 进化运行]
     F --> G{"每 p 代触发 LLM"}
     G -->|未到周期| F
-    G -->|到达周期| H[LLM 观察优化状态与搜索轨迹]
-    H --> I["LLM 决策：选择 CR ∈ {0.1, 0.3, 0.5, 0.7, 0.9}"]
-    I --> J["CR 影响公式 3-10 中 rand/1 vs best/2 的基因比例"]
+    G -->|到达周期| H[LLM 观察优化状态 · 搜索轨迹 · 影子对照]
+    H --> I["LLM 决策：CR / F / GMR（默认 hold）"]
+    I --> J["CR 影响公式 3-10 中 rand/1 vs best/2 的基因比例<br/>F / GMR 解耦后独立生效"]
     J --> K[DMDE 执行：差分进化 / 映射 / 约束 / 评估 / 选择]
     K --> L[更新优化状态与轨迹]
     L --> G
 
-    style A fill:#fff3e0,stroke:#f57c00
-    style B fill:#fff3e0,stroke:#f57c00
-    style C fill:#fff3e0,stroke:#f57c00
-    style D fill:#fff3e0,stroke:#f57c00
     style H fill:#fff3e0,stroke:#f57c00
     style I fill:#fff3e0,stroke:#f57c00
     style J fill:#fff3e0,stroke:#f57c00
-    style E fill:#e8f5e9,stroke:#388e3c
+    style A fill:#e8f5e9,stroke:#388e3c
     style F fill:#e8f5e9,stroke:#388e3c
     style K fill:#e8f5e9,stroke:#388e3c
     style L fill:#e8f5e9,stroke:#388e3c
@@ -135,10 +137,7 @@ graph TB
                 direction TB
                 LLM_base["BaseLLMModule<br/>+ ModuleState"]:::llm
                 LLM_client["LLMClient<br/>reasoning_effort 支持"]:::llm
-                LLM_pop["population_init<br/>(v2: S_problem → assignment)"]:::llm
-                LLM_conv["assignment_converter<br/>(assignment → gene)"]:::llm
-                LLM_filt["candidate_filter<br/>(quality + diversity)"]:::llm
-                LLM_sc["search_controller<br/>（统一 CR 控制）"]:::llm
+                LLM_sc["search_controller<br/>（CR / F / GMR 解耦控制）"]:::llm
             end
 
             LLM_traj["trajectory/<br/>OptimizationTrajectory"]:::infra
@@ -182,13 +181,8 @@ graph TB
     LLM_ops --> LLM_repr
 
     %% LLM 模块 → LLM 客户端
-    LLM_pop --> LLM_client
     LLM_sc --> LLM_client
-    LLM_pop --> LLM_base
     LLM_sc --> LLM_base
-    LLM_pop --> LLM_conv
-    LLM_pop --> LLM_filt
-    LLM_conv --> LLM_repr
 
     %% 两个算法模块 → 共享环境/模型层
     D_solver --> ENV
@@ -292,12 +286,9 @@ Experiments-For-Dissertation/
 │   │       │   ├── llm_client.py                 # OpenAI 兼容 API 客户端（含 reasoning_effort）
 │   │       │   └── modules/                      # 可插拔 LLM 模块
 │   │       │       ├── __init__.py               # 模块注册表
-│   │       │       ├── assignment_converter.py   # assignment → gene 转换 + validate/repair
-│   │       │       ├── candidate_filter.py       # quality + diversity 候选过滤
 │   │       │       ├── cr_control.py             # CR 控制模块（已废弃，合并进 search_controller）
 │   │       │       ├── operator_selection.py     # 算子选择模块（已废弃，合并进 search_controller）
-│   │       │       ├── population_init.py        # LLM 种群初始化（v2: S_problem → 候选 assignment）
-│   │       │       └── search_controller.py      # 统一搜索控制器（CR 自适应选择）
+│   │       │       └── search_controller.py      # 统一搜索控制器（CR / F / GMR 解耦控制）
 │   │       ├── features/                         # 搜索状态特征提取
 │   │       │   ├── __init__.py
 │   │       │   ├── constraint_features.py
@@ -526,20 +517,19 @@ from algorithms.algorithm_llm_enhanced_dmde import LLMEnhancedDMDEConfig
 # Vanilla DMDE（无 LLM）
 cfg = LLMEnhancedDMDEConfig(modules={})
 
-# 仅搜索控制器（LLM 选择 CR）
+# 仅搜索控制器（LLM 选择 CR / F / GMR，解耦）
 cfg = LLMEnhancedDMDEConfig(modules={
     "search_controller": {"enabled": True, "interval": 100}
 })
 
-# 仅 LLM 种群初始化
+# 耦合对照（只放开 CR 通道，F/GMR 由公式跟随）
 cfg = LLMEnhancedDMDEConfig(modules={
-    "population_init": {"enabled": True}
+    "search_controller": {"enabled": True, "interval": 100, "coupled": True}
 })
 
-# 全部启用
+# 去 CR 对照（CR 锁定，只放开 F / GMR）
 cfg = LLMEnhancedDMDEConfig(modules={
-    "population_init": {"enabled": True},
-    "search_controller": {"enabled": True, "interval": 100},
+    "search_controller": {"enabled": True, "interval": 100, "no_cr": True}
 })
 ```
 
@@ -561,7 +551,7 @@ uv run python experiments/exp_dmde/exp_dmde_01/run.py
 # 运行 LLM 增强实验（需配置 API）
 uv run python experiments/exp_llm_enhanced_dmde/exp_llm_dmde_01/run.py
 
-# 运行消融实验（S1/S2 × A0-A3，详见 experiments/exp_ablation_study/README.md）
+# 运行消融实验（S1/S2 × A0/A1，详见 experiments/exp_ablation_study/README.md）
 uv run python experiments/exp_ablation_study/run_ablation.py --runs 30
 
 # 运行测试

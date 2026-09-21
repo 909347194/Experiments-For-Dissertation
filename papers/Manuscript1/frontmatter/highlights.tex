@@ -8,10 +8,10 @@
 
 An LLM acts as a plug-in controller for differential evolution.
 
-Population seeding and crossover rate are decided by the language model.
+Crossover rate, scale factor and extinction rate are decoupled from each other.
 
 The model receives feedback on its previous decision, closing the control loop.
 
 Evolutionary operators stay untouched, so the method is easy to adopt.
 
-LLM seeding helps only when its candidates can be repaired to feasibility.
+A fixed crossover rate of 0.3 still beats every online variant on this task.

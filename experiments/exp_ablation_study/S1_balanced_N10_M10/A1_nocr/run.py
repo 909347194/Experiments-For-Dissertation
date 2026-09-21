@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""A1/A2/A3: LLM-DMDE 消融实验
+"""A1: LLM-DMDE 消融实验（Search Controller）
 
 根据 config/llm_config.yaml 中的 modules 字段自动判断启用哪些模块。
 """

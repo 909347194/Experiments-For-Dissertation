@@ -10,7 +10,7 @@
 \newcommand{\Ffactor}{\ensuremath{F}}              % 缩放因子
 \newcommand{\NP}{\ensuremath{\mathrm{NP}}}         % 种群规模
 \newcommand{\Gmax}{\ensuremath{G_{\max}}}          % 最大代数
-\newcommand{\rhoinit}{\ensuremath{\rho}}           % PopInit 注入比例
+\newcommand{\GMR}{\ensuremath{\mathrm{GMR}}}       % 灭绝机制（Gaussian Mutation Rate）
 \newcommand{\vx}{\ensuremath{\bm{x}}}              % 决策向量
 \newcommand{\vtheta}{\ensuremath{\bm{\theta}}}     % 参数向量
 \newcommand{\Expect}[1]{\ensuremath{\mathbb{E}\left[#1\right]}}
@@ -18,13 +18,12 @@
 % --- 方法名（保持全文大小写一致）---
 \newcommand{\dmde}{\textsc{dmde}}
 \newcommand{\llmdmde}{\textsc{llm-dmde}}
-\newcommand{\popinit}{\textsc{PopInit}}
-\newcommand{\crctrl}{\textsc{CR-Control}}
+\newcommand{\searchctrl}{\textsc{SearchCtrl}}
 
 % --- 审阅辅助：编译后显示为红色，投稿前用下面的开关一键隐藏 ---
 \newcommand{\reviewmode}{1}           % 投稿前改成 0 即可全部隐藏
 \ifnum\reviewmode=1
-  % 注意：这里刻意不加 \textbf / \itshape——\popinit 等命令用 \textsc，
+  % 注意：这里刻意不加 \textbf / \itshape——\searchctrl 等命令用 \textsc，
   % 而 cm 字体在粗体下没有 small-caps 字型，会触发 "Font shape undefined" 警告
   \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
   \newcommand{\note}[1]{\textcolor{blue}{\textit{[#1]}}}

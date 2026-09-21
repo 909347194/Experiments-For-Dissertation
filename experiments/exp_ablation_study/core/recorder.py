@@ -82,7 +82,6 @@ class RunRecorder:
         self._total_time: float = 0.0
         self._dmde_time: float = 0.0
         self._llm_time: float = 0.0
-        self._llm_init_time: float = 0.0
         self._llm_cr_time: float = 0.0
         self._llm_call_count: int = 0
 
@@ -128,13 +127,11 @@ class RunRecorder:
     # ── 时间设置 ──────────────────────────────────────────
 
     def set_times(self, total: float, dmde: float = 0.0,
-                  llm: float = 0.0, llm_init: float = 0.0,
-                  llm_cr: float = 0.0):
+                  llm: float = 0.0, llm_cr: float = 0.0):
         """设置时间分口径。"""
         self._total_time = total
         self._dmde_time = dmde
         self._llm_time = llm
-        self._llm_init_time = llm_init
         self._llm_cr_time = llm_cr
 
     def set_llm_call_count(self, count: int):
@@ -193,7 +190,6 @@ class RunRecorder:
             "total_time": round(self._total_time, 2),
             "dmde_time": round(self._dmde_time, 2),
             "llm_time": round(self._llm_time, 2),
-            "llm_init_time": round(self._llm_init_time, 2),
             "llm_cr_time": round(self._llm_cr_time, 2),
             "llm_call_count": self._llm_call_count,
         }

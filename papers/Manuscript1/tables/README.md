@@ -46,9 +46,8 @@ python3 tools/sync_from_experiments.py --copy-figures
 | `tbl_ablation_results.tex` | 解质量对比（Best / Mean ± Std / Median） | 4.3 Ablation Study |
 | `tbl_time_breakdown.tex` | 计算时间分口径对比 | 4.1 Setup 或 4.3 |
 | `tbl_mannwhitney.tex` | Mann-Whitney U 显著性检验 | 4.3 |
-| `tbl_synergy.tex` | 协同效应分析（A3 增益 vs A1+A2） | 4.3 |
 | `tbl_convergence_speed.tex` | 达到 X% 改进所需代数 | 4.3 |
-| `tbl_initial_pop.tex` | 初始种群质量对比（PopInit 效果） | 4.3 |
+| `tbl_parameter_coupling.tex` | CR-F 相关系数 / F 覆写次数 / GMR 模式分布 | 4.3 |
 
 `tables/imported/` 是**生成目录，不入库**（已 gitignore），可随时重新生成；
 正式表格请翻译后另存为 `tables/tbl_<用途>.tex` 纳入版本控制。

@@ -8,7 +8,7 @@
 
 % 段落规划（可删）：
 %   P1 应用背景与工程动机
-%   P2 现有方法及其局限（DMDE 的 CR 固定、初始化随机）
+%   P2 现有方法及其局限（DMDE 的 CR / F / GMR 被手工方程耦合）
 %   P3 LLM 用于优化的相关进展，指出 gap
 %   P4 本文贡献（bullet 列表）
 %   P5 论文结构
@@ -22,9 +22,11 @@ Differential evolution (DE) \citep{storn1997de} has become a popular solver for
 such continuous optimization problems owing to its simple structure and strong
 robustness.
 
-\todo{Paragraph 2: present the DMDE formulation and explain why two fixed
-hyper-parameters -- a fully random initial population and a constant crossover
-rate \CR{} -- limit solution quality and convergence speed.}
+\todo{Paragraph 2: present the DMDE formulation and explain why the three
+search mechanisms -- the crossover rate \CR{}, the scale factor \Ffactor{} and
+the extinction rate \GMR{} -- are coupled by hand-designed equations
+(formulas~3-9, 3-11 and 3-12), so that they can only be moved together and
+cannot respond independently to the observed search state.}
 
 \todo{Paragraph 3: review representative work on using LLMs for optimization
 (hyper-parameter control, operator design, heuristic generation) and state the
@@ -34,18 +36,24 @@ loop that feeds the outcome of the previous decision back to the model.}
 The main contributions of this work are summarised as follows.
 
 \begin{itemize}
-  \item We propose an \llmdmde{} framework that delegates population seeding and
-        crossover-rate control to an LLM while leaving the evolutionary
-        operators untouched, so it can be plugged into existing DE
-        implementations.
-  \item We design \popinit{}, in which LLM-generated candidates are repaired to
-        feasibility and de-duplicated before injection, preserving the
-        feasibility assumption of DMDE.
-  \item We design \crctrl{}, in which the LLM is queried at fixed intervals and
-        receives explicit feedback on the previously chosen \CR{} together with
-        its fitness and diversity consequences, forming a closed decision loop.
-  \item We conduct an ablation study across two scenarios and report solution
-        quality, convergence speed and computational overhead.
+  \item We propose an \llmdmde{} framework that decouples the three search
+        mechanisms of DMDE -- \CR{}, \Ffactor{} and \GMR{} -- and delegates
+        their coordination to an LLM, while leaving the evolutionary operators
+        untouched so that it can be plugged into existing DE implementations.
+  \item We design \searchctrl{}, in which the LLM is queried at fixed intervals
+        and receives explicit feedback on its previous decision together with
+        its fitness, diversity and feasibility consequences, and against a
+        fixed-\CR{} shadow population that makes the feedback attributable,
+        forming a closed decision loop.
+  \item We isolate the effect of the action space itself: a decoupled, a
+        coupled (\CR{} only) and a CR-locked (\Ffactor{} and \GMR{} only)
+        condition share the same observations, triggers and guards, so that
+        only what the model may control differs.
+  \item We report a negative result with a mechanistic explanation: on this
+        static assignment task an offline constant \CR{} = 0.3 outperforms all
+        online variants, and we attribute this to the granularity of the action
+        space, the signal-to-noise ratio of a single decision, and the absence
+        of a numeric-calibration prior in the pretrained model.
 \end{itemize}
 
 The remainder of this paper is organised as follows. \secref{sec:problem}

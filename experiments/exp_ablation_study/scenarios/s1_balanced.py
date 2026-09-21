@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """S1 场景定义：balanced N=10 M=10
 
-小规模基准，PopInit 最简单（N=M 一一对应）。
+小规模基准（N=M 一一对应）。
 """
 
 from pathlib import Path

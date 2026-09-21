@@ -8,20 +8,14 @@ SCENARIOS = {
 CONFIGS = {
     "A0": "A0_dmde",
     "A1": "A1_cr_control",
-    "A2": "A2_pop_init",
-    "A3": "A3_full",
 }
 CONFIG_LABELS = {
     "A0": "Vanilla DMDE",
-    "A1": "+CR Control",
-    "A2": "+PopInit",
-    "A3": "Full LLM-DMDE",
+    "A1": "+Search Controller",
 }
 CONFIG_COLORS = {
     "A0": "#1f77b4",
     "A1": "#ff7f0e",
-    "A2": "#2ca02c",
-    "A3": "#d62728",
 }
 SCENARIO_LABELS = {
     "S1": r"balanced ($N=M=10$)",
