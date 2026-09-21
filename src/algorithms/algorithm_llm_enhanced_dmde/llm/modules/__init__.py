@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 """LLM 可插拔模块注册表。"""
 
-from .population_init import LLMPopulationInitModule
 from .search_controller import LLMSearchControllerModule
-from .assignment_converter import AssignmentConverter
-from .candidate_filter import CandidateFilter
 
 # deprecated modules — import guarded so their removal won't break the package
 try:
@@ -20,7 +17,6 @@ except ImportError:
 # 模块名称 → 类的映射，用于配置驱动的模块加载
 # 注意: operator_selection 和 cr_control 已废弃，请统一使用 search_controller
 MODULE_REGISTRY: dict[str, type] = {
-    "population_init": LLMPopulationInitModule,
     "search_controller": LLMSearchControllerModule,
 }
 # 仅在 deprecated 模块可用时注册
@@ -45,12 +41,9 @@ def create_module(name: str, llm_client, config: dict) -> "BaseLLMModule":
     return cls(llm_client=llm_client, config=config)
 
 __all__ = [
-    "LLMPopulationInitModule",
     "LLMOperatorSelectionModule",
     "LLMCRControlModule",
     "LLMSearchControllerModule",
-    "AssignmentConverter",
-    "CandidateFilter",
     "MODULE_REGISTRY",
     "create_module",
 ]

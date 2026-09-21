@@ -18,7 +18,6 @@
 # 新架构导出
 from .llm.llm_client import LLMClient
 from .llm.base_module import BaseLLMModule, ModuleState
-from .llm.modules.population_init import LLMPopulationInitModule
 from .llm.modules.search_controller import LLMSearchControllerModule
 from .solvers.llm_enhanced_dmde_solver import (
     LLMEnhancedDMDEConfig,
@@ -36,7 +35,6 @@ __all__ = [
     "BaseLLMModule",
     "ModuleState",
     # LLM 可插拔模块
-    "LLMPopulationInitModule",
     "LLMSearchControllerModule",
     # 求解器
     "LLMEnhancedDMDEConfig",

@@ -86,3 +86,6 @@ experiments/exp_ablation_study/*/data
 # Manuscript1 实验同步产物（由 make sync 重新生成）
 papers/Manuscript1/tables/imported/
 .env
+
+# Python 打包构建产物（由 uv sync / pip install -e . 生成）
+*.egg-info/

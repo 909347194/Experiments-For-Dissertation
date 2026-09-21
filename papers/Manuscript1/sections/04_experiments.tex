@@ -13,21 +13,23 @@ district of Lhasa ($91.02^{\circ}$--$91.28^{\circ}$E,
 $29.52^{\circ}$--$29.73^{\circ}$N), with two radar threat fields of radius
 \SI{5000}{m} and \SI{6000}{m}. The \emph{balanced} scenario has
 $\Np = \Mt = 10$, so every UAV can be assigned a distinct target; the
-\emph{scarce-resource} scenario has $\Np = 10$ and $\Mt = 20$, which tightens the
+\emph{scarce-resource} scenario has $\Np = 15$ and $\Mt = 30$, which tightens the
 assignment constraints considerably.
 
-\textbf{Baseline and variants.} Four configurations are compared:
-a vanilla \dmde{} baseline (A0), \popinit{} only (A2, ``+PopInit''),
-\crctrl{} only (A1, ``+CR Control''), and the full framework (A3,
-``Full \llmdmde{}'').
+\textbf{Baseline and variants.} Two configurations form the main ablation:
+a vanilla \dmde{} baseline (A0) in which \CR{}, \Ffactor{} and \GMR{} are
+coupled by formulas~3-9, 3-11 and 3-12, and the full framework (A1,
+``+Search Controller'') in which they are decoupled. Three further control
+conditions isolate the action space: decoupled (A1), coupled (\CR{} only) and
+CR-locked (\Ffactor{} and \GMR{} only).
 
 \textbf{Parameters.} Population size $\NP = 50$; maximum generations
 $\Gmax = 1000$; scaling factor $\Ffactor = 0.5$;
 \todo{verify the baseline values of \Ffactor{} and \CR{}};
 30 independent runs per configuration with seeds $42$--$71$. The LLM is
-Qwen3-14B served by SiliconFlow with thinking disabled, temperature $0.7$;
-\popinit{} injects $\rho = 10\%$ of the population using a top-$k = 3$
-preference list, and \crctrl{} is queried every $I = 50$ generations.
+Qwen3-14B served by SiliconFlow with thinking disabled, temperature $0.7$, and
+\searchctrl{} is queried every $I = 50$ generations. In the CR-locked condition
+\CR{} is pinned to $0.3$, the best value found by an offline sweep.
 
 \textbf{Metrics.} Solution quality (best, mean $\pm$ standard deviation and
 median of the final cost), convergence speed (generations needed to reach $90\%$,
@@ -52,7 +54,7 @@ the DMDE loop and LLM calls.
 \subsection{Ablation Study}
 \label{subsec:ablation}
 
-\tabref{tab:ablation_results} reports the solution quality of the four
+\tabref{tab:ablation_results} reports the solution quality of the main
 configurations on both scenarios, and \figref{fig:convergence} shows the
 corresponding convergence curves.
 
@@ -68,15 +70,11 @@ corresponding convergence curves.
     \toprule
     Scenario & Configuration & Best & Mean $\pm$ Std & Median \\
     \midrule
-    balanced & Vanilla \dmde{}   & \dots & \dots & \dots \\
-             & + \crctrl{}       & \dots & \dots & \dots \\
-             & + \popinit{}      & \dots & \dots & \dots \\
-             & Full \llmdmde{}   & \dots & \dots & \dots \\
+    balanced & Vanilla \dmde{}      & \dots & \dots & \dots \\
+             & + Search Controller  & \dots & \dots & \dots \\
     \midrule
-    scarce   & Vanilla \dmde{}   & \dots & \dots & \dots \\
-             & + \crctrl{}       & \dots & \dots & \dots \\
-             & + \popinit{}      & \dots & \dots & \dots \\
-             & Full \llmdmde{}   & \dots & \dots & \dots \\
+    scarce   & Vanilla \dmde{}      & \dots & \dots & \dots \\
+             & + Search Controller  & \dots & \dots & \dots \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -90,11 +88,18 @@ corresponding convergence curves.
   \label{fig:convergence}
 \end{figure}
 
-% 待补：讨论要点——\popinit{} 在 balanced 场景有效、在 scarce 场景因约束修复失败
-% 而退化为基线；\crctrl{} 的 CR 轨迹与收益；以及显著性检验结论
-\todo{discuss: \popinit{} helps on the balanced scenario but degenerates to the
-      baseline on the scarce-resource scenario because repair fails; the \CR{}
-      trajectory and gain of \crctrl{}; and the significance-test outcome.}
+% 待补：讨论要点——三个动作空间条件的差异；CR 决策的自相关性（实测
+% corr(CR_t, CR_{t-1}) = -0.967、翻转率 0.98）说明模型在拟合噪声；
+% 相邻档位效应 -0.248pp vs 运行间噪声 sd 3.513pp，信噪比约 1/14；
+% 以及显著性检验结论（离线固定 CR=0.3 在 9/9 组对照中胜出）
+\todo{discuss: the difference between the three action-space conditions; the
+      autocorrelation of the \CR{} decisions (measured
+      $\mathrm{corr}(\CR_t, \CR_{t-1}) = -0.967$ with a flip rate of $0.98$),
+      which indicates that the model is fitting noise; the effect between
+      adjacent \CR{} levels ($-0.248$~pp) against the between-run noise
+      ($3.513$~pp), i.e. a signal-to-noise ratio of about $1/14$; and the
+      significance-test outcome, in which an offline constant $\CR = 0.3$
+      wins 9 out of 9 comparisons.}
 
 \subsection{Scalability Analysis}
 \label{subsec:scalability}

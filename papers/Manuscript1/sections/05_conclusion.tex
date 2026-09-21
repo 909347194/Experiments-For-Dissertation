@@ -7,17 +7,28 @@
 
 This paper presented an LLM-enhanced differential evolution framework for
 multi-UAV cooperative path planning in which a pretrained language model acts as
-a plug-in controller for population initialization and crossover-rate
-adaptation, leaving the evolutionary operators unchanged. The framework was
-evaluated through an ablation study on a balanced and a scarce-resource scenario.
-% 待补：一句话概括最重要的结论
+a plug-in controller for the three search mechanisms of DMDE -- the crossover
+rate, the scale factor and the extinction rate -- which are otherwise coupled by
+hand-designed equations, leaving the evolutionary operators unchanged. The
+framework was evaluated through an ablation study on a balanced and a
+scarce-resource scenario.
+% 待补：一句话概括最重要的结论（务必如实：离线固定 CR=0.3 在 9/9 组对照中胜出）
 \todo{summarise the single most important conclusion in one sentence.}
 
-The study also exposes a limitation that we consider practically important: the
-benefit of LLM-driven seeding depends on whether the generated candidates can be
-repaired to feasibility, which does not hold in tightly constrained scenarios.
-Future work will therefore target constraint-aware prompting and a repair
-mechanism that is informed by the constraint structure rather than by
-duplicate elimination alone. % 待补：其它未来工作方向（多目标扩展、算子层面的 LLM 参与）
-\todo{add further directions, e.g. multi-objective extensions and LLM
-      involvement at the operator level.}
+The study also exposes a limitation that we consider practically important:
+decoupling the three mechanisms does not by itself make the language model a
+better controller. On this static assignment task an offline constant
+$\CR = 0.3$ outperforms every online variant. We attribute this to three
+factors. Operator or strategy selection is a semantic classification task that a
+pretrained model can recall from its training distribution, whereas parameter
+control is a numeric calibration task for which no such prior exists. The action
+granularity is also unfavourable: adjacent \CR{} levels differ in effect by
+about $-0.248$~pp while between-run noise has a standard deviation of
+$3.513$~pp, a signal-to-noise ratio of roughly $1/14$. Finally, the available
+headroom is small and the task is static, so there is no time-varying structure
+for an online policy to exploit. Future work will therefore move the action
+space from numeric parameters to a semantic strategy tier, letting the model
+choose among qualitatively distinct search modes while a bandit performs the
+numeric credit assignment. % 待补：其它未来工作方向（多目标扩展、动态场景）
+\todo{add further directions, e.g. multi-objective extensions and dynamic
+      scenarios with time-varying cost matrices.}

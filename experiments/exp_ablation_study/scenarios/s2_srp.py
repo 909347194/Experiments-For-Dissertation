@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """S2 场景定义：srp N=10 M=20
 
-高复杂度场景：目标数 > UAV 数，PopInit 需同时决定分配 + 巡回顺序。
+高复杂度场景：目标数 > UAV 数，需同时决定分配 + 巡回顺序。
 """
 
 from pathlib import Path

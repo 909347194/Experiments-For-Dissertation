@@ -4,7 +4,7 @@
 用法：
     python run_ablation.py --runs 30
     python run_ablation.py --scenario S1 --runs 30
-    python run_ablation.py --config A3 --runs 30
+    python run_ablation.py --config A1 --runs 30
 """
 
 import argparse
@@ -19,14 +19,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[1]
 
 SCENARIOS = ["S1_balanced_N10_M10", "S2_srp_N10_M20"]
-CONFIGS = ["A0_dmde", "A1_cr_control", "A2_pop_init", "A3_full"]
+CONFIGS = ["A0_dmde", "A1_cr_control"]
 
 
 def main():
     parser = argparse.ArgumentParser(description="消融实验统一入口")
     parser.add_argument("--runs", type=int, default=30, help="每组运行次数")
     parser.add_argument("--scenario", choices=["S1", "S2", "all"], default="all")
-    parser.add_argument("--config", choices=["A0", "A1", "A2", "A3", "all"], default="all")
+    parser.add_argument("--config", choices=["A0", "A1", "all"], default="all")
     args = parser.parse_args()
 
     scenarios = SCENARIOS if args.scenario == "all" else [

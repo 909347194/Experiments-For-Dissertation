@@ -19,10 +19,6 @@ class ExperimentConfig:
     n_runs: int = 30
     seed_start: int = 42
 
-    # LLM 参数
-    llm_init_ratio: float = 0.2
-    llm_init_preference_top_k: int = 3
-
     @property
     def seeds(self) -> list[int]:
         """生成种子序列。"""

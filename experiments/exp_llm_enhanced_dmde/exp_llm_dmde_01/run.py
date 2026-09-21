@@ -296,7 +296,6 @@ def main():
             verbose=False,
             llm_config_path=str(CONFIG_DIR / "llm_config.yaml"),
             modules=modules_override if modules_override is not None else {
-                "population_init": {"enabled": False},
                 "search_controller": {
                     "enabled": True,
                     "interval": LLM_INTERVAL,

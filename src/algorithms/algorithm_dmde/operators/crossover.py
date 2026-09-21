@@ -95,3 +95,97 @@ def hybrid_differential_population(
         trials[i] = np.where(use_rand, trial_rand, trial_best)
 
     return trials
+
+
+def mutate_rand_1(
+    cost_vectors: np.ndarray,
+    best_idx: int,
+    f_values: np.ndarray,
+    cr: float,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """纯 DE/rand/1/bin 变异。
+
+    trial_i = x_r1 + F * (x_r2 - x_r3)
+    不依赖最优个体，纯探索。
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    pop_size, gene_len = cost_vectors.shape
+    trials = np.empty_like(cost_vectors)
+
+    for i in range(pop_size):
+        indices = rng.choice(pop_size, size=3, replace=False)
+        while i in indices:
+            indices = rng.choice(pop_size, size=3, replace=False)
+        r1, r2, r3 = indices
+
+        f = f_values[i]
+        mutant = cost_vectors[r1] + f * (cost_vectors[r2] - cost_vectors[r3])
+
+        # 二项交叉
+        rand_vals = rng.random(gene_len)
+        j_rand = rng.integers(gene_len)
+        mask = (rand_vals <= cr) | (np.arange(gene_len) == j_rand)
+        trials[i] = np.where(mask, mutant, cost_vectors[i])
+
+    return trials
+
+
+def mutate_best_1(
+    cost_vectors: np.ndarray,
+    best_idx: int,
+    f_values: np.ndarray,
+    cr: float,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """纯 DE/best/1/bin 变异。
+
+    trial_i = x_best + F * (x_r1 - x_r2)
+    以最优个体为锚点，收敛快。
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    pop_size, gene_len = cost_vectors.shape
+    trials = np.empty_like(cost_vectors)
+
+    for i in range(pop_size):
+        indices = rng.choice(pop_size, size=2, replace=False)
+        while i in indices:
+            indices = rng.choice(pop_size, size=2, replace=False)
+        r1, r2 = indices
+
+        f = f_values[i]
+        best = cost_vectors[best_idx]
+        mutant = best + f * (cost_vectors[r1] - cost_vectors[r2])
+
+        # 二项交叉
+        rand_vals = rng.random(gene_len)
+        j_rand = rng.integers(gene_len)
+        mask = (rand_vals <= cr) | (np.arange(gene_len) == j_rand)
+        trials[i] = np.where(mask, mutant, cost_vectors[i])
+
+    return trials
+
+
+def mutate_with_strategy(
+    cost_vectors: np.ndarray,
+    best_idx: int,
+    f_values: np.ndarray,
+    cr: float,
+    strategy: str = "mixed",
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """根据策略名称选择变异方式。
+
+    Args:
+        strategy: "rand/1" | "best/1" | "mixed"
+    """
+    if strategy == "rand/1":
+        return mutate_rand_1(cost_vectors, best_idx, f_values, cr, rng)
+    elif strategy == "best/1":
+        return mutate_best_1(cost_vectors, best_idx, f_values, cr, rng)
+    else:  # "mixed" or default
+        return hybrid_differential_population(cost_vectors, best_idx, f_values, cr, rng)

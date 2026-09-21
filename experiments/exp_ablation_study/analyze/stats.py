@@ -17,7 +17,6 @@ def compute_stats(results: list[dict]) -> dict:
     fitness = np.array([r["best_fitness"] for r in results])
     times = np.array([r["total_time"] for r in results])
     llm_times = np.array([r.get("llm_time", 0) for r in results])
-    llm_init_times = np.array([r.get("llm_init_time", 0) for r in results])
     llm_cr_times = np.array([r.get("llm_cr_time", 0) for r in results])
     llm_calls = np.array([r.get("llm_call_count", 0) for r in results])
     dmde_times = np.array([r.get("dmde_time", 0) for r in results])
@@ -31,7 +30,6 @@ def compute_stats(results: list[dict]) -> dict:
         "total_time_mean": round(float(times.mean()), 2),
         "dmde_time_mean": round(float(dmde_times.mean()), 2),
         "llm_time_mean": round(float(llm_times.mean()), 2),
-        "llm_init_time_mean": round(float(llm_init_times.mean()), 2),
         "llm_cr_time_mean": round(float(llm_cr_times.mean()), 2),
         "llm_calls_mean": round(float(llm_calls.mean()), 1),
         "fitness_array": fitness,
@@ -125,60 +123,6 @@ def compute_convergence_stats(curves: list[tuple[list[int], list[float]]]) -> di
     }
 
 
-# ── 协同效应分析 ──────────────────────────────────────────
-
-def compute_synergy(all_stats: dict) -> dict:
-    """计算协同效应：A3 增益 vs A1+A2 增益之和。
-
-    对每个场景计算（cost 场景下，**增益 = A0 fitness - 自身 fitness**，越小越好）：
-        ΔA1 = A0_mean - A1_mean  (CR Control 单独增益，正值 = 有效)
-        ΔA2 = A0_mean - A2_mean  (PopInit 单独增益)
-        ΔA3 = A0_mean - A3_mean  (双模块增益)
-        协同比 = ΔA3 / (ΔA1 + ΔA2)
-            >1 → 超加性（协同）
-            =1 → 加性（独立）
-            <1 → 亚加性（冗余）
-            NaN → A1+A2 增益近乎 0（两者均无效或相互抵消），结论无意义
-    """
-    import math
-    from .constants import SCENARIOS
-    result = {}
-    for s_key in SCENARIOS:
-        a0 = all_stats.get(f"{s_key}_A0", {}).get("mean")
-        a1 = all_stats.get(f"{s_key}_A1", {}).get("mean")
-        a2 = all_stats.get(f"{s_key}_A2", {}).get("mean")
-        a3 = all_stats.get(f"{s_key}_A3", {}).get("mean")
-        if any(v is None for v in [a0, a1, a2, a3]):
-            continue
-        # 增益 = A0 - 自身（cost 场景下，正值代表变好）
-        delta_a1 = a0 - a1
-        delta_a2 = a0 - a2
-        delta_a3 = a0 - a3
-        sum_delta = delta_a1 + delta_a2
-        if abs(sum_delta) < 1e-9:
-            ratio = float("nan")
-            is_synergistic = False
-            is_meaningful = False
-        else:
-            ratio = delta_a3 / sum_delta
-            is_synergistic = ratio > 1.0
-            is_meaningful = True
-        result[s_key] = {
-            "A0_mean": a0,
-            "A1_mean": a1,
-            "A2_mean": a2,
-            "A3_mean": a3,
-            "delta_A1": round(delta_a1, 2),
-            "delta_A2": round(delta_a2, 2),
-            "delta_A3": round(delta_a3, 2),
-            "sum_delta": round(sum_delta, 2),
-            "synergy_ratio": None if math.isnan(ratio) else round(ratio, 3),
-            "is_synergistic": is_synergistic,
-            "is_meaningful": is_meaningful,
-        }
-    return result
-
-
 def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) -> dict:
     """计算各配置达到 X% 改进所需代数（跨 run 取中位数）。
 
@@ -217,7 +161,7 @@ def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) ->
                 initial_best = curve[0]
                 final_best = curve[-1]
                 improvement = initial_best - final_best
-                # 无改进（卡点、震荡、或初始种群全部不可行）：
+                # 无改进（卡点、震荡、或初始种群全部不可行，fitness=inf）：
                 # 无法定义 X% 改进 → 记 -1
                 if not np.isfinite(improvement) or improvement <= 0:
                     for t in thresholds:
@@ -237,69 +181,6 @@ def compute_convergence_gens(all_stats: dict, thresholds: list[float] = None) ->
                 t: int(np.median([g for g in gens if g >= 0])) if any(g >= 0 for g in gens) else -1
                 for t, gens in gen_at.items()
             }
-    return result
-
-
-def initial_pop_value(run: dict):
-    """取某 run 初始种群（gen 0）的**种群平均** fitness。
-
-    注意：必须用 ``generation_records`` 中 gen==0 的 ``fitness_mean``，
-    而**不能**用 ``convergence_curve[0]``——后者是初始种群的**最优**个体，
-    会被随机初始化个体主导（PopInit 只注入少数 LLM 解，几乎不会改变最优值），
-    因此无法反映 PopInit 注入解的质量。
-    仅当缺失逐代记录时才退回 ``convergence_curve[0]``。
-    """
-    recs = run.get("generation_records", [])
-    for x in recs:
-        if x.get("gen") == 0:
-            v = x.get("fitness_mean")
-            if v is not None:
-                return float(v)
-    curve = run.get("convergence_curve", [])
-    return float(curve[0]) if curve else None
-
-
-def extract_initial_pop_fitness(all_stats: dict) -> dict:
-    """提取各配置初始种群（gen 0）的 mean fitness，用于 PopInit 质量对比。
-
-    Returns:
-        {"S1_A0": {"mean": float, "std": float, "median": float, "n_infeasible": int}, ...}
-        n_infeasible > 0 时表示该配置有部分 run 的初始种群全部不可行（fitness=inf）。
-    """
-    from .constants import SCENARIOS, CONFIGS
-    result = {}
-    for s_key in SCENARIOS:
-        for c_key in CONFIGS:
-            stats = all_stats.get(f"{s_key}_{c_key}", {})
-            raw = stats.get("_raw", [])
-            if not raw:
-                continue
-            init_fitnesses = []
-            n_infeasible = 0
-            for r in raw:
-                v = initial_pop_value(r)
-                if v is None:
-                    continue
-                if np.isfinite(v):
-                    init_fitnesses.append(v)
-                else:
-                    n_infeasible += 1
-            if init_fitnesses:
-                arr = np.array(init_fitnesses)
-                result[f"{s_key}_{c_key}"] = {
-                    "mean": round(float(arr.mean()), 2),
-                    "std": round(float(arr.std(ddof=1)) if len(arr) > 1 else 0.0, 2),
-                    "median": round(float(np.median(arr)), 2),
-                    "n_infeasible": n_infeasible,
-                }
-            elif n_infeasible > 0:
-                # 全部 run 都不可行
-                result[f"{s_key}_{c_key}"] = {
-                    "mean": float("inf"),
-                    "std": 0.0,
-                    "median": float("inf"),
-                    "n_infeasible": n_infeasible,
-                }
     return result
 
 
@@ -324,18 +205,38 @@ def summarize_llm_decisions(results: list[dict]) -> dict:
         mod = d.get("module", "unknown")
         if mod not in modules:
             modules[mod] = {"count": 0, "durations": [], "cr_values": [],
-                           "f_values": [], "gmr_modes": []}
+                           "f_values": [], "gmr_modes": [], "presets": []}
         modules[mod]["count"] += 1
         modules[mod]["durations"].append(d.get("duration", 0))
         if mod == "search_controller":
             parsed = d.get("parsed_decision", {})
+            # v3 preset 格式
+            preset = parsed.get("preset", "")
+            if preset:
+                modules[mod]["presets"].append(preset)
+            # CR/F/GMR（从 preset 解包或旧格式直接读取）
             cr = parsed.get("cr")
+            if cr is None and preset and preset != "hold":
+                from src.algorithms.algorithm_llm_enhanced_dmde.llm.presets import get_preset
+                p = get_preset(preset)
+                if p:
+                    cr = p.cr
             if cr is not None:
                 modules[mod]["cr_values"].append(cr)
-            f_val = parsed.get("f")
+            f_val = parsed.get("f") or parsed.get("override_f")
+            if f_val is None and preset and preset != "hold":
+                from src.algorithms.algorithm_llm_enhanced_dmde.llm.presets import get_preset
+                p = get_preset(preset)
+                if p:
+                    f_val = p.f
             if f_val is not None:
                 modules[mod]["f_values"].append(f_val)
             gmr = parsed.get("gmr_mode", "auto")
+            if gmr == "auto" and preset and preset != "hold":
+                from src.algorithms.algorithm_llm_enhanced_dmde.llm.presets import get_preset
+                p = get_preset(preset)
+                if p:
+                    gmr = p.gmr_mode
             modules[mod]["gmr_modes"].append(gmr)
     summary = {}
     for mod, data in modules.items():
@@ -366,6 +267,21 @@ def summarize_llm_decisions(results: list[dict]) -> dict:
             summary[mod]["gmr_mode_pcts"] = {
                 m: round(modes.count(m) / total * 100, 1) for m in set(modes)
             }
+        if data.get("presets"):
+            presets = data["presets"]
+            total = len(presets)
+            summary[mod]["preset_counts"] = {
+                p: presets.count(p) for p in sorted(set(presets))
+            }
+            summary[mod]["preset_pcts"] = {
+                p: round(presets.count(p) / total * 100, 1) for p in sorted(set(presets))
+            }
+            # 档位切换次数
+            switches = sum(
+                1 for i in range(1, len(presets))
+                if presets[i] != presets[i - 1]
+            )
+            summary[mod]["preset_switches"] = switches
     return summary
 
 
@@ -455,6 +371,52 @@ def compute_f_stats(results: list[dict]) -> dict:
 
 # ── GMR 模式分析 ──────────────────────────────────────────
 
+# ── Preset 档位分析 ──────────────────────────────────────────
+
+def extract_preset_histories(results: list[dict]) -> list[list[str]]:
+    """提取各 run 的 preset 档位轨迹。
+
+    Returns:
+        [[preset_gen0, preset_gen1, ...], ...]
+    """
+    histories = []
+    for r in results:
+        recs = r.get("generation_records", [])
+        if not recs:
+            continue
+        presets = [rec.get("preset", "") for rec in recs]
+        histories.append(presets)
+    return histories
+
+
+def compute_preset_stats(results: list[dict]) -> dict:
+    """计算 preset 档位的统计信息。"""
+    decisions = extract_llm_decisions(results)
+    sc_decisions = [d for d in decisions if d.get("module") == "search_controller"]
+    if not sc_decisions:
+        return {}
+    all_presets = []
+    for d in sc_decisions:
+        parsed = d.get("parsed_decision", {})
+        preset = parsed.get("preset", "hold")
+        all_presets.append(preset)
+    total = len(all_presets)
+    preset_counts = {p: all_presets.count(p) for p in sorted(set(all_presets))}
+    preset_pcts = {p: round(c / total * 100, 1) for p, c in preset_counts.items()}
+    switches = sum(
+        1 for i in range(1, len(all_presets))
+        if all_presets[i] != all_presets[i - 1]
+    )
+    return {
+        "total_decisions": total,
+        "preset_counts": preset_counts,
+        "preset_pcts": preset_pcts,
+        "preset_switches": switches,
+    }
+
+
+# ── GMR 模式分析（保留向后兼容） ──────────────────────────────
+
 def extract_gmr_histories(results: list[dict]) -> list[list[str]]:
     """提取各 run 的 GMR 模式轨迹。
 
@@ -542,126 +504,3 @@ def compute_parameter_coupling(results: list[dict]) -> dict:
         "gmr_mode_counts": mode_counts,
         "n_samples": len(all_cr),
     }
-
-
-# ── 解耦效应分析 (Decoupling Effect) ─────────────────────
-
-def compute_decoupling_effect(all_stats: dict) -> dict:
-    """计算解耦效应：A3（解耦 CR/F/GMR）vs A1（仅 LLM 控制 CR，F/GMR 耦合）。
-
-    核心论点支撑：在 PopInit 条件相同（均无）的前提下，
-    解耦 LLM 独立控制 CR/F/GMR 是否优于耦合公式。
-
-    对比矩阵：
-        A1: LLM 控制 CR，F 由公式 3-11 推导，GMR 由公式 3-12 推导（耦合）
-        A3: LLM 独立控制 CR、F、GMR + PopInit
-
-    注意 A3 包含 PopInit 而 A1 不包含，因此 A3 - A1 = 解耦效应 + PopInit 效应。
-    为了隔离纯解耦效应，我们计算：
-        纯解耦效应 = (A3 - A1) - (A2 - A0)
-    即：A3 相对 A1 的超额增益中，扣除 PopInit 单独贡献的部分。
-
-    Returns:
-        {"S1": {...}, "S2": {...}} 各场景的解耦效应指标。
-    """
-    from .constants import SCENARIOS
-    result = {}
-    for s_key in SCENARIOS:
-        a0 = all_stats.get(f"{s_key}_A0", {})
-        a1 = all_stats.get(f"{s_key}_A1", {})
-        a2 = all_stats.get(f"{s_key}_A2", {})
-        a3 = all_stats.get(f"{s_key}_A3", {})
-
-        if not all([a0, a1, a2, a3]):
-            continue
-
-        # 基本 fitness 指标
-        a0_mean = a0.get("mean", float("inf"))
-        a1_mean = a1.get("mean", float("inf"))
-        a2_mean = a2.get("mean", float("inf"))
-        a3_mean = a3.get("mean", float("inf"))
-
-        # A3 vs A1 的增益（含 PopInit + 解耦）
-        delta_a3_a1 = a1_mean - a3_mean  # 正值 = A3 更好
-
-        # PopInit 单独贡献 = A2 vs A0 的增益
-        delta_a2_a0 = a0_mean - a2_mean  # 正值 = A2 更好
-
-        # 纯解耦效应 = A3 超额增益 - PopInit 贡献
-        pure_decoupling = delta_a3_a1 - delta_a2_a0
-
-        # Mann-Whitney U 检验 A3 vs A1
-        a1_arr = a1.get("fitness_array", np.array([]))
-        a3_arr = a3.get("fitness_array", np.array([]))
-        p_a3_vs_a1 = mannwhitney_test(a3_arr, a1_arr)
-
-        # 收敛速度对比（达到 95% 改进的代数）
-        a1_conv = a1.get("_raw", [])
-        a3_conv = a3.get("_raw", [])
-        a1_gens_95 = _median_conv_gen(a1_conv, 0.95)
-        a3_gens_95 = _median_conv_gen(a3_conv, 0.95)
-
-        # 参数解耦指标
-        a1_coupling = compute_parameter_coupling(a1_conv)
-        a3_coupling = compute_parameter_coupling(a3_conv)
-
-        # F 独立控制指标
-        a1_f_stats = compute_f_stats(a1_conv)
-        a3_f_stats = compute_f_stats(a3_conv)
-
-        # GMR 独立控制指标
-        a1_gmr = compute_gmr_stats(a1_conv)
-        a3_gmr = compute_gmr_stats(a3_conv)
-
-        result[s_key] = {
-            # Fitness 对比
-            "A0_mean": a0_mean,
-            "A1_mean": a1_mean,
-            "A2_mean": a2_mean,
-            "A3_mean": a3_mean,
-            "delta_A3_A1": round(delta_a3_a1, 2),      # A3 vs A1 总增益
-            "delta_A2_A0": round(delta_a2_a0, 2),      # PopInit 单独贡献
-            "pure_decoupling_effect": round(pure_decoupling, 2),  # 纯解耦效应
-            "p_value_A3_vs_A1": p_a3_vs_a1,
-            "significant": p_a3_vs_a1 >= 0 and p_a3_vs_a1 < 0.05,
-            # 收敛速度
-            "A1_conv_gen_95": a1_gens_95,
-            "A3_conv_gen_95": a3_gens_95,
-            "conv_speedup": (
-                round((a1_gens_95 - a3_gens_95) / a1_gens_95 * 100, 1)
-                if a1_gens_95 > 0 else None
-            ),
-            # 参数解耦指标
-            "A1_cr_f_corr": a1_coupling.get("cr_f_correlation"),
-            "A3_cr_f_corr": a3_coupling.get("cr_f_correlation"),
-            "A1_f_override_count": a1_f_stats.get("f_override_count", 0),
-            "A3_f_override_count": a3_f_stats.get("f_override_count", 0),
-            "A1_gmr_modes": a1_gmr.get("mode_counts", {}),
-            "A3_gmr_modes": a3_gmr.get("mode_counts", {}),
-        }
-    return result
-
-
-def _median_conv_gen(results: list[dict], threshold: float) -> int:
-    """计算达到 threshold 比例改进的中位代数。"""
-    if not results:
-        return -1
-    gen_at = []
-    for r in results:
-        curve = r.get("convergence_curve", [])
-        if len(curve) < 2:
-            continue
-        gens = curve_gens(r)
-        initial = curve[0]
-        final = curve[-1]
-        improvement = initial - final
-        if not np.isfinite(improvement) or improvement <= 0:
-            continue
-        target = final + improvement * (1 - threshold)
-        gen = gens[-1]
-        for i, v in enumerate(curve):
-            if v <= target:
-                gen = gens[i]
-                break
-        gen_at.append(gen)
-    return int(np.median(gen_at)) if gen_at else -1

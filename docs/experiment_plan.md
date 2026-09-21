@@ -8,7 +8,7 @@
 
 ```
 实验一：消融实验（Ablation Study）
-    → 证明每个 LLM 模块的独立贡献 + 双模块协同效应
+    → 证明 Search Controller 模块的独立贡献
 
 实验二：性能对比实验（Comparative Experiment）
     → 与基线算法对比，证明 LLM-DMDE 的整体优势
@@ -23,12 +23,23 @@
 
 ### 2.1 消融配置
 
-| 编号 | 配置名 | PopInit | CR Control | 目的 |
-|---|---|---|---|---|
-| **A0** | Vanilla DMDE | ✗ | ✗ | 基线 |
-| **A1** | DMDE + CR Control | ✗ | ✓ | 仅 CR 模块贡献 |
-| **A2** | DMDE + PopInit | ✓ | ✗ | 仅初始化模块贡献 |
-| **A3** | Full LLM-DMDE | ✓ | ✓ | 双模块协同 |
+| 编号 | 配置名 | Search Controller | 目的 |
+|---|---|---|---|
+| **A0** | Vanilla DMDE | ✗ | 基线（公式 3-9/3-11/3-12 耦合） |
+| **A1** | DMDE + Search Controller | ✓ | 解耦自适应控制模块贡献 |
+
+> 原设计中的 LLM 增强种群初始化（PopInit）已移除，详见
+> `docs/prompt_design_search_controller.md`。
+
+#### 扩展对照：动作空间三条件
+
+为隔离"LLM 能控制哪些通道"，在 A1 之下再分三个子条件（共用同一观测集与守卫）：
+
+| 子条件 | 动作空间 | CR | 目录后缀 |
+|---|---|---|---|
+| 解耦 | CR + F + GMR | LLM 决策 | `A1_cr_control` |
+| 耦合 | 仅 CR（F/GMR 由公式跟随） | LLM 决策 | `A1_coupled` |
+| 去 CR | F + GMR | 锁定 0.3 | `A1_nocr` |
 
 ### 2.2 实验场景
 
@@ -36,14 +47,16 @@
 
 选择原则：
 - 一个**最简单**的场景（balanced），排除模型复杂度的干扰
-- 一个**PopInit 最复杂**的场景（srp），验证 LLM 在高复杂度下仍然有效
+- 一个**搜索空间最复杂**的场景（srp），验证在高复杂度下仍然有效
 
 | 场景 | Model | N | M | 选择理由 |
 |---|---|---|---|---|
-| **S1** | balanced (N=M) | 10 | 10 | 小规模基准，PopInit 最简单 |
-| **S2** | srp (N<M) | 10 | 20 | PopInit 需同时决定分配 + 巡回顺序 |
+| **S1** | balanced (N=M) | 10 | 10 | 小规模基准（一对一匹配） |
+| **S2** | srp (N<M) | 15 | 30 | 需同时决定分配 + 巡回顺序 |
 
-4 配置 × 2 场景 = **8 组实验**
+> ⚠️ 目录名 `S2_srp_N10_M20` 已过时，实际规模见 `scenarios/s2_srp.py` 的 `S2_CONFIG`。
+
+2 配置 × 2 场景 = **4 组实验**（扩展动作空间对照另计 3×2 = 6 组）
 
 ### 2.3 实验设置
 
@@ -53,8 +66,8 @@
 | 随机种子 | 42, 43, ..., 71 | 可复现 |
 | 最大迭代代数 | 1000 | 统一终止条件 |
 | 种群大小 | 50 | 默认 |
-| LLM 注入比例 r | 0.2 | PopInit 默认 |
-| CR 触发间隔 p | 50 | CR Control 默认 |
+| 动作空间 | 解耦 / 耦合 / 去 CR | 三条件对照 |
+| 决策触发间隔 p | 50 | Search Controller 默认 |
 | ζ (zeta) | 3 | DMDE 默认 |
 | δ (delta) | 0.3 | 灭绝阈值 |
 | LLM 模型 | deepseek-flash | 统一 LLM 后端 |
@@ -68,7 +81,7 @@
 | **Median** | 鲁棒性 | 30 次运行的中位数 |
 | **Convergence Gen** | 收敛速度 | 达到 95% 最终最优解所需的代数 |
 | **Success Rate** | 成功率 | 适应度低于阈值的运行比例 |
-| **Wilcoxon p-value** | 统计显著性 | A3 vs A0/A1/A2 的双侧秩和检验 |
+| **Mann-Whitney p-value** | 统计显著性 | A1 vs A0 的双侧秩和检验 |
 
 #### 计算时间统计（分口径）
 
@@ -77,8 +90,7 @@
 | **Total Wall Time** | 全部耗时 | 衡量实际总耗时 |
 | **DMDE Compute Time** | 仅进化部分 | 衡量算法本身计算开销 |
 | **LLM Time** | LLM 调用 + 等待 | 衡量 LLM 引入的额外开销 |
-| **LLM Init Time** | PopInit 模块耗时 | 分解 PopInit 代价 |
-| **LLM CR Time** | CR Control 模块耗时 | 分解 CR Control 代价 |
+| **LLM Time** | Search Controller 全部调用 | 分解进化阶段 LLM 代价 |
 | **LLM Call Count** | LLM 调用次数 | 评估 API 成本 |
 
 时间统计代码框架：
@@ -86,37 +98,29 @@
 ```python
 t_total_start = time.time()
 
-# LLM PopInit
-t_llm_init_start = time.time()
-# ... LLM 调用 ...
-t_llm_init = time.time() - t_llm_init_start
-
-t_llm_cr_total = 0.0
-llm_cr_call_count = 0
+t_llm_total = 0.0
+llm_call_count = 0
 
 # DMDE 进化循环
 for gen in range(max_gen):
     # LLM CR Control（每 p 代）
     if gen % p == 0:
-        t_llm_cr_start = time.time()
+        t_llm_start = time.time()
         # ... LLM 调用 ...
-        t_llm_cr_total += time.time() - t_llm_cr_start
-        llm_cr_call_count += 1
+        t_llm_total += time.time() - t_llm_start
+        llm_call_count += 1
 
     # DMDE 进化步骤
     # ... 进化 ...
 
 t_total = time.time() - t_total_start
-t_llm_total = t_llm_init + t_llm_cr_total
 
 # 结果
 {
     "total_time": t_total,
     "llm_time": t_llm_total,
-    "llm_init_time": t_llm_init,
-    "llm_cr_time": t_llm_cr_total,
-    "llm_call_count": llm_cr_call_count,
-    "avg_llm_latency": t_llm_total / max(llm_cr_call_count, 1),
+    "llm_call_count": llm_call_count,
+    "avg_llm_latency": t_llm_total / max(llm_call_count, 1),
 }
 ```
 
@@ -127,18 +131,14 @@ t_llm_total = t_llm_init + t_llm_cr_total
 | 场景 | 配置 | Best | Mean ± Std | Median | Conv.Gen | Succ.Rate | 总耗时(s) | LLM耗时(s) |
 |---|---|---|---|---|---|---|---|---|
 | S1 balanced | A0 DMDE | | | | | | | — |
-| S1 balanced | A1 +CR | | | | | | | |
-| S1 balanced | A2 +PopInit | | | | | | | |
-| S1 balanced | A3 Full | | | | | | | |
+| S1 balanced | A1 +SearchCtrl | | | | | | | |
 | S2 srp | A0 DMDE | | | | | | | — |
-| S2 srp | A1 +CR | | | | | | | |
-| S2 srp | A2 +PopInit | | | | | | | |
-| S2 srp | A3 Full | | | | | | | |
+| S2 srp | A1 +SearchCtrl | | | | | | | |
 
 #### 表 2：统计显著性（Wilcoxon p-value）
 
-| 场景 | A3 vs A0 | A3 vs A1 | A3 vs A2 | A1 vs A0 | A2 vs A0 |
-|---|---|---|---|---|---|
+| 场景 | A1 vs A0 | A1_coupled vs A0 | A1_nocr vs A0 |
+|---|---|---|---|
 | S1 balanced | | | | | |
 | S2 srp | | | | | |
 
@@ -148,21 +148,24 @@ p < 0.05 标记为显著（*），p < 0.01 标记为极显著（**）。
 
 | 对比 | 预期 | 解释 |
 |---|---|---|
-| A1 vs A0 | A1 更优 | LLM 的 CR 自适应 > 固定公式调度 |
-| A2 vs A0 | A2 收敛更快 | 知识驱动初始化 > 纯随机初始化 |
-| A3 vs A1 | A3 ≥ A1 | PopInit 提供更好的起点 |
-| A3 vs A2 | A3 ≥ A2 | CR Control 在进化中持续优化 |
-| A3 vs A0 | A3 显著优于 A0 | 双模块协同增益 |
+| A1 vs A0 | A1 更优 | 解耦自适应控制 > 固定公式调度 |
+| A1 CR-F 相关性 | ≈ 0（A0 应 ≈ ±1） | 三通道解耦成功 |
+| A1_coupled vs A1 | 解耦 ≥ 耦合 | 解耦带来额外自由度 |
+| A1_nocr vs A0 | 差异小 | CR 是主要杠杆，F/GMR 残余效应有限 |
 
-**关键验证**：A3 > max(A1, A2)，证明两个模块互补而非冗余。
+> ⚠️ **实测提示**：在当前静态 UAV 分配任务上，离线固定 CR=0.3 在 9/9 组对照中
+> 优于所有在线配置。本实验的定位因此是**机制研究与负面结果报告**，
+> 详见 `docs/prompt_design_search_controller.md` §6。
 
 ### 2.7 可视化
 
 | 图表 | 内容 | 用途 |
 |---|---|---|
-| 收敛曲线 | 每个场景 4 条曲线（A0-A3） | 直观展示收敛差异 |
-| 箱线图 | 每个场景 4 个配置的解质量分布 | 展示鲁棒性和离群值 |
-| 时间堆叠柱状图 | DMDE 时间 + LLM Init 时间 + LLM CR 时间 | 展示时间开销构成 |
+| 收敛曲线 | 每个场景 2 条曲线（A0 / A1） | 直观展示收敛差异 |
+| 箱线图 | 每个场景 2 个配置的解质量分布 | 展示鲁棒性和离群值 |
+| 时间堆叠柱状图 | DMDE 时间 + LLM 时间 | 展示时间开销构成 |
+| CR / F 轨迹图 | A0 公式值 vs A1 LLM 决策值 | 展示解耦后的参数动态 |
+| GMR 模式分布饼图 | auto / on / off 占比 | 展示灭绝机制通道的使用 |
 
 ---
 
@@ -205,32 +208,32 @@ p < 0.05 标记为显著（*），p < 0.01 标记为极显著（**）。
 
 在 S1 (balanced N=10) 和 S5 (srp N=10,M=20) 上做。
 
-### 4.1 PopInit 注入比例 r
+### 4.1 动作空间（解耦 / 耦合 / 去 CR）
 
-| r | 0.05 | 0.1 | 0.2 | 0.3 | 0.5 |
-|---|---|---|---|---|---|
+| 动作空间 | 解耦 | 耦合 | 去 CR |
+|---|---|---|---|
 
-其他参数固定，每个 r 值 30 runs。
+目标：隔离"LLM 能控制哪些通道"这一变量，验证核心主张
+"解耦优于手工耦合方程"（三条件共用同一观测集、触发机制与冻结守卫）。
 
-目标：找到最优注入区间，验证"少量高质量候选 > 大量随机候选"。
-
-### 4.2 CR Control 触发间隔 p
+### 4.2 Search Controller 触发间隔 p
 
 | p | 10 | 25 | 50 | 100 | 200 |
 |---|---|---|---|---|---|
 
 目标：验证过频调用（高 API 成本）vs 过疏调用（失去自适应性）的 trade-off。
 
-### 4.3 Top-k 偏好统计
+### 4.3 CR 候选集粒度
 
-| top_k | 1 | 2 | 3 | 5 | 10 |
-|---|---|---|---|---|---|
+| 候选集 | {0.1,0.5,0.9} | {0.1,0.3,0.5,0.7,0.9} | {0.1..0.9 步长 0.1} |
+|---|---|---|---|
 
-目标：验证 S_problem 信息量对 LLM 生成质量的影响。
+目标：验证动作粒度对信噪比的影响。粒度越细，档间效应越小、
+越容易被运行间噪声淹没（实测档间效应 −0.248 pp vs 噪声 sd 3.513 pp）。
 
 ### 4.4 敏感性分析总 runs
 
-5 值 × 3 参数 × 2 场景 × 30 runs = **900 runs**
+(3 + 5 + 3) 值 × 2 场景 × 30 runs = **660 runs**
 
 ---
 

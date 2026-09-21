@@ -66,7 +66,7 @@ def plot_cr_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
     if not HAS_MPL:
         return
     fig, ax = plt.subplots(figsize=(10, 4))
-    for config_key in ["A0", "A1", "A3"]:
+    for config_key in ["A0", "A1"]:
         stats = all_stats.get(f"{scenario_key}_{config_key}", {})
         raw = stats.get("_raw", [])
         if not raw:
@@ -139,21 +139,18 @@ def plot_time_breakdown(all_stats: dict, figures_dir: Path):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     for idx, (s_key, s_dir) in enumerate(SCENARIOS.items()):
         ax = axes[idx]
-        config_keys, dmde_vals, llm_init_vals, llm_cr_vals = [], [], [], []
+        config_keys, dmde_vals, llm_cr_vals = [], [], []
         for c_key in CONFIGS:
             stats = all_stats.get(f"{s_key}_{c_key}", {})
             if not stats:
                 continue
             config_keys.append(c_key)
             dmde_vals.append(stats.get("dmde_time_mean", 0))
-            llm_init_vals.append(stats.get("llm_init_time_mean", 0))
             llm_cr_vals.append(stats.get("llm_cr_time_mean", 0))
         x = np.arange(len(config_keys))
         labels = [CONFIG_LABELS[k] for k in config_keys]
         ax.bar(x, dmde_vals, label="DMDE", color="#1f77b4", alpha=0.8)
-        ax.bar(x, llm_init_vals, bottom=dmde_vals, label="LLM Init", color="#ff7f0e", alpha=0.8)
-        bottom2 = [d + li for d, li in zip(dmde_vals, llm_init_vals)]
-        ax.bar(x, llm_cr_vals, bottom=bottom2, label="LLM CR", color="#2ca02c", alpha=0.8)
+        ax.bar(x, llm_cr_vals, bottom=dmde_vals, label="LLM", color="#ff7f0e", alpha=0.8)
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=9)
         ax.set_ylabel("Time (s)", fontsize=11)
@@ -171,12 +168,12 @@ def plot_time_breakdown(all_stats: dict, figures_dir: Path):
 def plot_f_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
     """F 值轨迹对比图：展示各配置的 F 值随代数变化。
 
-    仅绘制 A3_full（含 LLM 覆写）和 A0（公式推导基线）。
+    仅绘制 A1（含 LLM 覆写）和 A0（公式推导基线）。
     """
     if not HAS_MPL:
         return
     fig, ax = plt.subplots(figsize=(10, 4))
-    for config_key in ["A0", "A3"]:
+    for config_key in ["A0", "A1"]:
         stats = all_stats.get(f"{scenario_key}_{config_key}", {})
         raw = stats.get("_raw", [])
         if not raw:
@@ -220,13 +217,13 @@ def plot_f_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
 def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: Path):
     """GMR 模式分布图：展示 LLM 在 search_controller 决策中选择的 GMR 模式分布。
 
-    仅对 A3_full（含 search_controller）有意义。
+    仅对 A1（含 search_controller）有意义。
     数据来源：llm_decisions（仅 search_controller 模块的决策），
     而非 generation_records（后者 99% 是默认 "auto"，会严重膨胀饼图）。
     """
     if not HAS_MPL:
         return
-    stats = all_stats.get(f"{scenario_key}_A3", {})
+    stats = all_stats.get(f"{scenario_key}_A1", {})
     raw = stats.get("_raw", [])
     if not raw:
         return
@@ -254,7 +251,7 @@ def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: 
         autotext.set_fontsize(9)
     ax.set_title(
         f"GMR Mode Distribution — {SCENARIO_LABELS.get(scenario_key, scenario_key)}\n"
-        f"(A3 Full, {len(raw)} runs, {total} LLM decisions)",
+        f"(A1, {len(raw)} runs, {total} LLM decisions)",
         fontsize=12,
     )
     fig.tight_layout()
@@ -265,13 +262,13 @@ def plot_gmr_mode_distribution(all_stats: dict, scenario_key: str, figures_dir: 
 
 
 def plot_parameter_control_overview(all_stats: dict, scenario_key: str, figures_dir: Path):
-    """参数控制总览：展示 A3 Full 中 CR、F、GMR 的独立控制效果。
+    """参数控制总览：展示 A1 中 CR、F、GMR 的独立控制效果。
 
     三行子图：CR 轨迹、F 轨迹、GMR 模式时间线。
     """
     if not HAS_MPL:
         return
-    stats = all_stats.get(f"{scenario_key}_A3", {})
+    stats = all_stats.get(f"{scenario_key}_A1", {})
     raw = stats.get("_raw", [])
     if not raw:
         return
@@ -298,7 +295,7 @@ def plot_parameter_control_overview(all_stats: dict, scenario_key: str, figures_
     axes[0].set_ylim(0, 1)
     axes[0].set_title(
         f"Parameter Control Overview — {SCENARIO_LABELS.get(scenario_key, scenario_key)}\n"
-        f"(A3 Full, seed={r.get('seed', '?')})",
+        f"(A1, seed={r.get('seed', '?')})",
         fontsize=12,
     )
     axes[0].grid(True, alpha=0.3)
@@ -326,68 +323,59 @@ def plot_parameter_control_overview(all_stats: dict, scenario_key: str, figures_
     print(f"  参数控制总览: {out}")
 
 
-def plot_decoupling_comparison(all_stats: dict, scenario_key: str, figures_dir: Path):
-    """解耦效应对比图：A1（耦合）vs A3（解耦）的收敛曲线 + 箱线图。
-
-    两行子图：
-    - 上行：A1 vs A3 收敛曲线对比（控制了 PopInit，隔离解耦效应）
-    - 下行：A1 vs A3 箱线图（fitness 分布对比）
-    """
+def plot_preset_distribution(all_stats: dict, scenario_key: str, figures_dir: Path):
+    """Preset 档位选择分布图（饼图 + 时间线）。"""
     if not HAS_MPL:
         return
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-    # ---- 左图：收敛曲线对比 ----
-    ax = axes[0]
-    for config_key in ["A1", "A3"]:
-        stats = all_stats.get(f"{scenario_key}_{config_key}", {})
-        raw = stats.get("_raw", [])
-        curves = extract_convergence_curves(raw)
-        if not curves:
-            continue
-        conv = compute_convergence_stats(curves)
-        if not conv:
-            continue
-        x = np.array(conv["gens"])
-        mean = np.array(conv["mean"])
-        std = np.array(conv["std"])
-        color = CONFIG_COLORS[config_key]
-        ax.plot(x, mean, label=CONFIG_LABELS[config_key], color=color, linewidth=2)
-        ax.fill_between(x, mean - std, mean + std, alpha=0.15, color=color)
-    ax.set_xlabel("Generation", fontsize=12)
-    ax.set_ylabel("Best Fitness", fontsize=12)
-    ax.set_title(
-        f"Decoupling Effect: Convergence\n"
-        f"{SCENARIO_LABELS.get(scenario_key, scenario_key)}",
-        fontsize=13,
-    )
-    ax.legend(fontsize=11)
-    ax.grid(True, alpha=0.3)
-
-    # ---- 右图：箱线图 ----
-    ax = axes[1]
-    data, labels, colors = [], [], []
-    for config_key in ["A0", "A1", "A2", "A3"]:
-        stats = all_stats.get(f"{scenario_key}_{config_key}", {})
-        arr = stats.get("fitness_array", np.array([]))
-        if len(arr) > 0:
-            data.append(arr)
-            labels.append(CONFIG_LABELS[config_key])
-            colors.append(CONFIG_COLORS[config_key])
-    if data:
-        try:
-            bp = ax.boxplot(data, tick_labels=labels, patch_artist=True)
-        except TypeError:
-            bp = ax.boxplot(data, labels=labels, patch_artist=True)
-        for patch, color in zip(bp["boxes"], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.6)
-    ax.set_ylabel("Best Fitness", fontsize=12)
-    ax.set_title("All Configurations", fontsize=13)
-    ax.grid(True, alpha=0.3, axis="y")
-
+    from .stats import compute_preset_stats, extract_preset_histories
+    stats = all_stats.get(f"{scenario_key}_A1", {})
+    raw = stats.get("_raw", [])
+    if not raw:
+        return
+    preset_stats = compute_preset_stats(raw)
+    if not preset_stats:
+        return
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    # 左图：档位选择饼图
+    counts = preset_stats.get("preset_counts", {})
+    if counts:
+        labels = list(counts.keys())
+        sizes = list(counts.values())
+        colors = plt.cm.Set3(range(len(labels)))
+        wedges, texts, autotexts = ax1.pie(
+            sizes, labels=labels, autopct="%1.0f%%",
+            colors=colors, startangle=90,
+        )
+        ax1.set_title(
+            f"Preset Selection Distribution\n"
+            f"({SCENARIO_LABELS.get(scenario_key, scenario_key)}, "
+            f"{preset_stats['total_decisions']} decisions, "
+            f"{preset_stats['preset_switches']} switches)",
+            fontsize=11,
+        )
+    # 右图：第一个 run 的档位时间线
+    r = raw[0]
+    recs = r.get("generation_records", [])
+    if recs:
+        gens = [rec["gen"] for rec in recs]
+        presets = [rec.get("preset", "") for rec in recs]
+        # 离散化
+        preset_names = sorted(set(p for p in presets if p))
+        if preset_names:
+            preset_to_num = {p: i for i, p in enumerate(preset_names)}
+            preset_nums = [preset_to_num.get(p, -1) for p in presets]
+            ax2.scatter(gens, preset_nums, s=8, alpha=0.6, c="#1f77b4")
+            ax2.set_yticks(range(len(preset_names)))
+            ax2.set_yticklabels(preset_names, fontsize=9)
+            ax2.set_ylabel("Preset", fontsize=11)
+            ax2.set_xlabel("Generation", fontsize=11)
+            ax2.set_title(
+                f"Preset Timeline (seed={r.get('seed', '?')})",
+                fontsize=11,
+            )
+            ax2.grid(True, alpha=0.3)
     fig.tight_layout()
-    out = figures_dir / f"decoupling_{scenario_key}.png"
+    out = figures_dir / f"preset_distribution_{scenario_key}.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    print(f"  解耦效应: {out}")
+    print(f"  档位分布: {out}")

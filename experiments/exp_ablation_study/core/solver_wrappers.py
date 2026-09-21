@@ -151,37 +151,59 @@ class RecordingLLMDESolver:
     def _build_llm_decision_map(llm_decisions: list[dict]) -> dict[int, dict]:
         """构建 generation → LLM decision 的映射表。
 
-        用于在记录每代数据时，查找该代最近一次 LLM 决策中覆写的 F 和 GMR 值。
+        用于在记录每代数据时，查找该代最近一次 LLM 决策中的档位和覆写值。
+        兼容 v3 preset 格式和旧版 CR/F/GMR 格式。
         """
         decision_map: dict[int, dict] = {}
         for d in llm_decisions:
             gen = d.get("generation", 0)
             decision = d.get("decision", {})
+            # v3 preset 格式
+            preset = decision.get("preset", "")
+            override_f = decision.get("override_f", None)
+            # 旧格式兼容
+            if not preset:
+                preset = ""
+            if override_f is None:
+                override_f = decision.get("f", None)
+            gmr_mode = decision.get("gmr_mode", "auto")
+            # 从 preset 解包 gmr_mode（如果决策中没有显式 gmr_mode）
+            if preset and preset != "hold" and gmr_mode == "auto":
+                from src.algorithms.algorithm_llm_enhanced_dmde.llm.presets import get_preset
+                p = get_preset(preset)
+                if p:
+                    gmr_mode = p.gmr_mode
+                    if override_f is None:
+                        override_f = p.f
             decision_map[gen] = {
-                "f": decision.get("f", None),
-                "gmr_mode": decision.get("gmr_mode", "auto"),
+                "preset": preset,
+                "f": override_f,
+                "gmr_mode": gmr_mode,
             }
         return decision_map
 
     @staticmethod
     def _get_active_llm_params(
         gen: int, decision_map: dict[int, dict],
-    ) -> tuple[float | None, str]:
-        """获取在给定代数生效的 LLM 覆写参数（F, GMR mode）。
+    ) -> tuple[str, float | None, str]:
+        """获取在给定代数生效的 LLM 覆写参数（preset, F, GMR mode）。
 
         查找逻辑：取 generation <= gen 的最近一次 LLM 决策。
         LLM 决策从触发代开始生效，持续到下一次 LLM 决策。
         """
+        active_preset = ""
         active_f = None
         active_gmr = "auto"
         for d_gen in sorted(decision_map.keys()):
             if d_gen > gen:
                 break
             params = decision_map[d_gen]
+            if params.get("preset"):
+                active_preset = params["preset"]
             if params["f"] is not None:
                 active_f = params["f"]
             active_gmr = params["gmr_mode"]
-        return active_f, active_gmr
+        return active_preset, active_f, active_gmr
 
     def solve(self, cost_matrix, n_uavs, n_targets, **kwargs):
         """代理 solve，从 trajectory 提取 LLM 决策记录。"""
@@ -214,7 +236,7 @@ class RecordingLLMDESolver:
                 if entry.llm_module:
                     continue
                 # 查找该代生效的 LLM 覆写参数
-                active_f, active_gmr = self._get_active_llm_params(
+                active_preset, active_f, active_gmr = self._get_active_llm_params(
                     entry.generation, decision_map,
                 )
                 self._rec.record_generation(
@@ -227,6 +249,7 @@ class RecordingLLMDESolver:
                     feasible_ratio=entry.feasible_ratio,
                     f_override=active_f,
                     gmr_mode=active_gmr,
+                    preset=active_preset,
                 )
 
         return result
