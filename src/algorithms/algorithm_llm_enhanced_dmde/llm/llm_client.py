@@ -134,6 +134,7 @@ class LLMClient:
         thinking_budget: int | None = None,
         max_tokens_cap: int | None = None,
         extra_body: dict[str, Any] | None = None,
+        fallback_model: str | None = None,
     ) -> None:
         if OpenAI is None:
             raise ImportError(
@@ -146,6 +147,7 @@ class LLMClient:
             timeout=timeout,
         )
         self.model = model
+        self.fallback_model = fallback_model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.api_base = api_base
@@ -160,41 +162,29 @@ class LLMClient:
         self.max_tokens_cap = max_tokens_cap or max(max_tokens * 2, 16384)
         self._extra_body = dict(extra_body or {})
 
-    def chat(self, messages: list[dict[str, str]], max_retries: int = 3) -> str:
-        """发送 Chat Completions 请求（带重试）。
+    def _chat_single(self, model: str, messages: list[dict[str, str]], max_retries: int) -> str:
+        """对单个模型执行带重试的请求循环。
 
+        成功返回正文；所有重试用尽后抛出最后的异常。
         重试策略：
             - 429 限流 / 5xx 服务端错误：退避重试。
             - 空响应（content 为空）：退避重试。
-            - 输出截断（finish_reason="length"）：**加倍 max_tokens** 后重试，
-              因为用同样的预算重发同样的请求只会再次被截断。
-
-        Args:
-            messages: [{"role": "user", "content": "Hello"}]
-            max_retries: 最大重试次数（针对 429/5xx/空响应/输出截断）。
-
-        Returns:
-            助手回复文本（已 strip）。
-
-        Raises:
-            LLMEmptyResponseError: 重试后仍返回空内容。
-            LLMTruncatedResponseError: 重试后输出仍被 max_tokens 截断。
+            - 输出截断（finish_reason="length"）：**加倍 max_tokens** 后重试。
         """
-        last_exc: Exception | None = None
         budget = self.max_tokens
+        last_exc: Exception | None = None
         for attempt in range(max_retries):
             try:
-                response = self._request(messages, budget)
+                response = self._request(messages, budget, model=model)
                 content = self._extract_content(response, budget)
                 logger.debug(
                     "[LLM] model=%s, messages=%d, response=%d chars",
-                    self.model, len(messages), len(content),
+                    model, len(messages), len(content),
                 )
                 return content
             except Exception as e:
                 last_exc = e
                 truncated = isinstance(e, LLMTruncatedResponseError)
-                # 判断是否可重试：429 限流、5xx 服务端错误、空响应、输出截断
                 status = getattr(e, "status_code", None)
                 is_retryable = (
                     status in (429, 500, 502, 503, 504)
@@ -211,7 +201,7 @@ class LLMClient:
                     elif attempt >= max_retries - 1:
                         # 已达 cap 且最后重试：尝试返回部分内容
                         try:
-                            resp = self._request(messages, budget)
+                            resp = self._request(messages, budget, model=model)
                             choices = getattr(resp, "choices", None)
                             if choices:
                                 raw = choices[0].message.content
@@ -238,8 +228,39 @@ class LLMClient:
         # 所有重试用尽
         raise last_exc  # type: ignore[misc]
 
-    def _request(self, messages: list[dict[str, str]], max_tokens: int):
-        """发起一次 Chat Completions 请求（不含重试）。"""
+    def chat(self, messages: list[dict[str, str]], max_retries: int = 3) -> str:
+        """发送 Chat Completions 请求（带重试 + 可选回退模型）。
+
+        先以主模型 ``self.model`` 重试 ``max_retries`` 次；若全部失败且
+        配置了 ``fallback_model``，则切换到回退模型再重试一轮。回退模型
+        与主模型共用同一 provider 的 api_base / api_key / temperature，
+        仅模型名不同，适合在主模型超时 / 503 / 空响应时快速兜底。
+
+        Args:
+            messages: [{"role": "user", "content": "Hello"}]
+            max_retries: 每个模型的最大重试次数。
+
+        Returns:
+            助手回复文本（已 strip）。
+        """
+        try:
+            return self._chat_single(self.model, messages, max_retries)
+        except Exception as primary_exc:  # noqa: BLE001
+            if self.fallback_model and self.fallback_model != self.model:
+                logger.warning(
+                    "[LLM] primary model '%s' exhausted after %d retries; "
+                    "falling back to '%s'",
+                    self.model, max_retries, self.fallback_model,
+                )
+                return self._chat_single(self.fallback_model, messages, max_retries)
+            raise primary_exc
+
+    def _request(self, messages: list[dict[str, str]], max_tokens: int, model: str | None = None):
+        """发起一次 Chat Completions 请求（不含重试）。
+
+        Args:
+            model: 覆盖默认模型名的模型（用于 fallback 切换）。
+        """
         extra_body = dict(self._extra_body)
         if self.reasoning_effort is not None:
             extra_body["reasoning_effort"] = self.reasoning_effort
@@ -249,7 +270,7 @@ class LLMClient:
         if self.thinking_budget is not None:
             extra_body["thinking_budget"] = self.thinking_budget
         kwargs: dict[str, Any] = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": max_tokens,
@@ -301,6 +322,7 @@ def create_llm_client(
     thinking_budget: int | None = None,
     max_tokens_cap: int | None = None,
     extra_body: dict[str, Any] | None = None,
+    fallback_model: str | None = None,
 ) -> LLMClient:
     """创建 LLM 客户端（推荐入口）。
 
@@ -315,6 +337,7 @@ def create_llm_client(
         reasoning_effort: 思维链强度 "none"/"low"/"high"/"max"，None=服务端默认。
         max_tokens_cap:   截断重试时 max_tokens 的上限。
         extra_body:  透传给 API 的额外请求体字段。
+        fallback_model: 主模型重试耗尽后的回退模型名（同一 provider）。
 
     Returns:
         LLMClient 实例。
@@ -336,6 +359,7 @@ def create_llm_client(
             thinking_budget=thinking_budget,
             max_tokens_cap=max_tokens_cap,
             extra_body=extra_body,
+            fallback_model=fallback_model,
         )
 
     preset = PROVIDER_PRESETS.get(provider)
@@ -368,6 +392,7 @@ def create_llm_client(
         thinking_budget=thinking_budget,
         max_tokens_cap=max_tokens_cap,
         extra_body=extra_body,
+        fallback_model=fallback_model,
     )
 
 
@@ -420,4 +445,5 @@ def create_llm_client_from_config(config_path: str | Path) -> LLMClient:
         thinking_budget=cfg.get("thinking_budget"),
         max_tokens_cap=cfg.get("max_tokens_cap"),
         extra_body=cfg.get("extra_body"),
+        fallback_model=cfg.get("fallback_model"),
     )

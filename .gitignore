@@ -1,4 +1,3 @@
-```markdown
 # Compiled and build artifacts
 *.pyc
 __pycache__/
@@ -69,7 +68,12 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
+
+# 实验结果备份（重跑前自动另存，勿入库）
+*.bak
+*.bak_*
+runs_archive/
+
 # Ablation study results (generated at runtime)
 
 

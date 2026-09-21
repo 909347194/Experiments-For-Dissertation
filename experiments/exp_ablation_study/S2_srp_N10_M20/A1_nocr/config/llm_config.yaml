@@ -18,6 +18,11 @@ max_tokens_cap: 16384
 modules:
     search_controller:
         enabled: true
+        # CR 锁定（部分解耦）：CR 恒为 0.3 —— headroom 扫描得到的离线最优固定值。
+        # 模型只控制 F 与 GMR。用于检验预测：CR 通道被滥用（CR 设定次数与
+        # 增益 Spearman rho=+0.93），移除它是否优于全解耦与全耦合。
+        no_cr: true
+        cr_lock: 0.3
         # 保留 interval 作为向后兼容字段；mode=event 时由事件触发器接管
         interval: 50
 

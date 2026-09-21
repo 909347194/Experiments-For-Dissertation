@@ -14,6 +14,9 @@ max_tokens_cap: 16384
 modules:
     search_controller:
         enabled: true
+        # 耦合对照：模型只控制 CR，F/GMR 由公式 3-11/3-12 推导。
+        # 与 A1 唯一差异——观测集、触发机制、影子对照、冻结守卫全部相同。
+        coupled: true
         # 保留 interval 作为向后兼容字段；mode=event 时由事件触发器接管
         interval: 50
 

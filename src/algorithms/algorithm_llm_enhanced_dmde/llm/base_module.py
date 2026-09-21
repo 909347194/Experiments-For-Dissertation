@@ -190,6 +190,14 @@ class ModuleState:
     # CR 不允许被改动，LLM 只能决定 restart_fraction。
     cr_frozen: bool = False
     cr_frozen_reason: str = ""                 # 冻结判据的人类可读说明
+    # ---- GMR / F 通道失败冻结（连续无效动作守卫） ----
+    # 与 CR 的"无证据冻结"不同：这里冻结的是**重复无效动作**——
+    # 某通道连续 N 次主动干预后 stage 仍无实质改善，判定该杠杆无效并冻结，
+    # 直到搜索重新出现实质改善(解锁)。避免 LLM 反复选同一个无效的杠杆。
+    gmr_frozen: bool = False
+    gmr_frozen_reason: str = ""
+    f_frozen: bool = False
+    f_frozen_reason: str = ""
     # Stage 级轨迹历史（最近 N 个 stage 的汇总）
     stage_history: list[dict[str, Any]] | None = None
     # DE 参数（当前值，模块可以读取或修改）

@@ -243,6 +243,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         llm_cr_prev_gen = 0                             # 上次 LLM CR 决定时的代数
         llm_f_override = None    # None = 使用公式 3-11，float = LLM 直接指定 F
         llm_gmr_mode = "auto"    # "auto" = 公式 3-12,"on" = 强制灭绝,"off" = 禁止灭绝
+        # GMR / F 失败冻结守卫的连续失败计数（跨 stage 累积，实质改善时清零）
+        gmr_fail_streak = 0
+        f_fail_streak = 0
+        llm_f_action_prev = None   # 上一轮 F 是否被主动 set（用于判定通道是否活跃）
 
         # Stage 级历史记录(闭环控制用)
         # 每次 LLM 调用 = 一个 stage,记录 stage 结束时的 fitness/diversity/CR
@@ -274,6 +278,15 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         shadow_enabled = bool(shadow_cfg.get("enabled", False))
         shadow_cr = float(shadow_cfg.get("cr", 0.5))
 
+        # ---- CR 锁定（部分解耦对照）----
+        # 非 None 时 CR 恒为该值，覆盖公式 3-9 与任何 LLM 输出。
+        # 用于检验预测：CR 通道被 LLM 滥用（实测 CR 设定次数与增益
+        # Spearman ρ=+0.93），锁住它、只让 LLM 控制 F/GMR 是否更优。
+        cr_lock = sc_cfg.get("cr_lock", None)
+        if cr_lock is not None:
+            cr_lock = float(cr_lock)
+            print(f"  [cr_lock] CR 锁定为 {cr_lock}（覆盖公式 3-9 与 LLM 的 CR 输出）")
+
         # 无证据冻结守卫:本 stage 的 CR 通道若被判定为无信息(无改进且与
         # 影子对照无差异),则冻结 CR,LLM 本轮只能决定 F 和 GMR。
         # 目的:不让控制器继续操作一个因果效应为零的通道。
@@ -281,6 +294,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         freeze_enabled = bool(freeze_cfg.get("enabled", False))
         freeze_df_noise = float(freeze_cfg.get("df_noise", tc["df_threshold"]))
         freeze_contrast = float(freeze_cfg.get("shadow_contrast", 0.05))
+        # GMR / F 失败冻结：连续 N 次主动干预后 stage 仍无实质改善即冻结该通道，
+        # 直到搜索再次出现实质改善(>= df_noise)才解锁。
+        gmr_freeze_after = int(freeze_cfg.get("gmr_freeze_after", 3))
+        f_freeze_after = int(freeze_cfg.get("f_freeze_after", 3))
 
         # 影子对照种群:固定 CR,从每个 stage 起点与主种群同源演化,
         # 为 LLM 的参数决策提供"如果不调整会怎样"的归因基线。
@@ -430,6 +447,53 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 state.cr_frozen = cr_frozen
                 state.cr_frozen_reason = cr_frozen_reason
 
+                # ---- 失败冻结守卫:GMR / F 通道 ----
+                # 判定上一 stage 中"主动使用过"的通道是否带来了实质改善;
+                # 未带来改善则累加连续失败计数,达标即冻结该通道(强制 auto / hold),
+                # 直到搜索重新出现实质改善时清零解锁。
+                # 目的:阻止 LLM 反复选择同一个已被证明无效的杠杆(GMR=on 固化问题)。
+                stage_improved = (
+                    delta_fitness is not None and delta_fitness >= freeze_df_noise
+                )
+                if not is_first_call:
+                    if stage_improved:
+                        # 搜索重新有实质改善 → 解锁所有通道
+                        gmr_fail_streak = 0
+                        f_fail_streak = 0
+                    else:
+                        # 仅当通道上一轮被主动使用时,才把这次无改善计为该通道的失败
+                        if llm_gmr_mode is not None and llm_gmr_mode != "auto":
+                            gmr_fail_streak += 1
+                        if llm_f_action_prev == "set":
+                            f_fail_streak += 1
+
+                gmr_frozen = bool(
+                    freeze_enabled and gmr_fail_streak >= gmr_freeze_after
+                )
+                f_frozen = bool(
+                    freeze_enabled and f_fail_streak >= f_freeze_after
+                )
+                gmr_frozen_reason = ""
+                f_frozen_reason = ""
+                if gmr_frozen:
+                    gmr_frozen_reason = (
+                        f"GMR has been actively used for {gmr_fail_streak} consecutive "
+                        f"stages (mode='{llm_gmr_mode}') without producing meaningful "
+                        f"improvement (df={delta_fitness:+.2f}% < {freeze_df_noise}%). "
+                        f"GMR is FROZEN to 'auto' until the search improves again."
+                    )
+                if f_frozen:
+                    f_frozen_reason = (
+                        f"F has been actively set for {f_fail_streak} consecutive stages "
+                        f"without meaningful improvement "
+                        f"(df={delta_fitness:+.2f}% < {freeze_df_noise}%). "
+                        f"F is FROZEN (must hold) until the search improves again."
+                    )
+                state.gmr_frozen = gmr_frozen
+                state.gmr_frozen_reason = gmr_frozen_reason
+                state.f_frozen = f_frozen
+                state.f_frozen_reason = f_frozen_reason
+
                 # 旧版反馈字段保留兼容
                 state.extra["previous_llm_cr"] = llm_cr
                 state.extra["previous_interval_gens"] = gen - llm_cr_prev_gen
@@ -459,6 +523,26 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     decision["cr_effective"] = new_cr
                     decision["cr_frozen"] = cr_frozen
                     decision["cr_frozen_reason"] = cr_frozen_reason
+
+                    # ---- GMR / F 失败冻结强制执行 ----
+                    # 与 CR 一致:记录模型原始请求,再覆写为生效值,
+                    # 保证审计记录与实际执行一致(否则冻结时日志仍显示原始值)。
+                    gmr_requested = decision.get("gmr_mode", "auto")
+                    f_requested = decision.get("f", None)
+                    f_action_requested = decision.get("f_action", "hold")
+                    if gmr_frozen:
+                        # 该杠杆已连续多次无效 → 强制回到公式默认
+                        decision["gmr_mode"] = "auto"
+                    if f_frozen:
+                        # F 连续多次无效 → 强制 hold
+                        decision["f_action"] = "hold"
+                        decision["f"] = None
+                    decision["gmr_requested"] = gmr_requested
+                    decision["gmr_mode_effective"] = decision.get("gmr_mode", "auto")
+                    decision["gmr_frozen"] = gmr_frozen
+                    decision["gmr_frozen_reason"] = gmr_frozen_reason
+                    decision["f_requested"] = f_requested
+                    decision["f_action_requested"] = f_action_requested
                     decision["f_effective"] = llm_f_override
                     decision["gmr_mode_effective"] = llm_gmr_mode
                     self._record_decision(gen, "search_controller", decision, state)
@@ -498,6 +582,11 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                         # v4:LLM 独立控制的 F 和 GMR
                         "f_scale": round(llm_f_override, 4) if llm_f_override is not None else "auto",
                         "gmr_mode": llm_gmr_mode,
+                        # v5:GMR / F 失败冻结守卫
+                        "gmr_frozen": gmr_frozen,
+                        "f_frozen": f_frozen,
+                        "gmr_fail_streak": gmr_fail_streak,
+                        "f_fail_streak": f_fail_streak,
                     })
 
                     # 更新 stage 起始快照(使下一 stage 的 Δ 反映新策略起点)
@@ -516,11 +605,14 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     llm_cr_prev_diversity = current_diversity
                     llm_cr_prev_gen = gen
                     # F: 从 decision 读取 LLM 指定值(f_action=set 时生效)
+                    # 注意用**生效后**的 f_action(冻结时已被覆写为 hold)
                     f_action = decision.get("f_action", "hold")
                     llm_f_val = decision.get("f", None)
                     if f_action == "set" and llm_f_val is not None:
                         llm_f_override = float(llm_f_val)
-                    # GMR: 从 decision 读取 LLM 指定模式
+                    # 记录本轮 F 是否主动生效,供下一 stage 的失败计数判定
+                    llm_f_action_prev = f_action
+                    # GMR: 从 decision 读取 LLM 指定模式(冻结时已是 "auto")
                     llm_gmr_mode = decision.get("gmr_mode", "auto")
 
                     # ---- 影子种群重置为当前主种群(下一 stage 的对照起点) ----
@@ -530,8 +622,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                         shadow_best_idx = int(np.argmin(shadow_fitness_arr))
                         shadow_best_fitness = shadow_pop[shadow_best_idx].fitness
 
-            # CR 来源:LLM 决定 or 公式 3-9(与纯 DMDE 一致)
-            if llm_cr is not None:
+            # CR 来源:锁定值 > LLM 决定 > 公式 3-9(与纯 DMDE 一致)
+            if cr_lock is not None:
+                cr = cr_lock
+            elif llm_cr is not None:
                 cr = llm_cr
             else:
                 cr = dynamic_crossover_rate(gen, cfg.max_generations, cfg.zeta)

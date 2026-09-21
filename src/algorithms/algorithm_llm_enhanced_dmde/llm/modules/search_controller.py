@@ -55,7 +55,32 @@ class LLMSearchControllerModule(BaseLLMModule):
         self._prompt_path = self._config.get("system_prompt_path")
         self._cr_choices = self._config.get("cr_choices", CR_CHOICES)
         self._f_choices = self._config.get("f_choices", F_CHOICES)
-        self._system_prompt: str | None = None  # 缓存,按 model_type 分别解析
+
+        # ---- 观测口径阈值（与 solver 的守卫判据同源，避免 prompt 与 solver 口径漂移）----
+        _freeze_cfg = self._config.get("freeze", {}) or {}
+        _trigger_cfg = self._config.get("trigger", {}) or {}
+        self._df_noise_pct = float(_freeze_cfg.get("df_noise", 0.05))
+        self._shadow_contrast = float(_freeze_cfg.get("shadow_contrast", 0.05))
+        self._dd_noise = float(_trigger_cfg.get("dd_threshold", 0.05))
+
+        # ---- 耦合对照模式 ----
+        # True: 模型只控制 CR，F/GMR 由公式 3-11/3-12 推导（原 DMDE 手工耦合关系）。
+        # 用于检验核心主张"解耦优于手工耦合"：与解耦条件共享观测集、触发机制、
+        # 冻结守卫，唯一差异是动作空间。
+        self._coupled = bool(self._config.get("coupled", False))
+        # no_cr：CR 锁定（部分解耦），只把 F/GMR 交给模型。
+        # solver 侧另有 cr_lock 负责真正锁死 CR 值，此处只负责动作空间。
+        self._no_cr = bool(self._config.get("no_cr", False))
+        if self._coupled:
+            logger.info("search_controller: COUPLED mode — LLM controls CR only "
+                        "(F/GMR derived via formulas 3-11/3-12)")
+        if self._no_cr:
+            logger.info("search_controller: NO_CR mode — CR locked by solver, "
+                        "LLM controls F/GMR only")
+
+        # 系统提示词按 (model_type, 三通道冻结态) 缓存：
+        # 冻结段随每轮状态变化，若只缓存首轮结果，冻结提示将永不注入。
+        self._system_prompt_cache: dict[tuple, str] = {}
 
     @property
     def name(self) -> str:
@@ -71,28 +96,32 @@ class LLMSearchControllerModule(BaseLLMModule):
             "generation": state.generation,
             "max_generations": state.max_generations,
             "model_type": state.model_type,
+            # ---- 约束可行性读数 ----
+            # GMR 重启与 F 步长是决定可行性的主要杠杆；此前 solver 已计算并写入
+            # ModuleState，但从未进入 prompt，属观测缺口。
+            "feasible_ratio": round(state.feasible_ratio, 4),
+            "violation_mean": round(state.violation_mean, 4),
+            "violation_max": round(state.violation_max, 4),
             # D_t: 当前多样性水平 + 空间结构分位数
             "diversity": round(state.diversity, 4),
             "diversity_p25": round(state.diversity_p25, 4),
             "diversity_p75": round(state.diversity_p75, 4),
             # Δf_t / ΔD_t: 当前 stage 的趋势
+            # 注意: Δf 未按 stage_length 归一,跨 stage 比较须结合历史表 Len 列
             "delta_fitness_pct": state.delta_fitness,
             "delta_diversity": state.delta_diversity,
-            # stage 内过程统计
+            # stage 内过程统计(已去重:improvements_in_stage 与 acceptance_rate 同源)
             "stage_length": state.stage_length,
             "acceptance_rate": (
                 round(state.acceptance_rate, 4)
                 if state.acceptance_rate is not None else None
             ),
-            "improvements_in_stage": state.improvements_in_stage,
             "gens_since_last_improvement": state.gens_since_last_improvement,
             # 停滞(真实值,未封顶)
-            "stagnation_count": state.stagnation_count,
+            # stagnation_count 与 stagnation_raw 同为 detect_stagnation() 的返回值,已去重
             "stagnation_raw": state.stagnation_raw,
-            # 上次动作及其效果
+            # 上次动作(其效果见 stage_history 最后一行,不再重复给出)
             "prev_action_cr": state.prev_action,
-            "prev_delta_fitness_pct": state.prev_delta_fitness,
-            "prev_delta_diversity": state.prev_delta_diversity,
             # stage 内逐代 best 曲线(降采样,携带 stage 内动态)
             "stage_best_curve": state.stage_best_curve,
             # 本次被触发的原因
@@ -100,11 +129,20 @@ class LLMSearchControllerModule(BaseLLMModule):
             # CR 通道是否被冻结(无证据守卫)
             "cr_frozen": state.cr_frozen,
             "cr_frozen_reason": state.cr_frozen_reason or None,
-            # 当前 DE 参数(LLM 可覆写)
+            # GMR / F 通道是否被冻结(连续无效动作守卫)
+            "gmr_frozen": state.gmr_frozen,
+            "gmr_frozen_reason": state.gmr_frozen_reason or None,
+            "f_frozen": state.f_frozen,
+            "f_frozen_reason": state.f_frozen_reason or None,
+            # 当前 DE 参数
+            # current_f / current_gmr_mode 是**状态观测**，两种模式都保留：
+            # 耦合模式下模型需要它们来预判改 CR 会连带把 F/GMR 带到哪里。
+            # f_choices 是**可选项列表**，耦合模式下不存在该选择权，故不注入。
             "current_f": round(state.f_scale, 4),
-            "f_choices": self._f_choices,
             "current_gmr_mode": state.gmr_mode,
         }
+        if not self._coupled:
+            features["f_choices"] = self._f_choices
 
         # ---- 影子对照(可归因锚点) ----
         if state.shadow_cr is not None:
@@ -164,24 +202,23 @@ class LLMSearchControllerModule(BaseLLMModule):
         if state.prev_action is None:
             feedback = (
                 f"\n\n## Last Decision Feedback\n"
-                f"First decision: no previous LLM action/outcome available.\n"
-                f"No prior parameter context to evaluate. Choose based on current state."
+                f"First decision: no previous action/outcome. "
+                f"Choose from the current state only."
             )
         else:
+            # 压缩:df / dD / df_shadow 已在 features 与 stage_history 末行给出,
+            # 这里只补上「归因判据的量化尺度」——此前模型从未被告知多大差值才算它的效果。
             feedback = (
                 f"\n\n## Last Decision Feedback\n"
-                f"You set CR={state.prev_action:.1f}. "
-                f"The observed stage outcome was "
-                f"df={state.delta_fitness:+.2f}%, "
-                f"dD={state.delta_diversity:+.4f}."
+                f"You set CR={state.prev_action:.1f}. Its outcome is the last row "
+                f"of the stage history table (df / dD / df_shadow columns)."
             )
             if state.shadow_delta_fitness is not None:
                 feedback += (
-                    f"\nOver the same stage, the fixed-CR shadow achieved "
-                    f"df_shadow={state.shadow_delta_fitness:+.2f}%, "
-                    f"dD_shadow={state.shadow_delta_diversity:+.4f}. "
-                    f"The difference (yours minus shadow) is the effect "
-                    f"attributable to your parameter choices (CR, F, GMR)."
+                    f"\nAttribution gate: |df - df_shadow| must exceed "
+                    f"{self._shadow_contrast:.2f}% to count as an effect of your "
+                    f"choices. Below that it is indistinguishable from the "
+                    f"fixed-CR baseline and is NOT evidence for changing anything."
                 )
 
         user = get_prompt(
@@ -191,8 +228,21 @@ class LLMSearchControllerModule(BaseLLMModule):
             trajectory_text=trajectory_text + feedback,
         )
 
-        if self._system_prompt is None:
-            self._system_prompt = get_prompt(
+        # 缓存键必须包含三通道冻结态:冻结段随每轮状态变化,
+        # 若沿用首轮(全 False)的结果,_SC_FROZEN / _SC_FROZEN_GMR / _SC_FROZEN_F
+        # 将永不注入,模型会持续请求已被守卫强制忽略的动作。
+        cache_key = (
+            state.model_type,
+            bool(state.cr_frozen),
+            bool(state.gmr_frozen),
+            bool(state.f_frozen),
+            state.shadow_cr,
+            self._coupled,
+            self._no_cr,
+        )
+        system_prompt = self._system_prompt_cache.get(cache_key)
+        if system_prompt is None:
+            system_prompt = get_prompt(
                 "search_controller",
                 prompt_type="system",
                 prompt_path=self._prompt_path,
@@ -201,10 +251,18 @@ class LLMSearchControllerModule(BaseLLMModule):
                 f_choices=self._f_choices,
                 shadow_cr=state.shadow_cr,
                 cr_frozen=state.cr_frozen,
+                gmr_frozen=state.gmr_frozen,
+                f_frozen=state.f_frozen,
+                df_noise_pct=self._df_noise_pct,
+                dd_noise=self._dd_noise,
+                shadow_contrast=self._shadow_contrast,
+                coupled=self._coupled,
+                no_cr=self._no_cr,
             )
+            self._system_prompt_cache[cache_key] = system_prompt
 
         return [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user},
         ]
 
@@ -305,6 +363,16 @@ class LLMSearchControllerModule(BaseLLMModule):
                 gmr_mode = "off"
             else:
                 gmr_mode = "auto"
+
+        # ---- CR 锁定：CR 通道不存在 ----
+        if self._no_cr:
+            action, cr = "hold", None
+
+        # ---- 耦合对照：F / GMR 通道不存在 ----
+        # 模型即使（受旧格式污染）输出了 f_action/gmr_mode，也一律忽略，
+        # 强制走公式 3-11（F 由 CR 推导）与 3-12（GMR 由 CR 推导）。
+        if self._coupled:
+            f_action, f_val, gmr_mode = "hold", None, "auto"
 
         return {
             "cr_action": action,
