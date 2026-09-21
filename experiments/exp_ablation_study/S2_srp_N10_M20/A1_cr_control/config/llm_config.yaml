@@ -4,9 +4,9 @@
 # 目的：验证 S2 上观测到的 LLM 增益（旧配置 -2.05%）在加入失败冻结守卫后是否仍然存在。
 
 provider: siliconflow
-model: Qwen/Qwen3.8-27B
+model: Qwen/Qwen3-14B
 # 主模型（27B）重试耗尽后切换到的快速回退模型（14B，同一 provider）
-fallback_model: Qwen/Qwen3-14B
+fallback_model: Qwen/Qwen3.8-27B
 temperature: 0.7
 max_tokens: 8192
 timeout: 60
@@ -23,12 +23,12 @@ modules:
 
         # ---- 事件触发（替代固定 interval）----
         trigger:
-            mode: "event"          # event = 事件驱动；缺省为固定 interval
-            first_call: 50         # 首次决策最早代数（积累初始历史）
-            min_interval: 20       # 两次决策最小间隔（防抖）
-            max_interval: 100      # 最大间隔（fallback 定时器，保底定期咨询）
-            df_threshold: 0.05     # Δf 事件阈值(%)
-            dd_threshold: 0.05     # ΔD 事件阈值（旧值 0.02 时触发率 91.9%，近乎常开）
+            mode: "event" # event = 事件驱动；缺省为固定 interval
+            first_call: 50 # 首次决策最早代数（积累初始历史）
+            min_interval: 20 # 两次决策最小间隔（防抖）
+            max_interval: 100 # 最大间隔（fallback 定时器，保底定期咨询）
+            df_threshold: 0.05 # Δf 事件阈值(%)
+            dd_threshold: 0.05 # ΔD 事件阈值（旧值 0.02 时触发率 91.9%，近乎常开）
             stag_tiers: [5, 10, 20, 40, 80, 160]
 
         # ---- 影子对照（可归因锚点）----
@@ -41,5 +41,5 @@ modules:
             enabled: true
             df_noise: 0.05
             shadow_contrast: 0.05
-            gmr_freeze_after: 3    # GMR 连续无效 3 次 → 强制 auto
-            f_freeze_after: 3      # F 连续无效 3 次 → 强制 hold
+            gmr_freeze_after: 3 # GMR 连续无效 3 次 → 强制 auto
+            f_freeze_after: 3 # F 连续无效 3 次 → 强制 hold
