@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # CR=0.3 is the phase transition (GMR stops below delta=0.3)
 STRATEGIES: dict[str, dict[str, Any]] = {
     "hold":     {"cr": None, "f": None, "gmr": "auto"},
-    "explore":  {"cr": 0.8,  "f": 0.9,  "gmr": "on"},
+    "explore":  {"cr": 0.8,  "f": 0.9,  "gmr": "off"},
     "balanced": {"cr": 0.5,  "f": 0.5,  "gmr": "auto"},
     "exploit":  {"cr": 0.3,  "f": 0.3,  "gmr": "off"},
     "recover":  {"cr": 0.5,  "f": 0.7,  "gmr": "on"},
@@ -188,3 +188,51 @@ class LLMSearchControllerModule(BaseLLMModule):
         state.extra["current_strategy"] = strategy
 
         return state
+
+    def screen_strategy(self, decision: dict[str, Any], state: ModuleState) -> dict[str, Any]:
+        """决策护栏：抑制 recover 的滥用。
+
+        `recover` 在物理上等于强制全局灭绝（apply_extinction）——保留最优 30%、重置
+        其余约 70% 种群、丢弃当前盆地。诊断表明，原协议把约 2/3 的决策浪费在 recover
+        上，因为 prompt 把"stagnation>50"误判为失败并触发全局重置，反复打断收敛，
+        既拖慢速度也停在次优盆地。
+
+        本护栏只允许 recover 在搜索真正陷入绝境时放行：
+          - 多样性正在显著塌缩（delta_diversity < -0.06，而非单纯的停滞），且
+          - 长期停滞（stagnation_raw >= 60），
+          - 且近期（最近 3 个 stage）没有用过 recover（防止连续重置）。
+        不满足则降级为 `exploit`（在当前盆地精修，不重置），并在 decision 中
+        记录 `recover_suppressed` 与原因，保证事后分析透明。
+
+        Returns:
+            可能被动过的 decision（recover 被降级时重写 strategy/cr/f/gmr_mode）。
+        """
+        strategy = decision.get("strategy", "hold")
+        if strategy != "recover":
+            return decision
+
+        dd = state.delta_diversity
+        stag = state.stagnation_raw
+        genuine_trap = (
+            dd is not None and dd < -0.06
+            and (stag is None or stag >= 60)
+        )
+        recent_recover = bool(state.stage_history) and any(
+            s.get("strategy") == "recover"
+            for s in state.stage_history[-3:]
+        )
+
+        if not genuine_trap or recent_recover:
+            cfg = self._strategies["exploit"]
+            decision["strategy"] = "exploit"
+            decision["cr"] = cfg["cr"]
+            decision["f"] = cfg["f"]
+            decision["gmr_mode"] = cfg["gmr"]
+            decision["recover_suppressed"] = True
+            decision["recover_suppress_reason"] = (
+                f"recover blocked: not a genuine trap "
+                f"(delta_diversity={dd}, stagnation_raw={stag}, "
+                f"recent_recover={recent_recover}) → downgraded to exploit"
+            )
+
+        return decision

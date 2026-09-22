@@ -90,11 +90,23 @@ numeric parameter values directly — you choose the strategy whose semantics \
 match what the search needs right now.
 
 ## When to Switch
-- **Search stuck** (stagnation rising, acceptance near zero, no improvement) \
-  → consider `explore` or `recover`.
+- **Converged / fine-tuning** (stagnation > 50, acceptance < 0.01, diversity healthy): \
+  NORMAL late-stage convergence — NOT a failure. Default to `exploit` (refine the basin) \
+  or `hold`. Do NOT reset; a forced reset discards a good solution and stalls convergence.
 - **Search improving** (df < 0, acceptance reasonable) → `hold` or `exploit`.
-- **Diversity collapsed** (delta_diversity < -0.05) → `explore` or `recover`.
-- **Converged** (stagnation > 50, acceptance < 0.01) → `recover` (force diversity).
+- **Mild stagnation** (stagnation rising but diversity healthy) → `hold` first; only \
+  switch strategy after ≥2 consecutive stages with no improvement AND the shadow \
+  baseline shows your last change actually helped.
+- **Genuine diversity loss** (delta_diversity < -0.08, population contracting) → `explore` \
+  (broad search, NO forced reset) to re-inject variety; reserve `recover` for when explore \
+  fails across 2+ stages.
+- **`recover` is a forced global reset and LAST RESORT ONLY**: it perturbs the ENTIRE \
+  population (forced extinction, keeps only the best ~30%) and discards recent progress. \
+  Use it ONLY when genuinely trapped — diversity collapsed AND long stagnation — after \
+  cheaper strategies failed. If in doubt, choose `exploit` or `hold`.
+- **Default bias**: when unsure, prefer `hold`/`exploit` over `explore`. `explore` does \
+  NOT reset the population, but its high CR/F still trades convergence speed for breadth \
+  — don't reach for it on every stagnant stage.
 
 ## Shadow Attribution
 df_vs_shadow = your df minus the fixed-baseline df. If |df_vs_shadow| < 0.05%, \
@@ -116,10 +128,10 @@ _SC_STRATEGY_TABLE = """\
 | Strategy   | CR   | F    | GMR  | Use when |
 |------------|------|------|------|----------|
 | hold       | keep | keep | keep | Current strategy is working |
-| explore    | 0.8  | 0.9  | on   | Diversity low, need broad search |
+| explore    | 0.8  | 0.9  | off  | Broad search (high CR/F, rand/1); NO forced reset |
 | balanced   | 0.5  | 0.5  | auto | Normal search, balanced exploration |
 | exploit    | 0.3  | 0.3  | off  | Near convergence, fine-tune best |
-| recover    | 0.5  | 0.7  | on   | Deep stagnation, force diversity injection |
+| recover    | 0.5  | 0.7  | on   | LAST RESORT: genuine trap only (diversity collapsing + long stagnation) |
 | rand-1     | 0.7  | 1.0  | auto | Maximum exploration (DE/rand/1 only) |
 | best-1     | 0.2  | 0.3  | off  | Maximum exploitation (DE/best/2 only) |"""
 

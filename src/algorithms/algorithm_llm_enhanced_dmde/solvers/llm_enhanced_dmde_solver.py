@@ -482,6 +482,9 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 decision = sc_module.inject(state)
 
                 if decision:
+                    # ---- 决策护栏：抑制 recover 滥用（详见 search_controller.screen_strategy）----
+                    decision = sc_module.screen_strategy(decision, state)
+
                     # ---- 策略决策解析：LLM 选择 strategy，解析出 CR/F/GMR ----
                     strategy = decision.get("strategy", "hold")
                     new_cr = decision.get("cr")       # None = 保持当前
