@@ -214,15 +214,28 @@ class RecordingLLMDESolver:
         if trajectory:
             llm_decisions = trajectory.get_llm_decisions()
             for d in llm_decisions:
+                gen = d.get("generation", 0)
+                dec = d.get("decision", {})
+                # fitness_before = 决策时的 best fitness（来自 trajectory entry）
+                fitness_before = d.get("fitness_best", 0.0)
+                if not isinstance(fitness_before, (int, float)) or not (fitness_before < 1e11):
+                    fitness_before = 0.0
+                # cr_before = 决策前生效的 CR，cr_after = 决策后生效的 CR
+                cr_before = dec.get("cr_effective", 0.0) or 0.0
+                cr_after = dec.get("cr_effective", 0.0) or 0.0
                 self._rec.record_llm_decision(
-                    generation=d.get("generation", 0),
+                    generation=gen,
                     module=d.get("module", ""),
                     prompt_messages=d.get("llm_input", {}).get("messages", []),
                     model=d.get("llm_input", {}).get("model", "unknown"),
                     raw_output=d.get("llm_raw_output", ""),
-                    parsed_decision=d.get("decision", {}),
+                    parsed_decision=dec,
                     reasoning=d.get("reasoning", ""),
                     duration=d.get("duration", 0.0),
+                    cr_before=cr_before,
+                    cr_after=cr_after,
+                    fitness_before=fitness_before,
+                    fitness_after=fitness_before,
                     temperature=d.get("llm_input", {}).get("temperature", 0.0),
                 )
 

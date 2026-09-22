@@ -153,6 +153,9 @@ class OptimizationTrajectory:
                 "duration": e.llm_call_duration,
                 "llm_input": e.llm_input,
                 "llm_raw_output": e.llm_raw_output,
+                "fitness_best": e.fitness_best,
+                "diversity": e.diversity,
+                "stagnation_count": e.stagnation_count,
             }
             for e in self._entries
             if e.llm_module
