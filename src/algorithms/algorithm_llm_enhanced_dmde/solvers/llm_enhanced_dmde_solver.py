@@ -4,7 +4,7 @@
 Architecture:
     ┌─────────────────────────────┐
     │       LLM Modules           │
-    │      SearchController        │  ← 可插拔、可消融
+    │  PopInit | SearchController  │  ← 可插拔、可消融
     └───────────┬─────────────────┘
                 │ inject(state)
                 ▼
@@ -32,7 +32,7 @@ import numpy as np
 from ..base.base_optimizer import BaseOptimizer, SolverResult
 from ..representation.encoder import PopulationEncoder, Individual
 from ..representation.inverse_mapper import inverse_phi
-from ..operators.crossover import dynamic_crossover_rate, mutate_with_strategy
+from ..operators.crossover import dynamic_crossover_rate
 from ..operators.scale_factor import dynamic_scale_factor_batch
 from ..operators.mutation import mutate_population
 from ..operators.extinction import should_extinct, apply_extinction
@@ -73,7 +73,7 @@ class LLMEnhancedDMDEConfig:
         # 模块配置(消融实验的核心)
         modules: 各模块配置字典。
             格式: {"module_name": {"enabled": bool, "interval": int, ...}}
-            可用模块名: "search_controller"
+            可用模块名: "population_init", "search_controller"
 
             search_controller v2 闭环控制配置(可选):
                 trigger:
@@ -92,7 +92,9 @@ class LLMEnhancedDMDEConfig:
                     df_noise: 0.05       # |df| 噪声阈值(%)
                     shadow_contrast: 0.05  # |df - df_shadow| 无差异阈值(%)
 
-            v3 CR 动作空间:LLM 输出 {"cr_action": "hold"|"set", "cr": <值或 null>}。
+            v5 策略选择模式:LLM 输出 {"strategy": "hold"|"explore"|"balanced"|"exploit"|"recover", 
+            "override_cr": null|float, "override_f": null|float}。
+            每个策略映射到固定 (CR, F, GMR) 配置，LLM 根据搜索状态选择策略。
             hold 是默认路径,解析失败/字段缺失/格式非法一律回退 hold;
             freeze 守卫触发时 solver 强制 hold(CR 通道本轮无信息)。
 
@@ -113,6 +115,7 @@ class LLMEnhancedDMDEConfig:
 
     # 模块配置
     modules: dict[str, dict[str, Any]] = field(default_factory=lambda: {
+        "population_init": {"enabled": False},
         "search_controller": {"enabled": True, "interval": 50},
     })
 
@@ -120,16 +123,26 @@ class LLMEnhancedDMDEConfig:
     save_trajectory: bool = True
     trajectory_window: int = 20
 
+    # LLM 种群初始化参数(v2)
+    # ⚠️ 以下参数均为实验调参项
+    llm_init_ratio: float = 0.2           # α,LLM 候选注入比例(K = ceil(α × P))
+    llm_init_k_min: int = 3               # K_min,LLM 最少生成候选数
+    llm_init_k_max: int = 10              # K_max,LLM 最多生成候选数
+    llm_init_max_retries: int = 3         # LLM 生成失败时的重试次数
+    llm_init_diversity_threshold: float = 0.1  # 多样性过滤阈值(0~1)
+    llm_init_preference_top_k: int = 3    # prompt 中每行/列的 top-k 最小代价统计
+
 
 class LLMEnhancedDMDESolver(BaseOptimizer):
     """模块化 LLM 增强 DMDE 求解器。
 
     主循环尽量清晰、可重复:
-    1. 标准 DMDE 初始化种群
+    1. 初始化种群(可选 LLM 种群初始化模块)
     2. 每代进化:
-       a. LLM 搜索控制器决定 CR / F / GMR（事件触发）
+       a. LLM CR 控制模块调整 CR/F
        b. 标准 DMDE 进化步骤
-       c. 记录轨迹
+       c. LLM 算子选择模块决定策略
+       d. 记录轨迹
     3. 输出结果 + 完整轨迹
 
     消融实验示例::
@@ -137,9 +150,15 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         # Vanilla DMDE(无 LLM)
         cfg = LLMEnhancedDMDEConfig(modules={})
 
-        # 搜索控制器(CR + F + GMR 解耦决策)
+        # 仅搜索控制器(策略 + CR 联合决策)
         cfg = LLMEnhancedDMDEConfig(modules={
             "search_controller": {"enabled": True, "interval": 50}
+        })
+
+        # 全部启用
+        cfg = LLMEnhancedDMDEConfig(modules={
+            "population_init": {"enabled": True},
+            "search_controller": {"enabled": True, "interval": 50},
         })
     """
 
@@ -183,12 +202,19 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         self._trajectory = OptimizationTrajectory()
 
         # ---- Step 1: 种群初始化 ----
-        # 标准 DMDE 初始化(论文规则 3.1 ~ 3.3),评估所有个体
+        # 新流程(v2):
+        #   1. LLM pop_init module 生成候选 assignments(hook: before_init)
+        #   2. AssignmentConverter 转换为 Individuals
+        #   3. CandidateFilter 过滤(quality + diversity)
+        #   4. DMDE 随机初始化补齐剩余个体
+        #   5. 合并为初始种群
+        #   6. 评估所有个体
         population = self._initialize_population(
-            cost_matrix, n_uavs, n_targets, cfg,
+            cost_matrix, n_uavs, n_targets, model_type,
+            fitness_evaluator, cfg, rng,
         )
 
-        # 评估初始种群
+        # 评估初始种群(LLM 注入的个体已在 _initialize_population 中评估)
         best_idx = 0
         for i, ind in enumerate(population):
             if ind.fitness == float("inf"):
@@ -219,12 +245,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         llm_cr_prev_gen = 0                             # 上次 LLM CR 决定时的代数
         llm_f_override = None    # None = 使用公式 3-11，float = LLM 直接指定 F
         llm_gmr_mode = "auto"    # "auto" = 公式 3-12,"on" = 强制灭绝,"off" = 禁止灭绝
-        llm_mutation_strategy = "mixed"  # "rand/1" | "best/1" | "mixed"
-        llm_preset_name = "balanced"     # 当前生效的预设档位名称
         # GMR / F 失败冻结守卫的连续失败计数（跨 stage 累积，实质改善时清零）
         gmr_fail_streak = 0
         f_fail_streak = 0
-        llm_f_action_prev = None   # 上一轮 F 是否被主动 set（用于判定通道是否活跃）
+        llm_strategy_prev = "hold"  # 上一轮策略（用于判定 F 通道是否活跃）
 
         # Stage 级历史记录(闭环控制用)
         # 每次 LLM 调用 = 一个 stage,记录 stage 结束时的 fitness/diversity/CR
@@ -336,10 +360,6 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     cost_history, actual_cr, actual_f_mean, 1.0 - gen / cfg.max_generations,
                 )
                 state.trajectory_recent = self._trajectory.get_recent(cfg.trajectory_window)
-                # 注入当前档位信息（供 prompt 展示）
-                state.extra["current_preset"] = llm_preset_name
-                state.extra["current_mutation_strategy"] = llm_mutation_strategy
-                state.extra["prev_preset"] = llm_preset_name
 
                 # ---- Δ 趋势信号(闭环控制核心) ----
                 current_fitness = best_individual.fitness
@@ -446,7 +466,7 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                         # 仅当通道上一轮被主动使用时,才把这次无改善计为该通道的失败
                         if llm_gmr_mode is not None and llm_gmr_mode != "auto":
                             gmr_fail_streak += 1
-                        if llm_f_action_prev == "set":
+                        if llm_strategy_prev != "hold":
                             f_fail_streak += 1
 
                 gmr_frozen = bool(
@@ -485,61 +505,43 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                 decision = sc_module.inject(state)
 
                 if decision:
-                    # ---- CR 动作解析:hold 为默认,set 才取值 ----
-                    cr_action = decision.get("cr_action", "hold")
-                    cr_requested = decision.get("cr")   # 模型原始请求(审计用)
-                    if cr_frozen:
-                        # 守卫强制保持:CR 通道本轮无信息,不采纳任何改动
-                        cr_action = "hold"
-                        decision["cr"] = None
-                    new_cr = decision.get("cr")
-                    if new_cr is None or not str(cr_action).startswith("set"):
-                        # hold(或无法解析):保持当前 CR;首次则回退到 0.5
-                        new_cr = llm_cr if llm_cr is not None else 0.5
-
-                    # 记录生效后的决策(含守卫判定与模型原始请求),
-                    # 保证审计记录与实际执行一致 -- 否则冻结时日志仍显示模型的
-                    # 原始 set 值,会误导归因分析。
-                    decision["cr_action"] = cr_action
-                    decision["cr_requested"] = cr_requested
-                    decision["cr_effective"] = new_cr
-                    decision["cr_frozen"] = cr_frozen
-                    decision["cr_frozen_reason"] = cr_frozen_reason
-
-                    # ---- GMR / F 失败冻结强制执行 ----
-                    # 与 CR 一致:记录模型原始请求,再覆写为生效值,
-                    # 保证审计记录与实际执行一致(否则冻结时日志仍显示原始值)。
+                    # ---- 策略决策解析：LLM 选择 strategy，解析出 CR/F/GMR ----
+                    strategy = decision.get("strategy", "hold")
+                    new_cr = decision.get("cr")       # None = 保持当前
+                    new_f = decision.get("f")          # None = 保持当前
                     gmr_requested = decision.get("gmr_mode", "auto")
-                    f_requested = decision.get("f", None)
-                    f_action_requested = decision.get("f_action", "hold")
+
+                    if cr_frozen:
+                        new_cr = None  # 冻结时强制保持当前 CR
                     if gmr_frozen:
-                        # 该杠杆已连续多次无效 → 强制回到公式默认
-                        decision["gmr_mode"] = "auto"
+                        gmr_requested = "auto"
                     if f_frozen:
-                        # F 连续多次无效 → 强制 hold
-                        decision["f_action"] = "hold"
-                        decision["f"] = None
-                    decision["gmr_requested"] = gmr_requested
-                    decision["gmr_mode_effective"] = decision.get("gmr_mode", "auto")
-                    decision["gmr_frozen"] = gmr_frozen
-                    decision["gmr_frozen_reason"] = gmr_frozen_reason
-                    decision["f_requested"] = f_requested
-                    decision["f_action_requested"] = f_action_requested
+                        new_f = None
+
+                    if new_cr is not None:
+                        llm_cr = new_cr
+                    if new_f is not None:
+                        llm_f_override = new_f
+                    llm_gmr_mode = gmr_requested
+
+                    decision["strategy"] = strategy
+                    decision["cr_effective"] = llm_cr
                     decision["f_effective"] = llm_f_override
                     decision["gmr_mode_effective"] = llm_gmr_mode
+                    decision["cr_frozen"] = cr_frozen
+                    decision["gmr_frozen"] = gmr_frozen
+                    decision["f_frozen"] = f_frozen
                     self._record_decision(gen, "search_controller", decision, state)
 
                     shadow_df_val = state.shadow_delta_fitness
                     shadow_dd_val = state.shadow_delta_diversity
                     # 记录 stage 结束时的快照到 stage_history
-                    # 记录产生 outcome 的参数（当前生效值），不是刚选的新值
+                    # CR 记录 actual_cr(产生 outcome 的 CR),不是 new_cr(刚选的 CR)
                     stage_history.append({
                         "stage": len(stage_history) + 1,
                         "gen_start": llm_cr_prev_gen,
                         "gen_end": gen,
                         "stage_length": gen - llm_cr_prev_gen,
-                        "preset": llm_preset_name,
-                        "mutation_strategy": llm_mutation_strategy,
                         "cr": round(actual_cr, 4),
                         "best_fitness": round(current_fitness, 2),
                         "delta_fitness": round(delta_fitness, 4) if delta_fitness is not None else None,
@@ -556,21 +558,13 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                             if state.acceptance_rate is not None else None
                         ),
                         "trigger_reason": trigger_reason,
-                        # v3:CR 动作是否被采纳、通道是否冻结
-                        "cr_action": cr_action,
-                        "cr_requested": (
-                            round(decision.get("cr"), 4)
-                            if decision.get("cr") is not None else None
-                        ),
+                        "strategy": strategy,
+                        "cr_effective": round(llm_cr, 4) if llm_cr is not None else None,
                         "cr_frozen": cr_frozen,
-                        # v4:LLM 独立控制的 F 和 GMR
                         "f_scale": round(llm_f_override, 4) if llm_f_override is not None else "auto",
                         "gmr_mode": llm_gmr_mode,
-                        # v5:GMR / F 失败冻结守卫
                         "gmr_frozen": gmr_frozen,
                         "f_frozen": f_frozen,
-                        "gmr_fail_streak": gmr_fail_streak,
-                        "f_fail_streak": f_fail_streak,
                     })
 
                     # 更新 stage 起始快照(使下一 stage 的 Δ 反映新策略起点)
@@ -583,29 +577,11 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
                     stage_improvements = 0
                     stage_best_curve = []
                     tier_at_decision = stagnation_tier(state.stagnation_raw, tc["tiers"])
-                    # 更新 LLM 决策缓存
-                    llm_cr = new_cr
+                    # 更新 LLM 决策缓存(strategy 模式:CR/F/GMR 已在上面更新)
                     llm_cr_prev_fitness = current_fitness
                     llm_cr_prev_diversity = current_diversity
                     llm_cr_prev_gen = gen
-                    # F: 从 decision 读取 LLM 指定值(f_action=set 时生效)
-                    # 注意用**生效后**的 f_action(冻结时已被覆写为 hold)
-                    f_action = decision.get("f_action", "hold")
-                    llm_f_val = decision.get("f", None)
-                    if f_action == "set" and llm_f_val is not None:
-                        llm_f_override = float(llm_f_val)
-                    # 记录本轮 F 是否主动生效,供下一 stage 的失败计数判定
-                    llm_f_action_prev = f_action
-                    # GMR: 从 decision 读取 LLM 指定模式(冻结时已是 "auto")
-                    llm_gmr_mode = decision.get("gmr_mode", "auto")
-                    # 档位: 从 decision 读取 preset 名称和变异策略
-                    # hold 时不更新（保持当前值）
-                    new_preset = decision.get("preset")
-                    if new_preset and new_preset != "hold":
-                        llm_preset_name = new_preset
-                        new_strategy = decision.get("mutation_strategy")
-                        if new_strategy:
-                            llm_mutation_strategy = new_strategy
+                    llm_strategy_prev = strategy
 
                     # ---- 影子种群重置为当前主种群(下一 stage 的对照起点) ----
                     if shadow_enabled:
@@ -634,10 +610,10 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
             cost_vectors = np.array([ind.cost_vector for ind in population])
             fitness_values = np.array([ind.fitness for ind in population])
 
-            # 混合变异产生试验向量（使用 LLM 选择的变异策略）
-            trial_vectors = mutate_with_strategy(
-                cost_vectors, best_idx, f_values, cr,
-                strategy=llm_mutation_strategy, rng=rng,
+            # 混合变异产生试验向量
+            trial_vectors = mutate_population(
+                cost_vectors, best_idx, gen, cfg.max_generations, cfg.zeta, rng,
+                cr=cr, f_scale=f_values,
             )
 
             # 对每个个体执行反映射 + 评估 + 贪婪选择
@@ -784,11 +760,184 @@ class LLMEnhancedDMDESolver(BaseOptimizer):
         )
 
     def _initialize_population(
-        self, cost_matrix, n_uavs, n_targets, cfg,
+        self, cost_matrix, n_uavs, n_targets, model_type,
+        fitness_evaluator, cfg, rng,
     ) -> list[Individual]:
-        """初始化种群：标准 DMDE 初始化(论文规则 3.1 ~ 3.3)。"""
+        """初始化种群(v2 流程)。
+
+        流程:
+        1. 如果 population_init 模块启用,调用 LLM 生成候选 assignments
+        2. AssignmentConverter 转换为 Individuals
+        3. CandidateFilter 过滤(quality + diversity)
+        4. DMDE 随机初始化补齐剩余个体
+        5. 合并为初始种群
+
+        如果 LLM 模块禁用或调用失败,fallback 到标准 DMDE 初始化。
+        """
+        from ..llm.modules.assignment_converter import AssignmentConverter
+        from ..llm.modules.candidate_filter import CandidateFilter
+
         encoder = PopulationEncoder(cost_matrix, n_uavs, n_targets)
-        return encoder.generate(cfg.pop_size, seed=cfg.seed)
+        pop_size = cfg.pop_size
+
+        # 检查 population_init 模块是否启用
+        pop_init_module = self._get_module("population_init")
+        if not (pop_init_module and pop_init_module.enabled):
+            # 模块禁用 → 标准 DMDE 初始化(与当前行为完全一致)
+            return encoder.generate(pop_size, seed=cfg.seed)
+
+        # ---- LLM 种群初始化 (hook: before_init) ----
+        # K = min(K_max, max(K_min, ceil(α × P)))
+        alpha = getattr(cfg, "llm_init_ratio", 0.2)
+        k_min = getattr(cfg, "llm_init_k_min", 3)
+        k_max = getattr(cfg, "llm_init_k_max", 10)
+        k = min(k_max, max(k_min, int(np.ceil(alpha * pop_size))))
+
+        # 构建 before_init 状态(此时还没有种群)
+        state = self._build_state_before_init(
+            cost_matrix, n_uavs, n_targets, model_type,
+        )
+        state.extra["pop_size"] = pop_size
+        state.extra["alpha"] = alpha
+        state.extra["k_min"] = k_min
+        state.extra["k_max"] = k_max
+        state.extra["preference_top_k"] = getattr(cfg, "llm_init_preference_top_k", 3)
+
+        # state.extra 已包含 pop_size, alpha, k_min, k_max(见上方 _build_state_before_init)
+        # build_prompt 会从 state.extra 读取这些值,无需直接修改模块私有配置
+
+        # 带重试的 LLM 调用
+        max_retries = getattr(cfg, "llm_init_max_retries", 3)
+        candidate_solutions = []
+        decision = {}
+
+        for attempt in range(max_retries):
+            try:
+                decision = pop_init_module.inject(state)
+                self._record_decision(0, "population_init", decision, state)
+                candidate_solutions = state.extra.get("candidate_solutions", [])
+                if candidate_solutions:
+                    break
+                logger.info(
+                    "[PopInit] 第 %d 次尝试未生成有效 solutions,重试...",
+                    attempt + 1,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[PopInit] 第 %d 次 LLM 调用失败: %s",
+                    attempt + 1, e,
+                )
+                decision = {"_error": str(e)}
+
+        if not candidate_solutions:
+            # LLM 调用全部失败 → fallback 到标准 DMDE 初始化
+            logger.info("[PopInit] LLM 调用失败,fallback 到标准 DMDE 初始化")
+            if cfg.verbose:
+                print("  [LLM PopInit] Failed, falling back to standard DMDE init")
+            return encoder.generate(pop_size, seed=cfg.seed)
+
+        # ---- 转换 assignments → Individuals ----
+        converter = AssignmentConverter(cost_matrix, n_uavs, n_targets)
+        candidates, convert_stats = converter.convert_batch(candidate_solutions)
+
+        # 记录 LLM 种群初始化质量统计
+        n_total = len(candidate_solutions)
+        n_raw = convert_stats["n_raw_valid"]
+        n_rep = convert_stats["n_repaired"]
+        n_fail = convert_stats["n_failed"]
+        dists = convert_stats["repair_distances"]
+        raw_costs = convert_stats["raw_costs"]
+        rep_costs = convert_stats["repaired_costs"]
+        avg_dist = float(np.mean(dists)) if dists else 0.0
+        avg_raw = float(np.mean(raw_costs)) if raw_costs else float("inf")
+        avg_rep = float(np.mean(rep_costs)) if rep_costs else float("inf")
+        logger.info(
+            "[PopInit] LLM %d 解: %d 直接可行, %d 修复, %d 失败 "
+            "| 平均修复距离=%.1f | 平均 cost: 原始=%.1f 修复后=%.1f",
+            n_total, n_raw, n_rep, n_fail, avg_dist, avg_raw, avg_rep,
+        )
+        if cfg.verbose:
+            print(
+                f"  [LLM PopInit] {n_total} solutions: "
+                f"{n_raw} raw valid, {n_rep} repaired (avg dist={avg_dist:.1f}), "
+                f"{n_fail} failed"
+            )
+
+        if not candidates:
+            logger.info("[PopInit] 所有 assignments 转换失败,fallback 到标准 DMDE 初始化")
+            return encoder.generate(pop_size, seed=cfg.seed)
+
+        # 评估候选个体
+        for ind in candidates:
+            ind.fitness = self._evaluate(ind, fitness_evaluator, cost_matrix, n_uavs=n_uavs)
+
+        # ---- Quality + Diversity 过滤 ----
+        diversity_threshold = getattr(cfg, "llm_init_diversity_threshold", 0.1)
+        candidate_filter = CandidateFilter(
+            fitness_evaluator=fitness_evaluator,
+            cost_matrix=cost_matrix,
+            n_uavs=n_uavs,
+            n_targets=n_targets,
+            diversity_threshold=diversity_threshold,
+            seed=cfg.seed,
+        )
+        selected = candidate_filter.filter(candidates, k)
+
+        # ---- 合并:LLM 候选 + 随机补齐 ----
+        n_random = pop_size - len(selected)
+        if n_random > 0:
+            random_pop = encoder.generate(n_random, seed=cfg.seed)
+            population = list(selected) + random_pop
+        else:
+            population = list(selected[:pop_size])
+
+        # 日志
+        logger.info(
+            "[PopInit] LLM 生成 %d 候选解 → 过滤后 %d 注入 + %d 随机 = %d 总种群",
+            len(candidate_solutions), len(selected), n_random, len(population),
+        )
+        if cfg.verbose:
+            llm_fitness = [ind.fitness for ind in selected]
+            best_llm = min(llm_fitness) if llm_fitness else float("inf")
+            print(
+                f"  [LLM PopInit] {len(candidate_solutions)} solutions → "
+                f"{len(selected)} selected (best={best_llm:.2f}) + "
+                f"{n_random} random = {len(population)} total"
+            )
+
+        return population
+
+    def _build_state_before_init(
+        self, cost_matrix, n_uavs, n_targets, model_type,
+    ) -> ModuleState:
+        """构建 before_init 阶段的 ModuleState。
+
+        此时还没有种群,只提供问题结构和代价矩阵信息。
+        """
+        return ModuleState(
+            generation=0,
+            max_generations=0,
+            population=None,
+            cost_vectors=None,
+            best_idx=0,
+            best_fitness=float("inf"),
+            mean_fitness=float("inf"),
+            diversity=0.0,
+            gene_variance=0.0,
+            convergence_speed=0.0,
+            stagnation_count=0,
+            feasible_ratio=0.0,
+            violation_mean=0.0,
+            violation_max=0.0,
+            cr=0.5,
+            f_scale=0.5,
+            temperature=1.0,
+            cost_matrix=cost_matrix,
+            n_uavs=n_uavs,
+            n_targets=n_targets,
+            model_type=model_type,
+            cost_history=[],
+        )
 
     def _init_modules(self, cfg: LLMEnhancedDMDEConfig) -> None:
         """根据配置初始化 LLM 模块。"""

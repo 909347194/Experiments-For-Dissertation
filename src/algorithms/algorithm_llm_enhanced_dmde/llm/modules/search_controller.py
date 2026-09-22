@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+<<<<<<< HEAD
 """search_controller.py — LLM 搜索控制器模块（v3: 语义档位版）
 
 职责：
@@ -18,8 +19,24 @@
         - 事件触发（event-based trigger）
         - 冻结守卫（CR/GMR/F freeze guard）
         - hold/set 二级决策（保守默认）
+=======
+"""search_controller.py — LLM 策略选择控制器
 
-注入点：before_mutation（变异前，由 solver 的事件触发器决定何时调用）
+方法：LLM 根据进化状态和搜索轨迹，从预定义策略中选择一个。
+每个策略映射到一组 (CR, F, GMR) 参数。LLM 不做数值优化，只做策略决策。
+
+策略定义（基于 CR Response Landscape 实验结论）：
+
+| 策略     | CR   | F    | GMR  | 适用状态 |
+|----------|------|------|------|----------|
+| explore  | 0.8  | 0.9  | on   | 多样性低、停滞 |
+| balanced | 0.5  | 0.5  | auto | 正常搜索 |
+| exploit  | 0.3  | 0.3  | off  | 收敛中、需要精细调整 |
+| recover  | 0.5  | 0.7  | on   | 深度停滞、需要多样性注入 |
+| hold     | 不变 | 不变 | 不变 | 搜索活跃、当前策略有效 |
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
+
+LLM 可通过 override_cr / override_f 微调，但默认使用策略默认值。
 """
 
 from __future__ import annotations
@@ -39,6 +56,7 @@ from ..presets import (
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
 
 class LLMSearchControllerModule(BaseLLMModule):
     """LLM 搜索控制器 v3：语义档位选择。
@@ -51,10 +69,29 @@ class LLMSearchControllerModule(BaseLLMModule):
 
     可选地通过 override_cr / override_f 覆盖档位的默认值。
     """
+=======
+# ── 策略定义 ─────────────────────────────────────────────
+# CR=0.3 是相变点（GMR 停止），explore 需要 CR>0.3 避免 GMR 干扰
+# recover 需要 GMR=on 强制注入多样性
+STRATEGIES: dict[str, dict[str, Any]] = {
+    "hold":     {"cr": None, "f": None, "gmr": "auto"},
+    "explore":  {"cr": 0.8,  "f": 0.9,  "gmr": "on"},
+    "balanced": {"cr": 0.5,  "f": 0.5,  "gmr": "auto"},
+    "exploit":  {"cr": 0.3,  "f": 0.3,  "gmr": "off"},
+    "recover":  {"cr": 0.5,  "f": 0.7,  "gmr": "on"},
+}
+
+STRATEGY_CHOICES = list(STRATEGIES.keys())
+
+
+class LLMSearchControllerModule(BaseLLMModule):
+    """LLM 策略选择控制器：根据搜索状态选择策略。"""
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
 
     def __init__(self, llm_client: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(llm_client, config)
         self._prompt_path = self._config.get("system_prompt_path")
+<<<<<<< HEAD
 
         # ---- 观测口径阈值（与 solver 的守卫判据同源）----
         _freeze_cfg = self._config.get("freeze", {}) or {}
@@ -76,6 +113,10 @@ class LLMSearchControllerModule(BaseLLMModule):
 
         # 系统提示词按 (model_type, 冻结态) 缓存
         self._system_prompt_cache: dict[tuple, str] = {}
+=======
+        self._strategies = self._config.get("strategies", STRATEGIES)
+        self._system_prompt: str | None = None
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
 
     @property
     def name(self) -> str:
@@ -86,6 +127,7 @@ class LLMSearchControllerModule(BaseLLMModule):
         return "before_mutation"
 
     def build_prompt(self, state: ModuleState) -> list[dict[str, str]]:
+<<<<<<< HEAD
         # ---- State: S_t (可观测性扩展版) ----
         features = {
             "generation": state.generation,
@@ -110,10 +152,20 @@ class LLMSearchControllerModule(BaseLLMModule):
             "delta_diversity": state.delta_diversity,
             # stage 内过程统计
             "stage_length": state.stage_length,
+=======
+        # ── 搜索状态（数据，不是指令） ──
+        features = {
+            "generation": state.generation,
+            "max_generations": state.max_generations,
+            "diversity": round(state.diversity, 4),
+            "delta_fitness_pct": state.delta_fitness,
+            "delta_diversity": state.delta_diversity,
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
             "acceptance_rate": (
                 round(state.acceptance_rate, 4)
                 if state.acceptance_rate is not None else None
             ),
+<<<<<<< HEAD
             "gens_since_last_improvement": state.gens_since_last_improvement,
             # 停滞
             "stagnation_raw": state.stagnation_raw,
@@ -212,14 +264,44 @@ class LLMSearchControllerModule(BaseLLMModule):
                     f"choices. Below that it is indistinguishable from the "
                     f"fixed-CR baseline and is NOT evidence for changing anything."
                 )
+=======
+            "stagnation_raw": state.stagnation_raw,
+            "gens_since_last_improvement": state.gens_since_last_improvement,
+            "improvements_in_stage": state.improvements_in_stage,
+            "current_strategy": state.extra.get("current_strategy", "hold"),
+            "trigger_reason": state.trigger_reason or None,
+        }
+
+        # Shadow 归因
+        if state.shadow_delta_fitness is not None:
+            features["shadow_df_pct"] = round(state.shadow_delta_fitness, 4)
+            features["df_vs_shadow"] = (
+                round(state.delta_fitness - state.shadow_delta_fitness, 4)
+                if state.delta_fitness is not None else None
+            )
+
+        # Stage History（最近 5 个 stage）
+        history_text = "No history yet."
+        if state.stage_history:
+            lines = ["Stage | Strategy | df(%) | df_shadow(%) | Acc% | Stag"]
+            for s in state.stage_history[-5:]:
+                df = f"{s.get('delta_fitness', 0):+7.2f}%" if s.get("delta_fitness") is not None else "    N/A"
+                dfs = f"{s.get('shadow_delta_fitness', 0):+7.2f}%" if s.get("shadow_delta_fitness") is not None else "    N/A"
+                acc = f"{s.get('acceptance_rate', 0)*100:5.1f}" if s.get("acceptance_rate") is not None else "  N/A"
+                stag = s.get("stagnation_raw", "?")
+                strat = s.get("strategy", s.get("preset", "?"))
+                lines.append(f"{s.get('stage', '?'):5} | {strat:<9} | {df} | {dfs} | {acc} | {stag}")
+            history_text = "\n".join(lines)
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
 
         user = get_prompt(
             "search_controller",
             prompt_type="user",
             state_json=json.dumps(features, indent=2),
-            trajectory_text=trajectory_text + feedback,
+            history_text=history_text,
         )
 
+<<<<<<< HEAD
         # 缓存键
         cache_key = (
             state.model_type,
@@ -233,10 +315,15 @@ class LLMSearchControllerModule(BaseLLMModule):
         system_prompt = self._system_prompt_cache.get(cache_key)
         if system_prompt is None:
             system_prompt = get_prompt(
+=======
+        if self._system_prompt is None:
+            self._system_prompt = get_prompt(
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
                 "search_controller",
                 prompt_type="system",
                 prompt_path=self._prompt_path,
                 model_type=state.model_type,
+<<<<<<< HEAD
                 shadow_cr=state.shadow_cr,
                 cr_frozen=state.cr_frozen,
                 gmr_frozen=state.gmr_frozen,
@@ -246,15 +333,18 @@ class LLMSearchControllerModule(BaseLLMModule):
                 shadow_contrast=self._shadow_contrast,
                 coupled=self._coupled,
                 no_cr=self._no_cr,
+=======
+                strategies=self._strategies,
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
             )
-            self._system_prompt_cache[cache_key] = system_prompt
 
         return [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": user},
         ]
 
     def parse_response(self, llm_output: str) -> dict[str, Any]:
+<<<<<<< HEAD
         """解析 LLM 输出。
 
         v3 输出格式：
@@ -274,17 +364,35 @@ class LLMSearchControllerModule(BaseLLMModule):
         json_str = self._extract_json(llm_output)
         if json_str is None:
             return self._hold_decision("Failed to parse LLM output, holding by default")
+=======
+        """解析 LLM 输出为策略选择。"""
+        _fallback = {"strategy": "hold", "override_cr": None, "override_f": None,
+                     "cr": None, "f": None, "gmr_mode": "auto", "reasoning": "parse failed"}
+        json_str = self._extract_json(llm_output)
+        if json_str is None:
+            return dict(_fallback)
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
 
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError:
+<<<<<<< HEAD
             return self._hold_decision("Invalid JSON from LLM, holding by default")
 
         if not isinstance(data, dict):
             return self._hold_decision("LLM output is not a JSON object, holding by default")
+=======
+            return dict(_fallback, reasoning="invalid JSON")
 
-        evidence_read = str(data.get("evidence_read", ""))[:500]
+        if not isinstance(data, dict):
+            return dict(_fallback, reasoning="not a JSON object")
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
 
+        # 策略选择
+        raw_strategy = str(data.get("strategy", "hold")).strip().lower()
+        strategy = raw_strategy if raw_strategy in self._strategies else "hold"
+
+<<<<<<< HEAD
         # ---- 优先解析 v3 preset 格式 ----
         raw_preset = data.get("preset", None)
         if raw_preset is not None:
@@ -344,9 +452,35 @@ class LLMSearchControllerModule(BaseLLMModule):
         # 可选覆盖
         override_cr = self._parse_optional_float(data.get("override_cr"))
         override_f = self._parse_optional_float(data.get("override_f"))
+=======
+        # 解析策略配置到具体 CR/F/GMR（供 solver 直接使用）
+        strategy_cfg = self._strategies.get(strategy, self._strategies["hold"])
+        effective_cr = strategy_cfg["cr"]
+        effective_f = strategy_cfg["f"]
+        effective_gmr = strategy_cfg["gmr"]
+
+        # 可选 override
+        override_cr = None
+        override_f = None
+        try:
+            v = data.get("override_cr")
+            if v is not None:
+                override_cr = max(0.0, min(1.0, float(v)))
+                effective_cr = override_cr
+        except (ValueError, TypeError):
+            pass
+        try:
+            v = data.get("override_f")
+            if v is not None:
+                override_f = max(0.0, min(2.0, float(v)))
+                effective_f = override_f
+        except (ValueError, TypeError):
+            pass
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
 
         preset = PRESETS[preset_name]
         return {
+<<<<<<< HEAD
             "preset": preset_name,
             "mutation_strategy": preset.mutation_strategy,
             "override_cr": override_cr,
@@ -433,11 +567,24 @@ class LLMSearchControllerModule(BaseLLMModule):
             "override_f": None,
             "evidence_read": evidence_read,
             "reasoning": reason,
+=======
+            "strategy": strategy,
+            "override_cr": override_cr,
+            "override_f": override_f,
+            "cr": effective_cr,          # solver 读这个
+            "f": effective_f,            # solver 读这个
+            "gmr_mode": effective_gmr,   # solver 读这个
+            "evidence_read": str(data.get("evidence_read", ""))[:500],
+            "reasoning": str(data.get("reasoning", ""))[:500],
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
         }
 
     def apply_decision(self, decision: dict[str, Any], state: ModuleState) -> ModuleState:
-        """将决策应用到搜索状态。
+        """将策略决策应用到搜索状态。"""
+        strategy = decision.get("strategy", "hold")
+        cfg = self._strategies.get(strategy, self._strategies["hold"])
 
+<<<<<<< HEAD
         preset="hold" 时不改动任何参数。
         其他 preset → 解包为 CR/F/GMR/mutation_strategy 写入 state。
         override_cr/override_f 可覆盖 preset 的默认值。
@@ -476,4 +623,24 @@ class LLMSearchControllerModule(BaseLLMModule):
         state.extra["llm_gmr_mode"] = preset.gmr_mode
         state.extra["llm_mutation_strategy"] = preset.mutation_strategy
 
+=======
+        # CR
+        if cfg["cr"] is not None:
+            state.cr = cfg["cr"]
+        if decision.get("override_cr") is not None:
+            state.cr = decision["override_cr"]
+
+        # F
+        if cfg["f"] is not None:
+            state.f_override = cfg["f"]
+        if decision.get("override_f") is not None:
+            state.f_override = decision["override_f"]
+
+        # GMR
+        state.gmr_mode = cfg["gmr"]
+
+        # 记录当前策略供下次 prompt 使用
+        state.extra["current_strategy"] = strategy
+
+>>>>>>> 16cd2af (refactor: LLM 策略选择架构 — 精简 prompt 12800→2600 chars)
         return state
